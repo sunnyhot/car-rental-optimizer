@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formDataToSearchValues, mergeSearchFormValues } from "./domain/searchRequest";
 import { formatSearchCompletionStatus } from "./domain/searchSummary";
 import type { PlatformId, Recommendation, ReturnMode, SearchRequest } from "./domain/types";
 import { createMockMapService } from "./services/mockMapService";
-import { createMockRentalAdapters } from "./services/mockRentalAdapters";
-import { searchRentalOptions } from "./services/searchOrchestrator";
+import { parseLivePlatformSnapshot } from "./services/livePageParser";
+import { getPlatformAutomation, type PlatformAuthState } from "./services/platformAutomation";
+import { rankRentalListings } from "./services/searchOrchestrator";
 
 const DEFAULT_REQUEST: SearchRequest = {
   origin: { lat: 39.9169, lng: 116.6462 },
@@ -24,16 +25,26 @@ const PLATFORM_LABELS: Record<PlatformId, string> = {
 
 export default function App() {
   const formRef = useRef<HTMLFormElement>(null);
+  const automation = useMemo(() => getPlatformAutomation(), []);
   const [request, setRequest] = useState<SearchRequest>(DEFAULT_REQUEST);
   const [results, setResults] = useState<Recommendation[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [isSearching, setIsSearching] = useState(false);
-  const [status, setStatus] = useState("使用本地模拟适配器，真实平台登录自动化接口已预留。");
+  const [authStates, setAuthStates] = useState<PlatformAuthState[]>([]);
+  const [status, setStatus] = useState(
+    automation
+      ? "真实数据模式：先打开平台窗口登录并完成查询，再点击开始比较。"
+      : "真实数据模式需要在 Electron 桌面 app 中运行；普通浏览器不能读取平台登录态。"
+  );
 
   const selected = useMemo(
     () => results.find((result) => result.listing.id === selectedId) ?? results[0],
     [results, selectedId]
   );
+
+  useEffect(() => {
+    void refreshAuthStates();
+  }, []);
 
   async function runSearch() {
     const formValues = formRef.current ? formDataToSearchValues(new FormData(formRef.current)) : {};
@@ -43,23 +54,71 @@ export default function App() {
     setIsSearching(true);
     setResults([]);
     setSelectedId("");
-    setStatus("正在查询一嗨、神州，并计算打车/公共交通成本...");
+    setStatus("正在读取平台官网当前页面，并计算打车/公共交通成本...");
 
     try {
-      const [nextResults] = await Promise.all([
-        searchRentalOptions(searchRequest, {
-          rentalAdapters: createMockRentalAdapters(),
-          mapService: createMockMapService()
-        }),
+      if (!automation) {
+        setStatus("请用 `npm run dev` 打开 Electron 桌面窗口；浏览器预览不会读取真实平台登录态。");
+        return;
+      }
+
+      const [snapshots] = await Promise.all([
+        Promise.all(searchRequest.platforms.map((platform) => automation.readSnapshot(platform))),
         waitForFeedback()
       ]);
+      const availableSnapshots = snapshots.flatMap((result) => (result.ok && result.snapshot ? [result.snapshot] : []));
+      const messages = snapshots.flatMap((result) => (result.ok ? [] : [result.message ?? "平台页面未打开"]));
+      const liveListings = availableSnapshots.flatMap((snapshot) =>
+        parseLivePlatformSnapshot(snapshot, searchRequest)
+      );
+
+      if (liveListings.length === 0) {
+        setStatus(
+          messages.length > 0
+            ? messages.join("；")
+            : "没有从平台官网当前页面识别到车辆价格。请在平台窗口完成城市、日期、门店/车型搜索后再点开始比较。"
+        );
+        return;
+      }
+
+      const nextResults = await rankRentalListings(searchRequest, liveListings, createMockMapService());
 
       setResults(nextResults);
       setSelectedId(nextResults[0]?.listing.id ?? "");
       setStatus(formatSearchCompletionStatus(searchRequest, nextResults.length));
+      await refreshAuthStates();
     } finally {
       setIsSearching(false);
     }
+  }
+
+  async function refreshAuthStates() {
+    if (!automation) {
+      return;
+    }
+
+    setAuthStates(await automation.getAuthStates());
+  }
+
+  async function openPlatform(platform: PlatformId) {
+    if (!automation) {
+      setStatus("请用 Electron 桌面窗口打开平台登录页，普通浏览器预览不可用。");
+      return;
+    }
+
+    const state = await automation.openPlatform(platform);
+    await refreshAuthStates();
+    setStatus(`已打开${state.label}官方页面。请登录，并在该窗口里按城市/日期/车型完成搜索。`);
+  }
+
+  async function clearPlatform(platform: PlatformId) {
+    if (!automation) {
+      return;
+    }
+
+    await automation.clearPlatform(platform);
+    await refreshAuthStates();
+    setStatus(`${PLATFORM_LABELS[platform]}登录态已清除。`);
   }
 
   function updateRequest<T extends keyof SearchRequest>(key: T, value: SearchRequest[T]) {
@@ -186,13 +245,36 @@ export default function App() {
             ))}
           </div>
 
+          <div className="login-manager">
+            <strong>平台登录态</strong>
+            {(["ehi", "car-inc"] as PlatformId[]).map((platform) => {
+              const authState = authStates.find((state) => state.platform === platform);
+              return (
+                <div className="login-row" key={platform}>
+                  <span>
+                    {PLATFORM_LABELS[platform]}
+                    <small>{authState?.hasCookies ? `已保存 ${authState.cookieCount} 个 Cookie` : "未检测到 Cookie"}</small>
+                  </span>
+                  <div>
+                    <button type="button" onClick={() => void openPlatform(platform)}>
+                      打开/登录
+                    </button>
+                    <button type="button" onClick={() => void clearPlatform(platform)} disabled={!automation}>
+                      清除
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
           <button className="primary-action" disabled={isSearching} type="submit">
             {isSearching ? "查询中..." : "开始比较"}
           </button>
 
           <div className="notice">
-            <strong>自动化说明</strong>
-            <p>真实版会在本地浏览器保存一嗨和神州登录态；遇到验证码或短信时暂停让你处理。</p>
+            <strong>真实数据说明</strong>
+            <p>这里不再使用 mock。请先打开平台官方页面登录并搜索，软件会读取该窗口当前页面里的真实价格文本。</p>
           </div>
           </form>
         </aside>
@@ -207,12 +289,12 @@ export default function App() {
             <div className="loading-state" role="status">
               <div className="spinner" />
               <h3>正在重新比较</h3>
-              <p>正在按当前日期、半径和平台重新计算租车价、打车成本和公共交通成本。</p>
+              <p>正在读取平台官网当前页面，解析车辆价格，并重新计算交通成本。</p>
             </div>
           ) : results.length === 0 ? (
             <div className="empty-state">
-              <h3>先跑一次比较</h3>
-              <p>保持默认 100km 会看到北京周边方案；把半径拉到 500km，会出现德州东站低价跨城方案。</p>
+              <h3>等待真实页面数据</h3>
+              <p>打开一嗨/神州官方窗口，登录后在平台页面完成搜索，再回到这里点击“开始比较”。</p>
             </div>
           ) : (
             <div className="result-list">

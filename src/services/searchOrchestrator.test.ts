@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createMockMapService } from "./mockMapService";
 import { createMockRentalAdapters } from "./mockRentalAdapters";
-import { searchRentalOptions } from "./searchOrchestrator";
-import type { SearchRequest } from "../domain/types";
+import { rankRentalListings, searchRentalOptions } from "./searchOrchestrator";
+import type { RentalListing, SearchRequest } from "../domain/types";
 
 const baseRequest: SearchRequest = {
   origin: { lat: 39.9169, lng: 116.6462 },
@@ -119,5 +119,38 @@ describe("searchRentalOptions", () => {
 
     expect(results.map((result) => result.listing.store.name)).toEqual(["德州东站店"]);
     expect(results[0].taxiRoute.distanceKm).toBeLessThan(1);
+  });
+
+  it("ranks parsed live listings without needing mock rental adapters", async () => {
+    const liveListing: RentalListing = {
+      id: "live-ehi-1",
+      platform: "ehi",
+      store: {
+        id: "live-store",
+        platform: "ehi",
+        name: "德州东站店",
+        city: "德州",
+        address: "德州东站店",
+        location: { lat: 37.443, lng: 116.374 },
+        distanceKm: 286,
+        hours: "以平台页面为准"
+      },
+      vehicleName: "奇瑞 瑞虎8 1.6T 自动",
+      vehicleClass: "中型SUV",
+      basePrice: 268,
+      platformFees: 0,
+      insuranceFees: 0,
+      oneWayFee: 0,
+      currency: "CNY",
+      sourceUrl: "https://booking.1hai.cn/",
+      dataCompleteness: 0.72,
+      warnings: ["partial-price"]
+    };
+
+    const results = await rankRentalListings(baseRequest, [liveListing], createMockMapService());
+
+    expect(results).toHaveLength(1);
+    expect(results[0].listing.sourceUrl).toBe("https://booking.1hai.cn/");
+    expect(results[0].match.kind).toBe("exact");
   });
 });

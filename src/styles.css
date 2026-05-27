@@ -189,6 +189,64 @@ input[type="range"] {
   margin: 4px 0 16px;
 }
 
+.login-manager {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 16px;
+  border: 1px solid #dce1e8;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.login-manager > strong {
+  color: #26313f;
+  font-size: 13px;
+}
+
+.login-row {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #e7ebf1;
+  padding-top: 10px;
+}
+
+.login-row span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #26313f;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.login-row small {
+  color: #69707d;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.login-row div {
+  display: grid;
+  grid-template-columns: 1fr 72px;
+  gap: 8px;
+}
+
+.login-row button {
+  height: 32px;
+  border: 1px solid #cfd5de;
+  border-radius: 7px;
+  color: #26313f;
+  background: #ffffff;
+  font-weight: 750;
+}
+
+.login-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .toggle,
 .primary-action,
 .source-link {
