@@ -253,14 +253,44 @@ input[type="range"] {
   background: #fafbfc;
 }
 
+.loading-state {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 360px;
+  padding: 30px;
+  border: 1px solid #d6e2f5;
+  border-radius: 8px;
+  color: #405066;
+  text-align: center;
+  background: #f6f9ff;
+}
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 16px;
+  border: 3px solid #d5e2f7;
+  border-top-color: #2878d7;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
 .empty-state h3 {
   color: #242a33;
 }
 
-.empty-state p {
+.empty-state p,
+.loading-state p {
   max-width: 420px;
   margin-bottom: 0;
   line-height: 1.6;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .result-list {

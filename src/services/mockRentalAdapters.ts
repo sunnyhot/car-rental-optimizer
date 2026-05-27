@@ -1,4 +1,5 @@
 import type { PlatformId, RentalListing, SearchRequest } from "../domain/types";
+import { calculateRentalDays } from "../domain/searchSummary";
 
 export interface RentalAdapter {
   platform: PlatformId;
@@ -43,6 +44,8 @@ export function createMockRentalAdapters(): RentalAdapter[] {
     {
       platform: "ehi",
       async search(request) {
+        const rentalDays = calculateRentalDays(request);
+
         return filterByRadius(
           [
             {
@@ -51,7 +54,7 @@ export function createMockRentalAdapters(): RentalAdapter[] {
               store: STORES.ehiTongzhou,
               vehicleName: "奇瑞 瑞虎8 1.6T 自动",
               vehicleClass: "中型SUV",
-              basePrice: 328,
+              basePrice: dailyTotal(328, rentalDays),
               platformFees: 36,
               insuranceFees: 50,
               oneWayFee: request.returnMode === "different-store" ? 120 : 0,
@@ -66,7 +69,7 @@ export function createMockRentalAdapters(): RentalAdapter[] {
               store: STORES.ehiDezhou,
               vehicleName: "奇瑞 瑞虎8",
               vehicleClass: "中型SUV",
-              basePrice: 120,
+              basePrice: dailyTotal(120, rentalDays),
               platformFees: 25,
               insuranceFees: 40,
               oneWayFee: request.returnMode === "different-store" ? 180 : 0,
@@ -83,6 +86,8 @@ export function createMockRentalAdapters(): RentalAdapter[] {
     {
       platform: "car-inc",
       async search(request) {
+        const rentalDays = calculateRentalDays(request);
+
         return filterByRadius(
           [
             {
@@ -91,7 +96,7 @@ export function createMockRentalAdapters(): RentalAdapter[] {
               store: STORES.carSouth,
               vehicleName: "哈弗 H6 自动",
               vehicleClass: "紧凑型SUV",
-              basePrice: 268,
+              basePrice: dailyTotal(268, rentalDays),
               platformFees: 42,
               insuranceFees: 55,
               oneWayFee: request.returnMode === "different-store" ? 150 : 0,
@@ -110,4 +115,8 @@ export function createMockRentalAdapters(): RentalAdapter[] {
 
 function filterByRadius(listings: RentalListing[], radiusKm: number): RentalListing[] {
   return listings.filter((listing) => listing.store.distanceKm <= radiusKm);
+}
+
+function dailyTotal(dailyPrice: number, rentalDays: number): number {
+  return dailyPrice * rentalDays;
 }

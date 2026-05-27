@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { formDataToSearchValues, mergeSearchFormValues } from "./domain/searchRequest";
+import { formatSearchCompletionStatus } from "./domain/searchSummary";
 import type { PlatformId, Recommendation, ReturnMode, SearchRequest } from "./domain/types";
 import { createMockMapService } from "./services/mockMapService";
 import { createMockRentalAdapters } from "./services/mockRentalAdapters";
@@ -21,6 +23,7 @@ const PLATFORM_LABELS: Record<PlatformId, string> = {
 };
 
 export default function App() {
+  const formRef = useRef<HTMLFormElement>(null);
   const [request, setRequest] = useState<SearchRequest>(DEFAULT_REQUEST);
   const [results, setResults] = useState<Recommendation[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
@@ -33,17 +36,27 @@ export default function App() {
   );
 
   async function runSearch() {
+    const formValues = formRef.current ? formDataToSearchValues(new FormData(formRef.current)) : {};
+    const searchRequest = mergeSearchFormValues(request, formValues);
+
+    setRequest(searchRequest);
     setIsSearching(true);
+    setResults([]);
+    setSelectedId("");
     setStatus("正在查询一嗨、神州，并计算打车/公共交通成本...");
 
     try {
-      const nextResults = await searchRentalOptions(request, {
-        rentalAdapters: createMockRentalAdapters(),
-        mapService: createMockMapService()
-      });
+      const [nextResults] = await Promise.all([
+        searchRentalOptions(searchRequest, {
+          rentalAdapters: createMockRentalAdapters(),
+          mapService: createMockMapService()
+        }),
+        waitForFeedback()
+      ]);
+
       setResults(nextResults);
       setSelectedId(nextResults[0]?.listing.id ?? "");
-      setStatus(nextResults.length > 0 ? `找到 ${nextResults.length} 个候选方案。` : "没有找到候选车辆。");
+      setStatus(formatSearchCompletionStatus(searchRequest, nextResults.length));
     } finally {
       setIsSearching(false);
     }
@@ -51,6 +64,9 @@ export default function App() {
 
   function updateRequest<T extends keyof SearchRequest>(key: T, value: SearchRequest[T]) {
     setRequest((current) => ({ ...current, [key]: value }));
+    if (results.length > 0) {
+      setStatus("搜索条件已变更，点击“开始比较”重新计算总成本。");
+    }
   }
 
   function togglePlatform(platform: PlatformId) {
@@ -84,9 +100,18 @@ export default function App() {
             <span>默认 100km</span>
           </div>
 
+          <form
+            className="search-form"
+            ref={formRef}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void runSearch();
+            }}
+          >
           <label className="field">
             <span>当前位置</span>
             <input
+              name="originLabel"
               value={request.originLabel}
               onChange={(event) => updateRequest("originLabel", event.target.value)}
             />
@@ -96,6 +121,7 @@ export default function App() {
             <label className="field">
               <span>取车时间</span>
               <input
+                name="pickupAt"
                 type="datetime-local"
                 value={request.pickupAt}
                 onChange={(event) => updateRequest("pickupAt", event.target.value)}
@@ -104,6 +130,7 @@ export default function App() {
             <label className="field">
               <span>还车时间</span>
               <input
+                name="returnAt"
                 type="datetime-local"
                 value={request.returnAt}
                 onChange={(event) => updateRequest("returnAt", event.target.value)}
@@ -114,6 +141,7 @@ export default function App() {
           <label className="field">
             <span>车型</span>
             <input
+              name="vehicleQuery"
               value={request.vehicleQuery}
               onChange={(event) => updateRequest("vehicleQuery", event.target.value)}
               placeholder="瑞虎8"
@@ -123,6 +151,7 @@ export default function App() {
           <label className="field">
             <span>搜索半径：{request.radiusKm} km</span>
             <input
+              name="radiusKm"
               type="range"
               min="10"
               max="500"
@@ -135,6 +164,7 @@ export default function App() {
           <label className="field">
             <span>还车方式</span>
             <select
+              name="returnMode"
               value={request.returnMode}
               onChange={(event) => updateRequest("returnMode", event.target.value as ReturnMode)}
             >
@@ -156,7 +186,7 @@ export default function App() {
             ))}
           </div>
 
-          <button className="primary-action" disabled={isSearching} onClick={runSearch} type="button">
+          <button className="primary-action" disabled={isSearching} type="submit">
             {isSearching ? "查询中..." : "开始比较"}
           </button>
 
@@ -164,6 +194,7 @@ export default function App() {
             <strong>自动化说明</strong>
             <p>真实版会在本地浏览器保存一嗨和神州登录态；遇到验证码或短信时暂停让你处理。</p>
           </div>
+          </form>
         </aside>
 
         <section className="result-panel" aria-label="推荐结果">
@@ -172,7 +203,13 @@ export default function App() {
             <span>{status}</span>
           </div>
 
-          {results.length === 0 ? (
+          {isSearching ? (
+            <div className="loading-state" role="status">
+              <div className="spinner" />
+              <h3>正在重新比较</h3>
+              <p>正在按当前日期、半径和平台重新计算租车价、打车成本和公共交通成本。</p>
+            </div>
+          ) : results.length === 0 ? (
             <div className="empty-state">
               <h3>先跑一次比较</h3>
               <p>保持默认 100km 会看到北京周边方案；把半径拉到 500km，会出现德州东站低价跨城方案。</p>
@@ -299,4 +336,8 @@ function renderWarnings(warnings: string[]) {
   }
 
   return "该方案存在数据完整度提醒，建议打开原始平台复核。";
+}
+
+function waitForFeedback() {
+  return new Promise((resolve) => window.setTimeout(resolve, 450));
 }

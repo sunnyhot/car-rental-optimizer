@@ -53,4 +53,29 @@ describe("searchRentalOptions", () => {
     expect(results[0].listing.store.name).toBe("德州东站店");
     expect(results[0].warnings).toContain("cross-city-pickup");
   });
+
+  it("uses the selected rental duration when calculating mock rental prices", async () => {
+    const twoDayResults = await searchRentalOptions(baseRequest, {
+      rentalAdapters: createMockRentalAdapters(),
+      mapService: createMockMapService()
+    });
+    const thirtyDayResults = await searchRentalOptions(
+      {
+        ...baseRequest,
+        pickupAt: "2026-09-11T09:00",
+        returnAt: "2026-10-11T18:00"
+      },
+      {
+        rentalAdapters: createMockRentalAdapters(),
+        mapService: createMockMapService()
+      }
+    );
+
+    const twoDaySouth = twoDayResults.find((result) => result.listing.store.name === "北京南站店");
+    const thirtyDaySouth = thirtyDayResults.find((result) => result.listing.store.name === "北京南站店");
+
+    expect(twoDaySouth?.listing.basePrice).toBe(804);
+    expect(thirtyDaySouth?.listing.basePrice).toBe(8_308);
+    expect(thirtyDaySouth!.rentalTotal).toBeGreaterThan(twoDaySouth!.rentalTotal);
+  });
 });
