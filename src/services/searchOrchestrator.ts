@@ -30,5 +30,9 @@ export async function searchRentalOptions(
     })
   );
 
-  return rankRecommendations(recommendations);
+  const filteredRecommendations = request.vehicleQuery.trim()
+    ? recommendations.filter((recommendation) => recommendation.match.kind !== "low-confidence")
+    : recommendations;
+
+  return rankRecommendations(filteredRecommendations);
 }

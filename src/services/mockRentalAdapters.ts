@@ -1,4 +1,5 @@
 import type { PlatformId, RentalListing, SearchRequest } from "../domain/types";
+import { distanceKmBetween } from "../domain/geo";
 import { calculateRentalDays } from "../domain/searchSummary";
 
 export interface RentalAdapter {
@@ -36,6 +37,16 @@ const STORES = {
     location: { lat: 39.865, lng: 116.379 },
     distanceKm: 32,
     hours: "07:30-22:30"
+  },
+  carTongzhouCompact: {
+    id: "car-tongzhou-compact",
+    platform: "car-inc" as const,
+    name: "北京通州北苑店",
+    city: "北京",
+    address: "北京市通州区北苑附近",
+    location: { lat: 39.903, lng: 116.642 },
+    distanceKm: 4.2,
+    hours: "08:00-21:00"
   }
 };
 
@@ -50,7 +61,7 @@ export function createMockRentalAdapters(): RentalAdapter[] {
           [
             {
               id: "ehi-tongzhou-tiggo8",
-              platform: "ehi",
+              platform: "ehi" as const,
               store: STORES.ehiTongzhou,
               vehicleName: "奇瑞 瑞虎8 1.6T 自动",
               vehicleClass: "中型SUV",
@@ -58,14 +69,14 @@ export function createMockRentalAdapters(): RentalAdapter[] {
               platformFees: 36,
               insuranceFees: 50,
               oneWayFee: request.returnMode === "different-store" ? 120 : 0,
-              currency: "CNY",
+              currency: "CNY" as const,
               sourceUrl: "https://www.1hai.cn/",
               dataCompleteness: 0.98,
-              warnings: []
+              warnings: [] as RentalListing["warnings"]
             },
             {
               id: "ehi-dezhou-tiggo8",
-              platform: "ehi",
+              platform: "ehi" as const,
               store: STORES.ehiDezhou,
               vehicleName: "奇瑞 瑞虎8",
               vehicleClass: "中型SUV",
@@ -73,12 +84,12 @@ export function createMockRentalAdapters(): RentalAdapter[] {
               platformFees: 25,
               insuranceFees: 40,
               oneWayFee: request.returnMode === "different-store" ? 180 : 0,
-              currency: "CNY",
+              currency: "CNY" as const,
               sourceUrl: "https://www.1hai.cn/",
               dataCompleteness: 0.92,
-              warnings: ["cross-city-pickup"]
+              warnings: ["cross-city-pickup"] as RentalListing["warnings"]
             }
-          ],
+          ].map((listing) => withDynamicDistance(listing, request)),
           request.radiusKm
         );
       }
@@ -92,7 +103,7 @@ export function createMockRentalAdapters(): RentalAdapter[] {
           [
             {
               id: "car-south-haval-h6",
-              platform: "car-inc",
+              platform: "car-inc" as const,
               store: STORES.carSouth,
               vehicleName: "哈弗 H6 自动",
               vehicleClass: "紧凑型SUV",
@@ -100,12 +111,27 @@ export function createMockRentalAdapters(): RentalAdapter[] {
               platformFees: 42,
               insuranceFees: 55,
               oneWayFee: request.returnMode === "different-store" ? 150 : 0,
-              currency: "CNY",
+              currency: "CNY" as const,
               sourceUrl: "https://www.zuche.com/",
               dataCompleteness: 0.95,
-              warnings: []
+              warnings: [] as RentalListing["warnings"]
+            },
+            {
+              id: "car-tongzhou-lavida",
+              platform: "car-inc" as const,
+              store: STORES.carTongzhouCompact,
+              vehicleName: "大众 朗逸 自动",
+              vehicleClass: "紧凑型轿车",
+              basePrice: dailyTotal(98, rentalDays),
+              platformFees: 30,
+              insuranceFees: 45,
+              oneWayFee: request.returnMode === "different-store" ? 100 : 0,
+              currency: "CNY" as const,
+              sourceUrl: "https://www.zuche.com/",
+              dataCompleteness: 0.94,
+              warnings: [] as RentalListing["warnings"]
             }
-          ],
+          ].map((listing) => withDynamicDistance(listing, request)),
           request.radiusKm
         );
       }
@@ -119,4 +145,24 @@ function filterByRadius(listings: RentalListing[], radiusKm: number): RentalList
 
 function dailyTotal(dailyPrice: number, rentalDays: number): number {
   return dailyPrice * rentalDays;
+}
+
+function withDynamicDistance(listing: RentalListing, request: SearchRequest): RentalListing {
+  const distanceKm = distanceKmBetween(request.origin, listing.store.location);
+  const warnings = new Set(listing.warnings);
+
+  if (distanceKm >= 80) {
+    warnings.add("cross-city-pickup");
+  } else {
+    warnings.delete("cross-city-pickup");
+  }
+
+  return {
+    ...listing,
+    store: {
+      ...listing.store,
+      distanceKm
+    },
+    warnings: Array.from(warnings)
+  };
 }

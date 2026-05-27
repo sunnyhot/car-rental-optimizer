@@ -30,4 +30,18 @@ describe("mergeSearchFormValues", () => {
     expect(merged.returnMode).toBe("different-store");
     expect(merged.platforms).toEqual(["ehi", "car-inc"]);
   });
+
+  it("updates the origin coordinates when the location text matches a known place", () => {
+    const merged = mergeSearchFormValues(current, {
+      originLabel: "德州东站",
+      pickupAt: "2026-09-11T09:00",
+      returnAt: "2026-10-11T18:00",
+      radiusKm: "100",
+      returnMode: "same-store",
+      vehicleQuery: "瑞虎8"
+    });
+
+    expect(merged.originLabel).toBe("德州东站");
+    expect(merged.origin).toEqual({ lat: 37.443, lng: 116.374 });
+  });
 });

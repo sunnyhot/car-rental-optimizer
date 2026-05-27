@@ -1,4 +1,5 @@
 import type { ReturnMode, SearchRequest } from "./types";
+import { resolveKnownOrigin } from "./locations";
 
 type SearchFormValues = Partial<Record<"originLabel" | "pickupAt" | "returnAt" | "radiusKm" | "returnMode" | "vehicleQuery", FormDataEntryValue | string>>;
 
@@ -6,9 +7,12 @@ export function mergeSearchFormValues(
   current: SearchRequest,
   values: SearchFormValues
 ): SearchRequest {
+  const originLabel = readString(values.originLabel, current.originLabel);
+
   return {
     ...current,
-    originLabel: readString(values.originLabel, current.originLabel),
+    origin: resolveKnownOrigin(originLabel) ?? current.origin,
+    originLabel,
     pickupAt: readString(values.pickupAt, current.pickupAt),
     returnAt: readString(values.returnAt, current.returnAt),
     radiusKm: readPositiveNumber(values.radiusKm, current.radiusKm),

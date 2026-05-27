@@ -2,7 +2,7 @@ export type PlatformId = "ehi" | "car-inc";
 
 export type ReturnMode = "same-store" | "different-store";
 
-export type MatchKind = "exact" | "similar-class" | "low-confidence";
+export type MatchKind = "exact" | "similar-class" | "low-confidence" | "not-specified";
 
 export type RouteMode = "taxi" | "transit";
 

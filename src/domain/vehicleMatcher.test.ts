@@ -35,4 +35,15 @@ describe("matchVehicle", () => {
     expect(match.score).toBeLessThan(0.5);
     expect(match.label).toContain("低置信");
   });
+
+  it("does not treat an empty vehicle query as an exact match", () => {
+    const match = matchVehicle("", {
+      vehicleName: "奇瑞 瑞虎8 1.6T 自动",
+      vehicleClass: "中型SUV"
+    });
+
+    expect(match.kind).toBe("not-specified");
+    expect(match.score).toBe(0);
+    expect(match.label).toContain("未指定");
+  });
 });

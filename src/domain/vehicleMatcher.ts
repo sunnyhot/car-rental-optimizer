@@ -21,6 +21,14 @@ export function matchVehicle(query: string, candidate: VehicleCandidate): Vehicl
   const normalizedName = normalize(candidate.vehicleName);
   const normalizedClass = normalize(candidate.vehicleClass);
 
+  if (!normalizedQuery) {
+    return {
+      kind: "not-specified",
+      score: 0,
+      label: "未指定车型"
+    };
+  }
+
   const aliases = MODEL_ALIASES[normalizedQuery] ?? [normalizedQuery];
   if (aliases.some((alias) => normalizedName.includes(normalize(alias)))) {
     return {

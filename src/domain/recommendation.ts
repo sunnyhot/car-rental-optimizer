@@ -3,7 +3,8 @@ import type { Recommendation, RentalListing, RouteEstimate, VehicleMatch } from 
 const MATCH_PRIORITY: Record<VehicleMatch["kind"], number> = {
   exact: 3,
   "similar-class": 2,
-  "low-confidence": 1
+  "low-confidence": 1,
+  "not-specified": 0
 };
 
 export function buildRecommendation(
