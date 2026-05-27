@@ -1,8 +1,14 @@
 const { app, BrowserWindow, ipcMain, session, shell } = require("electron");
 const path = require("node:path");
+const { createPlatformWindowController } = require("./platformWindows.cjs");
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const platformWindows = new Map();
+const platformWindowController = createPlatformWindowController({
+  BrowserWindow,
+  platformWindows,
+  getPlatformConfig
+});
 
 const PLATFORMS = {
   ehi: {
@@ -66,49 +72,14 @@ function registerRentalAutomationHandlers() {
   ipcMain.handle("rental:get-auth-states", async () => Promise.all(platformIds().map(getPlatformState)));
 
   ipcMain.handle("rental:open-platform", async (_event, platform) => {
-    const config = getPlatformConfig(platform);
-    const existing = platformWindows.get(platform);
-
-    if (existing && !existing.isDestroyed()) {
-      existing.show();
-      existing.focus();
-      return { ...(await getPlatformState(platform)), opened: true };
-    }
-
-    const loginWindow = new BrowserWindow({
-      width: 1180,
-      height: 820,
-      title: `${config.label} 登录/查询`,
-      webPreferences: {
-        partition: config.partition,
-        contextIsolation: true,
-        nodeIntegration: false
-      }
-    });
-
-    platformWindows.set(platform, loginWindow);
-    loginWindow.on("closed", () => {
-      platformWindows.delete(platform);
-    });
-    loginWindow.webContents.setWindowOpenHandler(({ url }) => {
-      loginWindow.loadURL(url);
-      return { action: "deny" };
-    });
-    await loginWindow.loadURL(config.url);
+    await platformWindowController.ensurePlatformWindow(platform);
 
     return { ...(await getPlatformState(platform)), opened: true };
   });
 
-  ipcMain.handle("rental:read-snapshot", async (_event, platform) => {
-    const config = getPlatformConfig(platform);
-    const targetWindow = platformWindows.get(platform);
-
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return {
-        ok: false,
-        message: `请先打开${config.label}窗口，登录并在平台页面完成查询。`
-      };
-    }
+  ipcMain.handle("rental:read-snapshot", async (event, platform) => {
+    const requesterWindow = BrowserWindow.fromWebContents(event.sender);
+    const { config, opened, window: targetWindow } = await platformWindowController.ensurePlatformWindow(platform);
 
     const snapshot = await targetWindow.webContents.executeJavaScript(
       `({
@@ -119,8 +90,14 @@ function registerRentalAutomationHandlers() {
       true
     );
 
+    refocusWindow(requesterWindow);
+
     return {
       ok: true,
+      autoOpened: opened,
+      message: opened
+        ? `已自动打开${config.label}官方窗口。请在该窗口完成城市、日期、车型搜索后再次点击开始比较。`
+        : undefined,
       snapshot: {
         platform,
         title: snapshot.title,
@@ -167,4 +144,11 @@ function getPlatformConfig(platform) {
     throw new Error(`Unsupported platform: ${platform}`);
   }
   return config;
+}
+
+function refocusWindow(targetWindow) {
+  if (targetWindow && !targetWindow.isDestroyed()) {
+    targetWindow.show();
+    targetWindow.focus();
+  }
 }

@@ -15,6 +15,7 @@ export interface PlatformOpenResult extends PlatformAuthState {
 
 export interface PlatformSnapshotResult {
   ok: boolean;
+  autoOpened?: boolean;
   snapshot?: LivePlatformSnapshot;
   message?: string;
 }

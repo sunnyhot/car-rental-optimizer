@@ -9,6 +9,17 @@ export interface LivePlatformSnapshot {
   text: string;
 }
 
+export interface LiveSnapshotDiagnostics {
+  platform: PlatformId;
+  title: string;
+  url: string;
+  textLength: number;
+  lineCount: number;
+  priceCandidateCount: number;
+  vehicleCandidateCount: number;
+  storeCandidateCount: number;
+}
+
 const VEHICLE_HINTS = ["瑞虎", "哈弗", "大众", "丰田", "本田", "日产", "别克", "宝马", "奔驰", "奥迪", "SUV", "自动"];
 const STORE_HINTS = ["店", "站", "机场", "门店", "取车点"];
 const NON_VEHICLE_PRICE_HINTS = ["保险", "保障", "押金", "服务费", "手续费", "违章", "优惠", "券"];
@@ -17,10 +28,7 @@ export function parseLivePlatformSnapshot(
   snapshot: LivePlatformSnapshot,
   request: SearchRequest
 ): RentalListing[] {
-  const lines = snapshot.text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = splitPageLines(snapshot.text);
 
   const listings: RentalListing[] = [];
 
@@ -61,6 +69,28 @@ export function parseLivePlatformSnapshot(
   return dedupeListings(listings);
 }
 
+export function analyzeLivePlatformSnapshot(snapshot: LivePlatformSnapshot): LiveSnapshotDiagnostics {
+  const lines = splitPageLines(snapshot.text);
+
+  return {
+    platform: snapshot.platform,
+    title: snapshot.title,
+    url: snapshot.url,
+    textLength: snapshot.text.length,
+    lineCount: lines.length,
+    priceCandidateCount: lines.filter((line) => Boolean(extractPrice(line))).length,
+    vehicleCandidateCount: lines.filter(hasVehicleHint).length,
+    storeCandidateCount: lines.filter(hasStoreHint).length
+  };
+}
+
+function splitPageLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function extractPrice(line: string): number | undefined {
   const match = line.match(/[¥￥]\s*(\d{2,6})|(\d{2,6})\s*元/);
   const raw = match?.[1] ?? match?.[2];
@@ -71,14 +101,22 @@ function extractPrice(line: string): number | undefined {
 function findVehicleName(lines: string[], priceLineIndex: number): string | undefined {
   const candidates = lines.slice(Math.max(0, priceLineIndex - 4), priceLineIndex + 1).reverse();
 
-  return candidates.find((line) => VEHICLE_HINTS.some((hint) => line.toLowerCase().includes(hint.toLowerCase())));
+  return candidates.find(hasVehicleHint);
 }
 
 function findStoreName(lines: string[], priceLineIndex: number): string {
   const candidates = lines.slice(Math.max(0, priceLineIndex - 8), priceLineIndex + 1).reverse();
-  const storeLine = candidates.find((line) => STORE_HINTS.some((hint) => line.includes(hint)));
+  const storeLine = candidates.find(hasStoreHint);
 
   return storeLine ?? "平台当前门店";
+}
+
+function hasVehicleHint(line: string): boolean {
+  return VEHICLE_HINTS.some((hint) => line.toLowerCase().includes(hint.toLowerCase()));
+}
+
+function hasStoreHint(line: string): boolean {
+  return STORE_HINTS.some((hint) => line.includes(hint));
 }
 
 function buildStore(platform: PlatformId, name: string, request: SearchRequest): Store {

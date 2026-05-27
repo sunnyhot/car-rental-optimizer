@@ -345,6 +345,84 @@ input[type="range"] {
   line-height: 1.6;
 }
 
+.diagnostic-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  width: min(720px, 100%);
+  margin-top: 18px;
+  text-align: left;
+}
+
+.diagnostic-card {
+  border: 1px solid #dce1e8;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.diagnostic-card > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.diagnostic-card strong {
+  color: #242a33;
+  font-size: 13px;
+}
+
+.diagnostic-card span {
+  color: #1f6a4d;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.diagnostic-card p {
+  max-width: none;
+  margin-bottom: 10px;
+  color: #465263;
+  font-size: 12px;
+}
+
+.diagnostic-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.diagnostic-card dl div {
+  min-height: 48px;
+  border-radius: 7px;
+  padding: 8px;
+  background: #f5f7fa;
+}
+
+.diagnostic-card dt {
+  color: #69707d;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.diagnostic-card dd {
+  margin: 4px 0 0;
+  color: #242a33;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.diagnostic-card small {
+  display: block;
+  overflow: hidden;
+  color: #69707d;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

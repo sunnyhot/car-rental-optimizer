@@ -3,8 +3,16 @@ import { formDataToSearchValues, mergeSearchFormValues } from "./domain/searchRe
 import { formatSearchCompletionStatus } from "./domain/searchSummary";
 import type { PlatformId, Recommendation, ReturnMode, SearchRequest } from "./domain/types";
 import { createMockMapService } from "./services/mockMapService";
-import { parseLivePlatformSnapshot } from "./services/livePageParser";
-import { getPlatformAutomation, type PlatformAuthState } from "./services/platformAutomation";
+import {
+  analyzeLivePlatformSnapshot,
+  parseLivePlatformSnapshot,
+  type LiveSnapshotDiagnostics
+} from "./services/livePageParser";
+import {
+  getPlatformAutomation,
+  type PlatformAuthState,
+  type PlatformSnapshotResult
+} from "./services/platformAutomation";
 import { rankRentalListings } from "./services/searchOrchestrator";
 
 const DEFAULT_REQUEST: SearchRequest = {
@@ -23,6 +31,11 @@ const PLATFORM_LABELS: Record<PlatformId, string> = {
   "car-inc": "神州"
 };
 
+type SnapshotReadDiagnostic = LiveSnapshotDiagnostics & {
+  autoOpened?: boolean;
+  message?: string;
+};
+
 export default function App() {
   const formRef = useRef<HTMLFormElement>(null);
   const automation = useMemo(() => getPlatformAutomation(), []);
@@ -31,9 +44,10 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [isSearching, setIsSearching] = useState(false);
   const [authStates, setAuthStates] = useState<PlatformAuthState[]>([]);
+  const [snapshotDiagnostics, setSnapshotDiagnostics] = useState<SnapshotReadDiagnostic[]>([]);
   const [status, setStatus] = useState(
     automation
-      ? "真实数据模式：先打开平台窗口登录并完成查询，再点击开始比较。"
+      ? "真实数据模式：点击开始比较会读取已登录平台窗口的当前页面。"
       : "真实数据模式需要在 Electron 桌面 app 中运行；普通浏览器不能读取平台登录态。"
   );
 
@@ -54,7 +68,8 @@ export default function App() {
     setIsSearching(true);
     setResults([]);
     setSelectedId("");
-    setStatus("正在读取平台官网当前页面，并计算打车/公共交通成本...");
+    setSnapshotDiagnostics([]);
+    setStatus("正在打开/读取平台官网当前页面，并计算打车/公共交通成本...");
 
     try {
       if (!automation) {
@@ -63,21 +78,24 @@ export default function App() {
       }
 
       const [snapshots] = await Promise.all([
-        Promise.all(searchRequest.platforms.map((platform) => automation.readSnapshot(platform))),
+        Promise.all(searchRequest.platforms.map((platform) => readPlatformSnapshot(platform))),
         waitForFeedback()
       ]);
       const availableSnapshots = snapshots.flatMap((result) => (result.ok && result.snapshot ? [result.snapshot] : []));
-      const messages = snapshots.flatMap((result) => (result.ok ? [] : [result.message ?? "平台页面未打开"]));
+      const messages = snapshots.flatMap((result) => (result.message ? [result.message] : []));
+      const diagnostics = snapshots.flatMap((result) =>
+        result.ok && result.snapshot
+          ? [{ ...analyzeLivePlatformSnapshot(result.snapshot), autoOpened: result.autoOpened, message: result.message }]
+          : []
+      );
       const liveListings = availableSnapshots.flatMap((snapshot) =>
         parseLivePlatformSnapshot(snapshot, searchRequest)
       );
 
+      setSnapshotDiagnostics(diagnostics);
+
       if (liveListings.length === 0) {
-        setStatus(
-          messages.length > 0
-            ? messages.join("；")
-            : "没有从平台官网当前页面识别到车辆价格。请在平台窗口完成城市、日期、门店/车型搜索后再点开始比较。"
-        );
+        setStatus(formatNoLiveListingsStatus(messages, diagnostics));
         return;
       }
 
@@ -89,6 +107,21 @@ export default function App() {
       await refreshAuthStates();
     } finally {
       setIsSearching(false);
+    }
+  }
+
+  async function readPlatformSnapshot(platform: PlatformId): Promise<PlatformSnapshotResult> {
+    if (!automation) {
+      return { ok: false, message: "Electron 桌面桥接不可用。" };
+    }
+
+    try {
+      return await automation.readSnapshot(platform);
+    } catch (error) {
+      return {
+        ok: false,
+        message: `${PLATFORM_LABELS[platform]}读取失败：${formatError(error)}`
+      };
     }
   }
 
@@ -274,7 +307,7 @@ export default function App() {
 
           <div className="notice">
             <strong>真实数据说明</strong>
-            <p>这里不再使用 mock。请先打开平台官方页面登录并搜索，软件会读取该窗口当前页面里的真实价格文本。</p>
+            <p>这里不再使用 mock 车源。开始比较会自动打开/读取平台官方窗口；若页面还没有价格，会显示读取诊断。</p>
           </div>
           </form>
         </aside>
@@ -295,6 +328,7 @@ export default function App() {
             <div className="empty-state">
               <h3>等待真实页面数据</h3>
               <p>打开一嗨/神州官方窗口，登录后在平台页面完成搜索，再回到这里点击“开始比较”。</p>
+              {snapshotDiagnostics.length > 0 && <SnapshotDiagnostics diagnostics={snapshotDiagnostics} />}
             </div>
           ) : (
             <div className="result-list">
@@ -330,6 +364,74 @@ export default function App() {
       </section>
     </main>
   );
+}
+
+function SnapshotDiagnostics({ diagnostics }: { diagnostics: SnapshotReadDiagnostic[] }) {
+  return (
+    <div className="diagnostic-list" aria-label="页面读取诊断">
+      {diagnostics.map((diagnostic) => (
+        <div className="diagnostic-card" key={`${diagnostic.platform}-${diagnostic.url}`}>
+          <div>
+            <strong>{PLATFORM_LABELS[diagnostic.platform]}</strong>
+            <span>{diagnostic.autoOpened ? "已自动打开窗口" : "已读取当前窗口"}</span>
+          </div>
+          <p>{diagnostic.title || "未读取到页面标题"}</p>
+          <dl>
+            <div>
+              <dt>页面文本</dt>
+              <dd>{diagnostic.textLength} 字</dd>
+            </div>
+            <div>
+              <dt>价格候选</dt>
+              <dd>{diagnostic.priceCandidateCount}</dd>
+            </div>
+            <div>
+              <dt>车型候选</dt>
+              <dd>{diagnostic.vehicleCandidateCount}</dd>
+            </div>
+            <div>
+              <dt>门店候选</dt>
+              <dd>{diagnostic.storeCandidateCount}</dd>
+            </div>
+          </dl>
+          <small>{shortenUrl(diagnostic.url)}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatNoLiveListingsStatus(messages: string[], diagnostics: SnapshotReadDiagnostic[]): string {
+  if (diagnostics.some((diagnostic) => diagnostic.autoOpened)) {
+    return "已自动打开平台官网窗口，但当前页面还没有可解析车价；请在官方窗口完成搜索后再点开始比较。";
+  }
+
+  if (diagnostics.length > 0) {
+    const summary = diagnostics
+      .map(
+        (diagnostic) =>
+          `${PLATFORM_LABELS[diagnostic.platform]}：价格候选 ${diagnostic.priceCandidateCount}，车型候选 ${diagnostic.vehicleCandidateCount}`
+      )
+      .join("；");
+    return `已读取平台官网，但没有识别到可比价车源。${summary}`;
+  }
+
+  return messages.length > 0
+    ? messages.join("；")
+    : "没有从平台官网当前页面识别到车辆价格。请在平台窗口完成城市、日期、门店/车型搜索后再点开始比较。";
+}
+
+function shortenUrl(url: string): string {
+  try {
+    const parsedUrl = new URL(url);
+    return `${parsedUrl.host}${parsedUrl.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function RecommendationDetail({ recommendation }: { recommendation: Recommendation }) {

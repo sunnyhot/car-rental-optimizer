@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLivePlatformSnapshot } from "./livePageParser";
+import { analyzeLivePlatformSnapshot, parseLivePlatformSnapshot } from "./livePageParser";
 import type { SearchRequest } from "../domain/types";
 
 const request: SearchRequest = {
@@ -56,5 +56,25 @@ describe("parseLivePlatformSnapshot", () => {
     );
 
     expect(listings).toEqual([]);
+  });
+
+  it("summarizes page diagnostics when no rental listings can be parsed", () => {
+    const diagnostics = analyzeLivePlatformSnapshot({
+      platform: "ehi",
+      title: "一嗨租车",
+      url: "https://www.1hai.cn/",
+      text: ["北京通州", "瑞虎8", "请选择取车门店", "暂无价格"].join("\n")
+    });
+
+    expect(diagnostics).toEqual({
+      platform: "ehi",
+      title: "一嗨租车",
+      url: "https://www.1hai.cn/",
+      textLength: 21,
+      lineCount: 4,
+      priceCandidateCount: 0,
+      vehicleCandidateCount: 1,
+      storeCandidateCount: 1
+    });
   });
 });
