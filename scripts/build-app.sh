@@ -40,6 +40,24 @@ fi
 # Create PkgInfo
 echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
 
+# Ad-hoc sign (sign frameworks first, then the whole bundle)
+echo "==> Signing app bundle..."
+if [ -d "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework" ]; then
+    codesign --force --sign - "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
+    echo "    Signed Sparkle.framework"
+fi
+codesign --deep --force --sign - "${APP_BUNDLE}"
+echo "    Ad-hoc signed ${APP_NAME}.app"
+
+# Verify signature
+echo "==> Verifying signature..."
+codesign --verify --deep --strict "${APP_BUNDLE}"
+echo "    Signature OK"
+
+# Clear quarantine attributes
+xattr -cr "${APP_BUNDLE}"
+echo "    Cleared quarantine attributes"
+
 echo "==> App bundle created at ${APP_BUNDLE}"
 echo ""
 echo "To test: open \"${APP_BUNDLE}\""
