@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 5.9
 
 import PackageDescription
 
@@ -11,7 +11,8 @@ let package = Package(
         .executable(
             name: "CarRentalOptimizer",
             targets: ["CarRentalOptimizer"]
-        )
+        ),
+        .library(name: "CarRentalDomain", targets: ["CarRentalDomain"]),
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.4.0")
@@ -20,14 +21,17 @@ let package = Package(
         .executableTarget(
             name: "CarRentalOptimizer",
             dependencies: [
-                .product(name: "Sparkle", package: "Sparkle")
+                .product(name: "Sparkle", package: "Sparkle"),
+                "CarRentalDomain",
             ],
             path: "Sources/CarRentalOptimizer"
         ),
+        .target(name: "CarRentalDomain", path: "Sources/CarRentalDomain"),
         .testTarget(
             name: "CarRentalOptimizerTests",
             dependencies: ["CarRentalOptimizer"],
             path: "Tests/CarRentalOptimizerTests"
-        )
+        ),
+        .testTarget(name: "CarRentalDomainTests", dependencies: ["CarRentalDomain"], path: "Tests/CarRentalDomainTests"),
     ]
 )

@@ -26,3 +26,11 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Node
+npm-debug.log*
+playwright-report/
+test-results/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
