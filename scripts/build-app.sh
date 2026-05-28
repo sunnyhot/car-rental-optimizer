@@ -20,6 +20,11 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources"
 # Copy executable
 cp ".build/release/CarRentalOptimizer" "${APP_BUNDLE}/Contents/MacOS/"
 
+# Add @loader_path/../Frameworks rpath so the binary can find Sparkle.framework
+# in Contents/Frameworks/ at runtime. SwiftPM builds only set @loader_path (which
+# resolves to Contents/MacOS/), but frameworks live in Contents/Frameworks/.
+install_name_tool -add_rpath "@loader_path/../Frameworks" "${APP_BUNDLE}/Contents/MacOS/CarRentalOptimizer"
+
 # Copy Info.plist
 if [ -f "native/Info.plist" ]; then
     cp "native/Info.plist" "${APP_BUNDLE}/Contents/Info.plist"
@@ -40,7 +45,12 @@ fi
 # Create PkgInfo
 echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
 
+# Ad-hoc code sign (required for macOS to launch the app without "damaged" error)
+# For production distribution, replace with proper Developer ID signing.
+echo "==> Ad-hoc code signing..."
+codesign --force --deep --sign - "${APP_BUNDLE}" 2>/dev/null && echo "    Signed (ad-hoc)" || echo "    WARNING: codesign failed (install Xcode CLI tools)"
+
 echo "==> App bundle created at ${APP_BUNDLE}"
 echo ""
 echo "To test: open \"${APP_BUNDLE}\""
-echo "To distribute: codesign, notarize, and create a DMG (see docs/release-guide.md)"
+echo "To distribute: codesign with Developer ID, notarize, and create a DMG (see docs/release-guide.md)"
