@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Swift Package Manager
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build .app bundle
+        run: bash scripts/build-app.sh
+
+      - name: Verify signature
+        run: codesign --verify --deep --strict "build/租车总成本比较.app"
+
+      - name: Create ZIP archive
+        run: |
+          cd build
+          zip -r -9 "../租车总成本比较-${{ github.ref_name }}.zip" "租车总成本比较.app"
+
+      - name: Generate SHA256 checksum
+        run: |
+          shasum -a 256 "租车总成本比较-${{ github.ref_name }}.zip" > "checksums-${{ github.ref_name }}.txt"
+          cat "checksums-${{ github.ref_name }}.txt"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "租车总成本比较 ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: |
+            租车总成本比较-${{ github.ref_name }}.zip
+            checksums-${{ github.ref_name }}.txt
