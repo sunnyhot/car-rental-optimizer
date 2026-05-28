@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2] - 2026-05-28
+
+### Added
+- GitHub Actions CI workflow（构建验证 PR）
+- GitHub Actions Release workflow（自动构建、打包 zip、shasum、创建 GitHub Release 并上传产物）
+
 ## [0.2.1] - 2026-05-28
 
 ### Fixed
