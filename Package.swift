@@ -13,9 +13,15 @@ let package = Package(
             targets: ["CarRentalOptimizer"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.4.0")
+    ],
     targets: [
         .executableTarget(
             name: "CarRentalOptimizer",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             path: "Sources/CarRentalOptimizer"
         ),
         .testTarget(

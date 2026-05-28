@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>租车总成本比较 更新</title>
+        <link>https://sunnyhot.github.io/car-rental-optimizer/appcast.xml</link>
+        <description>Car Rental Optimizer 自动更新 feed</description>
+        <language>zh-CN</language>
+
+        <!--
+            This is a placeholder appcast file.
+
+            To generate a real appcast:
+            1. Build your app and archive it (dmg/zip)
+            2. Place the archive in a folder
+            3. Run: generate_appcast /path/to/updates_folder/
+            4. Upload the generated appcast.xml + archives to your hosting
+
+            See docs/release-guide.md for the complete workflow.
+        -->
+
+    </channel>
+</rss>
