@@ -9,6 +9,7 @@
 - 修复 ZIP 打包中文文件名兼容性：使用 Python zipfile 替代系统 zip 命令
 - 修复 codesign 验证：ad-hoc 签名使用非严格模式
 - 同步 AppInfo.swift 版本号与 Info.plist
+- 修复 Swift concurrency 编译错误：CarRentalOptimizerApp 添加 @MainActor 注解（CI macos-14 Xcode 15.4 严格执行并发检查）
 
 ## [0.2.2] - 2026-05-28
 
