@@ -57,7 +57,7 @@ jobs:
       - name: Create ZIP archive
         run: |
           cd build
-          zip -r -9 "../租车总成本比较-${{ github.ref_name }}.zip" "租车总成本比较.app"
+          ditto -c -k --sequesterRsrc --keepParent "租车总成本比较.app" "../租车总成本比较-${{ github.ref_name }}.zip"
 
       - name: Generate SHA256 checksum
         run: |
