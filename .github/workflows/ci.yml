@@ -41,10 +41,14 @@ jobs:
           ls /Applications/ | grep Xcode
 
       - name: Resolve dependencies
-        run: swift package resolve 2>&1 | tee /tmp/resolve.log || { cat /tmp/resolve.log; exit 1; }
+        run: |
+          set -o pipefail
+          swift package resolve 2>&1 | tee /tmp/resolve.log || { cat /tmp/resolve.log; exit 1; }
 
       - name: Build
-        run: swift build -v 2>&1 | tee /tmp/build.log || { cat /tmp/build.log; exit 1; }
+        run: |
+          set -o pipefail
+          swift build -v 2>&1 | tee /tmp/build.log || { cat /tmp/build.log; exit 1; }
 
       - name: Run tests
         run: swift test
