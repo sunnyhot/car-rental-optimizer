@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3] - 2026-05-29
+
+### Fixed
+- 修复 Release workflow 构建失败：添加 Xcode 版本选择步骤（与 CI workflow 一致）
+- 修复 Release workflow 中文路径编码问题：添加 UTF-8 locale 环境变量
+
 ## [0.2.2] - 2026-05-28
 
 ### Added
