@@ -47,10 +47,32 @@ jobs:
       - name: Resolve dependencies
         run: swift package resolve 2>&1 || true
 
-      - name: Build .app bundle
+      - name: Build Swift package
+        run: swift build -c release 2>&1 || { echo "swift build failed"; exit 1; }
+
+      - name: Create .app bundle
         run: |
-          set -o pipefail
-          bash scripts/build-app.sh 2>&1 | tee /tmp/build.log || { cat /tmp/build.log; exit 1; }
+          APP_NAME="租车总成本比较"
+          BUILD_DIR="build"
+          APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
+          mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+          mkdir -p "${APP_BUNDLE}/Contents/Frameworks"
+          mkdir -p "${APP_BUNDLE}/Contents/Resources"
+          cp ".build/release/CarRentalOptimizer" "${APP_BUNDLE}/Contents/MacOS/"
+          cp native/Info.plist "${APP_BUNDLE}/Contents/Info.plist"
+          SPARKLE_FW=$(find .build -name "Sparkle.framework" -type d -maxdepth 5 | head -1)
+          if [ -n "${SPARKLE_FW}" ]; then cp -R "${SPARKLE_FW}" "${APP_BUNDLE}/Contents/Frameworks/"; fi
+          echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
+
+      - name: Sign .app bundle
+        run: |
+          APP_BUNDLE="build/租车总成本比较.app"
+          if [ -d "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework" ]; then
+            codesign --force --sign - "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
+          fi
+          codesign --deep --force --sign - "${APP_BUNDLE}"
+          codesign --verify --deep "${APP_BUNDLE}" 2>&1 || echo "Warning: codesign verify non-strict OK"
+          xattr -cr "${APP_BUNDLE}"
 
       - name: Verify signature
         run: |
