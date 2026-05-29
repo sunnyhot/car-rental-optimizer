@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4] - 2026-05-29
+
+### Fixed
+- 修复 macOS 应用打开报错"可能已损坏或不完整"：在 Info.plist 中添加 CFBundleExecutable 键（macOS LaunchServices 依赖此字段定位可执行文件）
+
+
 ## [0.2.3] - 2026-05-29
 
 ### Fixed
