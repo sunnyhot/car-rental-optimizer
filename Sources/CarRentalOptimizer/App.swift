@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 @main
 struct CarRentalOptimizerApp: App {
     private let updaterManager = UpdaterManager()
