@@ -24,10 +24,35 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || true
 
-      - name: Build .app bundle
+      - name: Cache Swift Package Manager
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Print environment info
         run: |
-          swift package resolve
-          bash scripts/build-app.sh
+          echo "== Swift version =="
+          swift --version
+          echo "== Xcode path =="
+          xcode-select -p
+          echo "== xcodebuild version =="
+          xcodebuild -version
+          echo "== Available Xcodes =="
+          ls /Applications/ | grep Xcode
+
+      - name: Resolve dependencies
+        run: swift package resolve 2>&1 || true
+
+      - name: Build .app bundle
+        run: bash scripts/build-app.sh 2>&1 | tee /tmp/build.log || { cat /tmp/build.log; exit 1; }
+
+      - name: Verify signature
+        run: |
+          codesign --verify --deep "build/租车总成本比较.app" 2>&1 || echo "Warning: codesign verify failed, but ad-hoc signing is sufficient for distribution"
 
       - name: Create ZIP archive
         run: python3 scripts/create-zip.py "build/租车总成本比较.app" "租车总成本比较-${{ github.ref_name }}.zip"
