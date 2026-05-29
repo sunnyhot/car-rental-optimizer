@@ -24,20 +24,10 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer || true
 
-      - name: Cache Swift Package Manager
-        uses: actions/cache@v4
-        with:
-          path: |
-            .build
-            ~/Library/Developer/Xcode/DerivedData
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
-          restore-keys: ${{ runner.os }}-spm-
-
-      - name: Resolve dependencies
-        run: swift package resolve 2>&1 || true
-
       - name: Build .app bundle
-        run: bash scripts/build-app.sh
+        run: |
+          swift package resolve
+          bash scripts/build-app.sh
 
       - name: Create ZIP archive
         run: python3 scripts/create-zip.py "build/租车总成本比较.app" "租车总成本比较-${{ github.ref_name }}.zip"
