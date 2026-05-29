@@ -6,7 +6,18 @@ import sys
 
 def create_zip(app_path, output_path):
     """Create a ZIP archive from an .app bundle."""
+    print(f"Source: {app_path}")
+    print(f"Source exists: {os.path.exists(app_path)}")
+    print(f"Source is dir: {os.path.isdir(app_path)}")
+    print(f"CWD: {os.getcwd()}")
+    
     if not os.path.isdir(app_path):
+        # Try listing build/ to help debug
+        build_dir = os.path.dirname(app_path)
+        if os.path.isdir(build_dir):
+            print(f"Contents of {build_dir}:")
+            for item in os.listdir(build_dir):
+                print(f"  - {item}")
         print(f"ERROR: Source directory not found: {app_path}", file=sys.stderr)
         sys.exit(1)
     
