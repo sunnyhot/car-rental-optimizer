@@ -33,5 +33,9 @@
     <string>租车总成本比较</string>
     <key>CFBundleDisplayName</key>
     <string>租车总成本比较</string>
+
+    <!-- Executable name -->
+    <key>CFBundleExecutable</key>
+    <string>CarRentalOptimizer</string>
 </dict>
 </plist>
