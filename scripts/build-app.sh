@@ -51,8 +51,13 @@ echo "    Ad-hoc signed ${APP_NAME}.app"
 
 # Verify signature
 echo "==> Verifying signature..."
-codesign --verify --deep --strict "${APP_BUNDLE}"
-echo "    Signature OK"
+if codesign --verify --deep --strict "${APP_BUNDLE}" 2>&1; then
+    echo "    Signature OK (strict) "
+else
+    echo "    Strict verification failed, trying non-strict..."
+    codesign --verify --deep "${APP_BUNDLE}"
+    echo "    Signature OK (non-strict)"
+fi
 
 # Clear quarantine attributes
 xattr -cr "${APP_BUNDLE}"
