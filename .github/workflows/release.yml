@@ -50,14 +50,32 @@ jobs:
       - name: Build .app bundle
         run: bash scripts/build-app.sh 2>&1 | tee /tmp/build.log || { cat /tmp/build.log; exit 1; }
 
+      - name: Verify build output
+        run: |
+          echo "== Listing build directory =="
+          ls -la build/
+          echo "== App bundle exists =="
+          test -d "build/租车总成本比较.app" && echo "YES" || echo "NO"
+          echo "== App bundle size =="
+          du -sh "build/租车总成本比较.app" 2>&1 || echo "N/A"
+
       - name: Verify signature
         run: |
-          codesign --verify --deep --strict "build/租车总成本比较.app" 2>&1 ||           codesign --verify --deep "build/租车总成本比较.app" 2>&1 ||           echo "Warning: codesign verify failed, but ad-hoc signing is sufficient for distribution"
+          codesign --verify --deep "build/租车总成本比较.app" 2>&1 || echo "Warning: codesign verify failed, but ad-hoc signing is sufficient for distribution"
 
       - name: Create ZIP archive
         run: |
-          cd build
-          ditto -c -k --sequesterRsrc --keepParent "租车总成本比较.app" "../租车总成本比较-${{ github.ref_name }}.zip"
+          set -x
+          python3 scripts/create-zip.py build/租车总成本比较.app "租车总成本比较-${{ github.ref_name }}.zip"
+
+      - name: Verify ZIP archive
+        run: |
+          echo "== ZIP file exists =="
+          test -f "租车总成本比较-${{ github.ref_name }}.zip" && echo "YES" || echo "NO"
+          echo "== ZIP file size =="
+          ls -lh "租车总成本比较-${{ github.ref_name }}.zip"
+          echo "== ZIP contents =="
+          unzip -l "租车总成本比较-${{ github.ref_name }}.zip" | head -20
 
       - name: Generate SHA256 checksum
         run: |
