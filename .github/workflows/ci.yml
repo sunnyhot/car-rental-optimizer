@@ -29,8 +29,22 @@ jobs:
           key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: ${{ runner.os }}-spm-
 
+      - name: Print environment info
+        run: |
+          echo "== Swift version =="
+          swift --version
+          echo "== Xcode path =="
+          xcode-select -p
+          echo "== xcodebuild version =="
+          xcodebuild -version
+          echo "== Available Xcodes =="
+          ls /Applications/ | grep Xcode
+
+      - name: Resolve dependencies
+        run: swift package resolve 2>&1 | tee /tmp/resolve.log || { cat /tmp/resolve.log; exit 1; }
+
       - name: Build
-        run: swift build
+        run: swift build -v 2>&1 | tee /tmp/build.log || { cat /tmp/build.log; exit 1; }
 
       - name: Run tests
         run: swift test
