@@ -5,6 +5,10 @@
 ### Fixed
 - 修复 Release workflow 构建失败：添加 Xcode 版本选择步骤（与 CI workflow 一致）
 - 修复 Release workflow 中文路径编码问题：添加 UTF-8 locale 环境变量
+- 修复 CI 管道 `| tee` 吞噬 exit code：添加 `set -o pipefail`（ci.yml + release.yml）
+- 修复 ZIP 打包中文文件名兼容性：使用 Python zipfile 替代系统 zip 命令
+- 修复 codesign 验证：ad-hoc 签名使用非严格模式
+- 同步 AppInfo.swift 版本号与 Info.plist
 
 ## [0.2.2] - 2026-05-28
 
