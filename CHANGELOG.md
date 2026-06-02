@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0] - 2026-06-02
+
+### Added
+- 接通原生 SwiftUI 三栏比价工作区，`swift run CarRentalOptimizer` 可直接查询 Mock 候选方案
+- 新增原生搜索 ViewModel、一嗨/神州 Mock 车源、Mock 路线成本和推荐明细展示
+- 新增 ViewModel 回归测试，覆盖默认搜索能返回排序结果并选中首条候选
+
+### Changed
+- README 更新为当前原生 Mock 比价工具状态，不再描述为占位骨架
+
 ## [0.2.4] - 2026-05-29
 
 ### Fixed

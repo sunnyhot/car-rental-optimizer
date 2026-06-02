@@ -9,7 +9,7 @@ public enum PlatformId: String, Codable, Equatable, CaseIterable {
 }
 
 /// How the rental vehicle should be returned.
-public enum ReturnMode: String, Codable, Equatable {
+public enum ReturnMode: String, Codable, Equatable, CaseIterable {
     case sameStore = "same-store"
     case differentStore = "different-store"
 }
@@ -52,14 +52,14 @@ public struct GeoPoint: Codable, Equatable {
 
 /// A rental search request.
 public struct SearchRequest: Codable, Equatable {
-    public let origin: GeoPoint
-    public let originLabel: String
-    public let pickupAt: String
-    public let returnAt: String
-    public let returnMode: ReturnMode
-    public let radiusKm: Double
-    public let vehicleQuery: String
-    public let platforms: [PlatformId]
+    public var origin: GeoPoint
+    public var originLabel: String
+    public var pickupAt: String
+    public var returnAt: String
+    public var returnMode: ReturnMode
+    public var radiusKm: Double
+    public var vehicleQuery: String
+    public var platforms: [PlatformId]
 
     public init(
         origin: GeoPoint,
@@ -83,7 +83,7 @@ public struct SearchRequest: Codable, Equatable {
 }
 
 /// A rental store / pickup location.
-public struct Store: Codable, Equatable {
+public struct Store: Codable, Equatable, Identifiable {
     public let id: String
     public let platform: PlatformId
     public let name: String
@@ -115,7 +115,7 @@ public struct Store: Codable, Equatable {
 }
 
 /// A rental listing from a platform.
-public struct RentalListing: Codable, Equatable {
+public struct RentalListing: Codable, Equatable, Identifiable {
     public let id: String
     public let platform: PlatformId
     public let store: Store
@@ -192,7 +192,9 @@ public struct RouteEstimate: Codable, Equatable {
 }
 
 /// A fully scored and ranked rental recommendation.
-public struct Recommendation: Codable, Equatable {
+public struct Recommendation: Codable, Equatable, Identifiable {
+    public var id: String { listing.id }
+
     public let listing: RentalListing
     public let match: VehicleMatch
     public let taxiRoute: RouteEstimate

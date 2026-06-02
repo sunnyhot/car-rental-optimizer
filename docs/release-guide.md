@@ -46,7 +46,7 @@
 版本号定义在两个位置，**必须保持一致**：
 
 1. `Sources/CarRentalOptimizer/AppInfo.swift` — `AppInfo.version`
-2. `Sources/CarRentalOptimizer/Resources/Info.plist` — `CFBundleShortVersionString` + `CFBundleVersion`
+2. `native/Info.plist` — `CFBundleShortVersionString` + `CFBundleVersion`
 
 ### 版本号规范
 
@@ -128,7 +128,7 @@ mkdir -p "build/租车总成本比较.app/Contents/Resources"
 cp .build/release/CarRentalOptimizer "build/租车总成本比较.app/Contents/MacOS/"
 
 # 复制 Info.plist
-cp Sources/CarRentalOptimizer/Resources/Info.plist "build/租车总成本比较.app/Contents/"
+cp native/Info.plist "build/租车总成本比较.app/Contents/"
 
 # 复制 Sparkle.framework
 cp -R .build/release/Sparkle.framework "build/租车总成本比较.app/Contents/Frameworks/"

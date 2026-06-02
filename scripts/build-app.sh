@@ -20,6 +20,14 @@ mkdir -p "${APP_BUNDLE}/Contents/Resources"
 # Copy executable
 cp ".build/release/CarRentalOptimizer" "${APP_BUNDLE}/Contents/MacOS/"
 
+# Ensure embedded frameworks are resolvable when launched from the .app bundle.
+EXECUTABLE_PATH="${APP_BUNDLE}/Contents/MacOS/CarRentalOptimizer"
+FRAMEWORK_RPATH="@executable_path/../Frameworks"
+if ! otool -l "${EXECUTABLE_PATH}" | grep -q "${FRAMEWORK_RPATH}"; then
+    install_name_tool -add_rpath "${FRAMEWORK_RPATH}" "${EXECUTABLE_PATH}"
+    echo "    Added framework rpath ${FRAMEWORK_RPATH}"
+fi
+
 # Copy Info.plist
 if [ -f "native/Info.plist" ]; then
     cp "native/Info.plist" "${APP_BUNDLE}/Contents/Info.plist"
@@ -49,19 +57,12 @@ fi
 codesign --deep --force --sign - "${APP_BUNDLE}"
 echo "    Ad-hoc signed ${APP_NAME}.app"
 
-# Verify signature
-echo "==> Verifying signature..."
-if codesign --verify --deep --strict "${APP_BUNDLE}" 2>&1; then
-    echo "    Signature OK (strict) "
-else
-    echo "    Strict verification failed, trying non-strict..."
-    codesign --verify --deep "${APP_BUNDLE}"
-    echo "    Signature OK (non-strict)"
-fi
-
 # Clear quarantine attributes
 xattr -cr "${APP_BUNDLE}"
 echo "    Cleared quarantine attributes"
+
+echo "==> Verifying app bundle..."
+"$(dirname "$0")/verify-app-bundle.sh" "${APP_BUNDLE}"
 
 echo "==> App bundle created at ${APP_BUNDLE}"
 echo ""

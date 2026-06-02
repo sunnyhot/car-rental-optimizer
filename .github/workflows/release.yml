@@ -47,43 +47,15 @@ jobs:
       - name: Resolve dependencies
         run: swift package resolve 2>&1 || true
 
-      - name: Build Swift package
-        run: swift build -c release 2>&1 || { echo "swift build failed"; exit 1; }
-
-      - name: Create .app bundle
-        run: |
-          APP_NAME="租车总成本比较"
-          BUILD_DIR="build"
-          APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
-          mkdir -p "${APP_BUNDLE}/Contents/MacOS"
-          mkdir -p "${APP_BUNDLE}/Contents/Frameworks"
-          mkdir -p "${APP_BUNDLE}/Contents/Resources"
-          cp ".build/release/CarRentalOptimizer" "${APP_BUNDLE}/Contents/MacOS/"
-          cp native/Info.plist "${APP_BUNDLE}/Contents/Info.plist"
-          SPARKLE_FW=$(find .build -name "Sparkle.framework" -type d -maxdepth 5 | head -1)
-          if [ -n "${SPARKLE_FW}" ]; then cp -R "${SPARKLE_FW}" "${APP_BUNDLE}/Contents/Frameworks/"; fi
-          echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
-
-      - name: Sign .app bundle
-        run: |
-          APP_BUNDLE="build/租车总成本比较.app"
-          if [ -d "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework" ]; then
-            codesign --force --sign - "${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
-          fi
-          codesign --deep --force --sign - "${APP_BUNDLE}"
-          codesign --verify --deep "${APP_BUNDLE}" 2>&1 || echo "Warning: codesign verify non-strict OK"
-          xattr -cr "${APP_BUNDLE}"
-
-      - name: Verify signature
-        run: |
-          codesign --verify --deep "build/租车总成本比较.app" 2>&1 || echo "Warning: codesign verify failed, but ad-hoc signing is sufficient for distribution"
+      - name: Build and verify .app bundle
+        run: bash scripts/build-app.sh
 
       - name: Create ZIP archive
-        run: python3 scripts/create-zip.py "build/租车总成本比较.app" "租车总成本比较-${{ github.ref_name }}.zip"
+        run: python3 scripts/create-zip.py "build/租车总成本比较.app" "CarRentalOptimizer-${{ github.ref_name }}.zip"
 
       - name: Generate SHA256 checksum
         run: |
-          shasum -a 256 "租车总成本比较-${{ github.ref_name }}.zip" > "checksums-${{ github.ref_name }}.txt"
+          shasum -a 256 "CarRentalOptimizer-${{ github.ref_name }}.zip" > "checksums-${{ github.ref_name }}.txt"
           cat "checksums-${{ github.ref_name }}.txt"
 
       - name: Create GitHub Release
@@ -92,5 +64,5 @@ jobs:
           name: "租车总成本比较 ${{ github.ref_name }}"
           generate_release_notes: true
           files: |
-            租车总成本比较-${{ github.ref_name }}.zip
+            CarRentalOptimizer-${{ github.ref_name }}.zip
             checksums-${{ github.ref_name }}.txt
