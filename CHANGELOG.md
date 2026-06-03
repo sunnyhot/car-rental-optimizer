@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.2] - 2026-06-03
+
+### Added
+- 原生 SwiftUI 版本新增内嵌一嗨/神州官方页面，搜索时自动读取当前页面文本并解析候选方案，不再要求用户复制搜索结果。
+
+### Changed
+- 检查更新改为只读取 GitHub Releases latest 页面跳转，不再请求 `api.github.com`。
+- 更新 release 安装脚本默认版本为 v0.5.2。
+
 ## [0.5.1] - 2026-06-03
 
 ### Fixed

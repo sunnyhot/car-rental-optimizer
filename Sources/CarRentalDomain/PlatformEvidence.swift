@@ -52,7 +52,7 @@ public struct PlatformEvidenceResult: Codable, Equatable {
 public func parsePlatformEvidence(input: PlatformEvidenceInput, request: SearchRequest) -> PlatformEvidenceResult {
     let trimmedText = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmedText.isEmpty {
-        return result(input: input, kind: .waitingForEvidence, message: "等待粘贴\(input.platform.defaultLabel)官方搜索页面内容。")
+        return result(input: input, kind: .waitingForEvidence, message: "等待在\(input.platform.defaultLabel)官方页面完成搜索。")
     }
 
     if containsAny(trimmedText, captchaSignals) {

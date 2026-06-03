@@ -16,7 +16,7 @@ struct DetailPanelView: View {
                         .foregroundStyle(.secondary)
                     Text("等待结果")
                         .font(.headline)
-                    Text("识别到官方车源后，这里会显示费用拆分和路线估算。")
+                    Text("读取到官方车源后，这里会显示费用拆分和路线估算。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

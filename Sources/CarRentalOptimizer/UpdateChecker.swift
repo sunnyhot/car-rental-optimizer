@@ -66,40 +66,18 @@ extension URLSession: ReleaseDataLoading {
 }
 
 struct GitHubReleaseFetcher: ReleaseFetching {
-    let apiEndpoint: URL
     let latestReleaseURL: URL
     private let dataLoader: any ReleaseDataLoading
 
     init(
-        apiEndpoint: URL = URL(string: "https://api.github.com/repos/sunnyhot/car-rental-optimizer/releases/latest")!,
         latestReleaseURL: URL = URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/latest")!,
         dataLoader: any ReleaseDataLoading = URLSession.shared
     ) {
-        self.apiEndpoint = apiEndpoint
         self.latestReleaseURL = latestReleaseURL
         self.dataLoader = dataLoader
     }
 
     func latestRelease() async throws -> GitHubRelease {
-        do {
-            return try await latestReleaseFromAPI()
-        } catch {
-            return try await latestReleaseFromRedirect()
-        }
-    }
-
-    private func latestReleaseFromAPI() async throws -> GitHubRelease {
-        var request = URLRequest(url: apiEndpoint)
-        request.setValue("CarRentalOptimizer/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await dataLoader.loadData(for: request)
-        try validateSuccess(response)
-
-        return try JSONDecoder().decode(GitHubRelease.self, from: data)
-    }
-
-    private func latestReleaseFromRedirect() async throws -> GitHubRelease {
         var request = URLRequest(url: latestReleaseURL)
         request.httpMethod = "HEAD"
         request.setValue("CarRentalOptimizer/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SearchPanelView: View {
     @EnvironmentObject var viewModel: SearchViewModel
+    @EnvironmentObject var browserStore: PlatformBrowserStore
     @State private var pickupDate = AppDateRules.today
     @State private var returnDate = AppDateRules.addingDays(1, to: AppDateRules.today)
 
@@ -13,7 +14,7 @@ struct SearchPanelView: View {
                     Text("搜索条件")
                         .font(.headline)
                     Spacer()
-                    Text("真实证据")
+                    Text("自动读取")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -64,7 +65,7 @@ struct SearchPanelView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("平台与官方页面")
+                    Text("平台")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -81,9 +82,9 @@ struct SearchPanelView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(viewModel.request.platforms, id: \.self) { platform in
-                        PlatformEvidenceEditor(platform: platform)
+                        PlatformStatusCard(platform: platform)
                     }
                 }
 
@@ -119,8 +120,9 @@ struct SearchPanelView: View {
     }
 }
 
-private struct PlatformEvidenceEditor: View {
+private struct PlatformStatusCard: View {
     @EnvironmentObject var viewModel: SearchViewModel
+    @EnvironmentObject var browserStore: PlatformBrowserStore
     let platform: PlatformId
 
     var body: some View {
@@ -131,34 +133,29 @@ private struct PlatformEvidenceEditor: View {
                     .font(.caption)
                     .fontWeight(.semibold)
                 Spacer()
-                if let url = URL(string: officialPlatformURL(for: platform)) {
-                    Link(destination: url) {
-                        Image(systemName: "arrow.up.right.square")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("打开\(platform.label)官方页面")
+                Button {
+                    browserStore.select(platform)
+                } label: {
+                    Image(systemName: "safari")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("切换到\(platform.label)官方页面")
+
+                Button {
+                    browserStore.loadHome(platform)
+                } label: {
+                    Image(systemName: "house")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("打开\(platform.label)首页")
             }
 
             Text(viewModel.platformStatus(for: platform).message)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
-
-            TextEditor(text: Binding(
-                get: { viewModel.evidenceText(for: platform) },
-                set: { viewModel.updateEvidenceText($0, for: platform) }
-            ))
-            .font(.caption)
-            .frame(minHeight: 82)
-            .scrollContentBackground(.hidden)
-            .background(Color(nsColor: .textBackgroundColor))
-            .overlay(
-                RoundedRectangle(cornerRadius: 5)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-            )
-            .cornerRadius(5)
         }
         .padding(10)
         .background(Color(nsColor: .controlBackgroundColor))

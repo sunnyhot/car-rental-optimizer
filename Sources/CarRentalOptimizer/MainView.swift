@@ -35,8 +35,14 @@ struct MainView: View {
                 SearchPanelView()
                     .frame(minWidth: 320, idealWidth: 360, maxWidth: 440)
 
-                ResultPanelView()
-                    .frame(minWidth: 360, idealWidth: 440)
+                VSplitView {
+                    PlatformBrowserPanel()
+                        .frame(minWidth: 480, minHeight: 360)
+
+                    ResultPanelView()
+                        .frame(minWidth: 480, minHeight: 240)
+                }
+                .frame(minWidth: 520, idealWidth: 620)
 
                 DetailPanelView()
                     .frame(minWidth: 300, idealWidth: 360, maxWidth: 420)

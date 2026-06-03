@@ -6,18 +6,27 @@ import SwiftUI
 final class SearchViewModel: ObservableObject {
     @Published var request = AppDefaults.searchRequest
     @Published var results: [Recommendation] = []
-    @Published var platformEvidenceText: [PlatformId: String] = [:]
     @Published var platformStatuses: [PlatformEvidenceStatus] = AppDefaults.searchRequest.platforms.map {
         PlatformEvidenceStatus(
             platform: $0,
             kind: .waitingForEvidence,
-            message: "等待粘贴\($0.label)官方搜索页面内容。",
+            message: "等待在\($0.label)官方页面完成搜索。",
             sourceUrl: officialPlatformURL(for: $0)
         )
     }
     @Published var selectedId = ""
     @Published var isSearching = false
-    @Published var status = "粘贴官方页面数据后，点击「开始比较」进行查询。"
+    @Published var status = "在官方页面完成搜索后，点击「开始比较」自动读取当前页面。"
+
+    private let snapshotProvider: PlatformSnapshotProviding
+
+    init() {
+        self.snapshotProvider = EmptyPlatformSnapshotProvider()
+    }
+
+    init(snapshotProvider: PlatformSnapshotProviding) {
+        self.snapshotProvider = snapshotProvider
+    }
 
     var selected: Recommendation? {
         results.first { $0.id == selectedId } ?? results.first
@@ -27,21 +36,27 @@ final class SearchViewModel: ObservableObject {
         isSearching = true
         results = []
         selectedId = ""
-        status = "正在读取官方页面证据，并计算到店路线估算成本..."
+        status = "正在读取官方页面，并计算到店路线估算成本..."
 
         defer {
             isSearching = false
         }
 
-        let evidenceResults = request.platforms.map { platform in
-            parsePlatformEvidence(
-                input: PlatformEvidenceInput(
-                    platform: platform,
-                    text: platformEvidenceText[platform] ?? "",
-                    sourceUrl: officialPlatformURL(for: platform)
-                ),
-                request: request
-            )
+        var evidenceResults: [PlatformEvidenceResult] = []
+        for platform in request.platforms {
+            do {
+                let snapshot = try await snapshotProvider.snapshot(for: platform)
+                evidenceResults.append(parsePlatformEvidence(
+                    input: PlatformEvidenceInput(
+                        platform: platform,
+                        text: snapshot.text,
+                        sourceUrl: snapshot.url
+                    ),
+                    request: request
+                ))
+            } catch {
+                evidenceResults.append(snapshotFailureResult(platform: platform, error: error))
+            }
         }
         platformStatuses = evidenceResults.map(\.status)
 
@@ -80,22 +95,11 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
-    func updateEvidenceText(_ text: String, for platform: PlatformId) {
-        platformEvidenceText[platform] = text
-        if !results.isEmpty {
-            status = "官方页面数据已变更，点击「开始比较」重新计算总成本。"
-        }
-    }
-
-    func evidenceText(for platform: PlatformId) -> String {
-        platformEvidenceText[platform] ?? ""
-    }
-
     func platformStatus(for platform: PlatformId) -> PlatformEvidenceStatus {
         platformStatuses.first { $0.platform == platform } ?? PlatformEvidenceStatus(
             platform: platform,
             kind: .waitingForEvidence,
-            message: "等待粘贴\(platform.label)官方搜索页面内容。",
+            message: "等待在\(platform.label)官方页面完成搜索。",
             sourceUrl: officialPlatformURL(for: platform)
         )
     }
@@ -118,9 +122,22 @@ func officialPlatformURL(for platform: PlatformId) -> String {
 
 private func formatNoOfficialListingsStatus(_ evidenceResults: [PlatformEvidenceResult]) -> String {
     if evidenceResults.allSatisfy({ $0.status.kind == .waitingForEvidence }) {
-        return "等待官方页面数据：请打开平台完成搜索后，把页面文本粘贴进来。"
+        return "等待官方页面搜索结果：请在内嵌官方页面完成搜索后再次比较。"
     }
 
     let messages = evidenceResults.map(\.status.message)
     return messages.joined(separator: "；")
+}
+
+private func snapshotFailureResult(platform: PlatformId, error: Error) -> PlatformEvidenceResult {
+    PlatformEvidenceResult(
+        platform: platform,
+        status: PlatformEvidenceStatus(
+            platform: platform,
+            kind: .parseFailed,
+            message: "\(platform.label)官方页面读取失败：\(error.localizedDescription)",
+            sourceUrl: officialPlatformURL(for: platform)
+        ),
+        listings: []
+    )
 }
