@@ -9,7 +9,7 @@ struct UpdateCheckerTests {
     func versionComparisonHandlesPrefixAndMultiDigitComponents() {
         #expect(AppVersion("v0.10.0") > AppVersion("0.9.9"))
         #expect(AppVersion("1.0") == AppVersion("1.0.0"))
-        #expect(AppVersion("0.5.0") > AppVersion("0.4.0"))
+        #expect(AppVersion("0.5.1") > AppVersion("0.5.0"))
     }
 
     @Test("Checker reports newer GitHub release")
@@ -17,9 +17,9 @@ struct UpdateCheckerTests {
         let checker = UpdateChecker(
             currentVersion: "0.4.0",
             releaseFetcher: StubReleaseFetcher(release: GitHubRelease(
-                tagName: "v0.5.0",
-                name: "租车比价助手 v0.5.0",
-                htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.5.0")!
+                tagName: "v0.5.1",
+                name: "租车比价助手 v0.5.1",
+                htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.5.1")!
             ))
         )
 
@@ -27,18 +27,18 @@ struct UpdateCheckerTests {
 
         #expect(checker.isChecking == false)
         #expect(checker.alert?.kind == .updateAvailable)
-        #expect(checker.alert?.title == "发现新版本 0.5.0")
-        #expect(checker.alert?.releaseURL?.absoluteString.contains("v0.5.0") == true)
+        #expect(checker.alert?.title == "发现新版本 0.5.1")
+        #expect(checker.alert?.releaseURL?.absoluteString.contains("v0.5.1") == true)
     }
 
     @Test("Checker reports current version up to date")
     func checkerReportsCurrentVersionUpToDate() async {
         let checker = UpdateChecker(
-            currentVersion: "0.5.0",
+            currentVersion: "0.5.1",
             releaseFetcher: StubReleaseFetcher(release: GitHubRelease(
-                tagName: "v0.5.0",
-                name: "租车比价助手 v0.5.0",
-                htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.5.0")!
+                tagName: "v0.5.1",
+                name: "租车比价助手 v0.5.1",
+                htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.5.1")!
             ))
         )
 
@@ -51,7 +51,7 @@ struct UpdateCheckerTests {
     @Test("Checker reports fetch failures")
     func checkerReportsFetchFailures() async {
         let checker = UpdateChecker(
-            currentVersion: "0.5.0",
+            currentVersion: "0.5.1",
             releaseFetcher: StubReleaseFetcher(error: URLError(.notConnectedToInternet))
         )
 
@@ -59,6 +59,28 @@ struct UpdateCheckerTests {
 
         #expect(checker.alert?.kind == .failed)
         #expect(checker.alert?.title == "检查更新失败")
+    }
+
+    @Test("Fetcher falls back to latest release redirect when GitHub API is rate limited")
+    func fetcherFallsBackToLatestRedirectWhenAPIRateLimited() async throws {
+        let apiURL = URL(string: "https://api.github.com/repos/sunnyhot/car-rental-optimizer/releases/latest")!
+        let latestURL = URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/latest")!
+        let redirectedURL = URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.5.2")!
+        let dataLoader = StubReleaseDataLoader(results: [
+            .success((Data(), httpResponse(url: apiURL, statusCode: 403))),
+            .success((Data(), httpResponse(url: redirectedURL, statusCode: 200))),
+        ])
+        let fetcher = GitHubReleaseFetcher(
+            apiEndpoint: apiURL,
+            latestReleaseURL: latestURL,
+            dataLoader: dataLoader
+        )
+
+        let release = try await fetcher.latestRelease()
+
+        #expect(release.tagName == "v0.5.2")
+        #expect(release.htmlURL == redirectedURL)
+        #expect(dataLoader.requestedURLs == [apiURL, latestURL])
     }
 }
 
@@ -82,4 +104,32 @@ private struct StubReleaseFetcher: ReleaseFetching {
         }
         return release!
     }
+}
+
+private final class StubReleaseDataLoader: ReleaseDataLoading {
+    private var results: [Result<(Data, URLResponse), Error>]
+    private(set) var requestedURLs: [URL] = []
+
+    init(results: [Result<(Data, URLResponse), Error>]) {
+        self.results = results
+    }
+
+    func loadData(for request: URLRequest) async throws -> (Data, URLResponse) {
+        if let url = request.url {
+            requestedURLs.append(url)
+        }
+        guard !results.isEmpty else {
+            throw URLError(.badServerResponse)
+        }
+        return try results.removeFirst().get()
+    }
+}
+
+private func httpResponse(url: URL, statusCode: Int) -> HTTPURLResponse {
+    HTTPURLResponse(
+        url: url,
+        statusCode: statusCode,
+        httpVersion: "HTTP/1.1",
+        headerFields: nil
+    )!
 }

@@ -55,25 +55,88 @@ protocol ReleaseFetching {
     func latestRelease() async throws -> GitHubRelease
 }
 
-struct GitHubReleaseFetcher: ReleaseFetching {
-    let endpoint: URL
+protocol ReleaseDataLoading {
+    func loadData(for request: URLRequest) async throws -> (Data, URLResponse)
+}
 
-    init(endpoint: URL = URL(string: "https://api.github.com/repos/sunnyhot/car-rental-optimizer/releases/latest")!) {
-        self.endpoint = endpoint
+extension URLSession: ReleaseDataLoading {
+    func loadData(for request: URLRequest) async throws -> (Data, URLResponse) {
+        try await data(for: request)
+    }
+}
+
+struct GitHubReleaseFetcher: ReleaseFetching {
+    let apiEndpoint: URL
+    let latestReleaseURL: URL
+    private let dataLoader: any ReleaseDataLoading
+
+    init(
+        apiEndpoint: URL = URL(string: "https://api.github.com/repos/sunnyhot/car-rental-optimizer/releases/latest")!,
+        latestReleaseURL: URL = URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/latest")!,
+        dataLoader: any ReleaseDataLoading = URLSession.shared
+    ) {
+        self.apiEndpoint = apiEndpoint
+        self.latestReleaseURL = latestReleaseURL
+        self.dataLoader = dataLoader
     }
 
     func latestRelease() async throws -> GitHubRelease {
-        var request = URLRequest(url: endpoint)
+        do {
+            return try await latestReleaseFromAPI()
+        } catch {
+            return try await latestReleaseFromRedirect()
+        }
+    }
+
+    private func latestReleaseFromAPI() async throws -> GitHubRelease {
+        var request = URLRequest(url: apiEndpoint)
         request.setValue("CarRentalOptimizer/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await dataLoader.loadData(for: request)
+        try validateSuccess(response)
+
+        return try JSONDecoder().decode(GitHubRelease.self, from: data)
+    }
+
+    private func latestReleaseFromRedirect() async throws -> GitHubRelease {
+        var request = URLRequest(url: latestReleaseURL)
+        request.httpMethod = "HEAD"
+        request.setValue("CarRentalOptimizer/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+
+        let (_, response) = try await dataLoader.loadData(for: request)
+        try validateSuccess(response)
+
+        let finalURL = response.url ?? latestReleaseURL
+        guard let tagName = Self.releaseTag(from: finalURL) else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        return GitHubRelease(
+            tagName: tagName,
+            name: nil,
+            htmlURL: finalURL
+        )
+    }
+
+    private func validateSuccess(_ response: URLResponse) throws {
         if let httpResponse = response as? HTTPURLResponse,
            !(200...299).contains(httpResponse.statusCode) {
             throw URLError(.badServerResponse)
         }
+    }
 
-        return try JSONDecoder().decode(GitHubRelease.self, from: data)
+    static func releaseTag(from url: URL) -> String? {
+        let pathComponents = url.pathComponents
+        guard let tagIndex = pathComponents.firstIndex(of: "tag") else {
+            return nil
+        }
+        let versionIndex = pathComponents.index(after: tagIndex)
+        guard pathComponents.indices.contains(versionIndex) else {
+            return nil
+        }
+        return pathComponents[versionIndex]
     }
 }
 

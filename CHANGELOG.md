@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.1] - 2026-06-03
+
+### Fixed
+- 检查更新增加 GitHub `/releases/latest` 重定向兜底；即使 GitHub API 匿名请求被限流，也能从最新 release tag 判断是否有新版本。
+- 更新 release 安装脚本默认版本为 v0.5.1。
+
 ## [0.5.0] - 2026-06-03
 
 ### Added
