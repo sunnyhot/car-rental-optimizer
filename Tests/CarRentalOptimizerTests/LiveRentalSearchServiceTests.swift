@@ -1,3 +1,4 @@
+import CarRentalDomain
 import Foundation
 import JavaScriptCore
 import Testing
@@ -77,6 +78,39 @@ struct LiveRentalSearchServiceTests {
 
         #expect(decodedPrice?.toDouble() == 123.5)
     }
+
+    @Test("eHi blank vehicle query probes nearby stores until one has priced listings")
+    func ehiBlankVehicleQueryProbesNearbyStoresUntilPriced() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("nearestStoreProbeLimit = 12"))
+        #expect(script.contains("storeCandidates.slice(0, nearestStoreProbeLimit)"))
+        #expect(script.contains("listingsBeforeStore"))
+        #expect(script.contains("!hasVehicleQuery && Object.keys(listingsByKey).length > listingsBeforeStore"))
+        #expect(!script.contains("storeCandidates.slice(0, 1)"))
+    }
+
+    @Test("Blank vehicle query uses nearest store with available listings")
+    func blankVehicleQueryUsesNearestStoreWithAvailableListings() {
+        let emptyNearest = StoreListingsBatch(distanceKm: 1.2, listings: [])
+        let availableSecond = StoreListingsBatch(
+            distanceKm: 1.8,
+            listings: [
+                makeListing(id: "second-lavida", storeId: "second", distanceKm: 1.8),
+                makeListing(id: "second-kruze", storeId: "second", distanceKm: 1.8),
+            ]
+        )
+        let fartherAvailable = StoreListingsBatch(
+            distanceKm: 3.4,
+            listings: [
+                makeListing(id: "farther-camry", storeId: "farther", distanceKm: 3.4),
+            ]
+        )
+
+        let selected = nearestAvailableStoreListings(from: [fartherAvailable, emptyNearest, availableSecond])
+
+        #expect(selected.map(\.id) == ["second-lavida", "second-kruze"])
+    }
 }
 
 private func date(_ value: String) -> Date {
@@ -84,4 +118,29 @@ private func date(_ value: String) -> Date {
     formatter.dateFormat = "yyyy-MM-dd HH:mm"
     formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
     return formatter.date(from: value)!
+}
+
+private func makeListing(id: String, storeId: String, distanceKm: Double) -> RentalListing {
+    RentalListing(
+        id: id,
+        platform: .carInc,
+        store: Store(
+            id: storeId,
+            platform: .carInc,
+            name: "\(storeId) store",
+            city: "北京",
+            address: "北京通州",
+            location: GeoPoint(lat: 39.9 + distanceKm / 100, lng: 116.65),
+            distanceKm: distanceKm,
+            hours: "08:00-21:00"
+        ),
+        vehicleName: id,
+        vehicleClass: "",
+        basePrice: 100,
+        platformFees: 0,
+        insuranceFees: 0,
+        oneWayFee: 0,
+        sourceUrl: "https://m.zuche.com/",
+        dataCompleteness: 0.88
+    )
 }

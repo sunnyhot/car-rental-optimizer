@@ -61,6 +61,18 @@ struct SnapshotRentalSearchService: RentalSearchProviding {
     }
 }
 
+struct StoreListingsBatch {
+    let distanceKm: Double
+    let listings: [RentalListing]
+}
+
+func nearestAvailableStoreListings(from batches: [StoreListingsBatch]) -> [RentalListing] {
+    batches
+        .sorted { $0.distanceKm < $1.distanceKm }
+        .first { !$0.listings.isEmpty }?
+        .listings ?? []
+}
+
 // MARK: - Zuche
 
 private final class ZucheAPIClient {
@@ -94,6 +106,7 @@ private final class ZucheAPIClient {
             let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
             let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             var listingsByKey: [String: RentalListing] = [:]
+            var nearestStoreBatches: [StoreListingsBatch] = []
             var queryErrors: [String] = []
 
             for anchor in queryAnchors(candidates: candidates, request: request) {
@@ -121,27 +134,16 @@ private final class ZucheAPIClient {
                     guard let store = makeStore(from: dept, request: request) else { continue }
                     if hasVehicleQuery {
                         guard store.distanceKm <= request.radiusKm else { continue }
-                    } else {
-                        guard store.id == candidates.first?.id else { continue }
                     }
 
-                    for model in dept.models where model.bookFlag != false && model.havePriceFlag != false {
-                        guard let dailyPrice = model.price else { continue }
-                        let listing = RentalListing(
-                            id: "car-inc-\(store.id)-\(model.modelId)",
-                            platform: .carInc,
-                            store: store,
-                            vehicleName: model.modelName,
-                            vehicleClass: model.modelDesc,
-                            basePrice: dailyPrice * Double(rentalDays(request)),
-                            platformFees: 0,
-                            insuranceFees: 0,
-                            oneWayFee: 0,
-                            sourceUrl: "https://m.zuche.com/#/rent/list",
-                            dataCompleteness: 0.88,
-                            warnings: [.partialPrice]
-                        )
-                        let key = "\(store.id)-\(model.modelName)"
+                    let deptListings = listings(from: dept.models, store: store, request: request)
+                    if !hasVehicleQuery {
+                        nearestStoreBatches.append(StoreListingsBatch(distanceKm: store.distanceKm, listings: deptListings))
+                        continue
+                    }
+
+                    for listing in deptListings {
+                        let key = "\(store.id)-\(listing.vehicleName)"
                         if let old = listingsByKey[key], old.basePrice <= listing.basePrice {
                             continue
                         }
@@ -150,7 +152,9 @@ private final class ZucheAPIClient {
                 }
             }
 
-            let listings = Array(listingsByKey.values)
+            let listings = hasVehicleQuery
+                ? Array(listingsByKey.values)
+                : nearestAvailableStoreListings(from: nearestStoreBatches)
             guard !listings.isEmpty else {
                 if !queryErrors.isEmpty {
                     return status(.parseFailed, "神州 API 部分查询失败：\(queryErrors.prefix(2).joined(separator: "；"))")
@@ -227,13 +231,13 @@ private final class ZucheAPIClient {
     private func candidateStores(_ stores: [ZucheDept], request: SearchRequest) -> [Store] {
         let sorted = stores.compactMap { makeStore(from: $0, request: request) }.sorted { $0.distanceKm < $1.distanceKm }
         let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasVehicleQuery ? sorted.filter { $0.distanceKm <= request.radiusKm } : Array(sorted.prefix(1))
+        return hasVehicleQuery ? sorted.filter { $0.distanceKm <= request.radiusKm } : sorted
     }
 
     private func queryAnchors(candidates: [Store], request: SearchRequest) -> [GeoPoint] {
         let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasVehicleQuery else {
-            return candidates.first.map { [$0.location] } ?? []
+            return [request.origin]
         }
 
         let maxAnchorCount = 6
@@ -251,6 +255,29 @@ private final class ZucheAPIClient {
         }
 
         return anchors
+    }
+
+    private func listings(from models: [ZucheModel], store: Store, request: SearchRequest) -> [RentalListing] {
+        models.compactMap { model in
+            guard model.bookFlag != false && model.havePriceFlag != false,
+                  let dailyPrice = model.price
+            else { return nil }
+
+            return RentalListing(
+                id: "car-inc-\(store.id)-\(model.modelId)",
+                platform: .carInc,
+                store: store,
+                vehicleName: model.modelName,
+                vehicleClass: model.modelDesc,
+                basePrice: dailyPrice * Double(rentalDays(request)),
+                platformFees: 0,
+                insuranceFees: 0,
+                oneWayFee: 0,
+                sourceUrl: "https://m.zuche.com/#/rent/list",
+                dataCompleteness: 0.88,
+                warnings: [.partialPrice]
+            )
+        }
     }
 
     private func makeStore(from dept: ZucheDept, request: SearchRequest) -> Store? {
@@ -534,7 +561,10 @@ func makeEhiSearchScript(json: String) -> String {
           .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng))
           .map(s => ({ ...s, distanceKm: distanceKm(origin, { lat: s.lat, lng: s.lng }) }))
           .sort((a, b) => a.distanceKm - b.distanceKm);
-        const candidates = hasVehicleQuery ? storeCandidates.filter(s => s.distanceKm <= request.radiusKm) : storeCandidates.slice(0, 1);
+        const nearestStoreProbeLimit = 12;
+        const candidates = hasVehicleQuery
+          ? storeCandidates.filter(s => s.distanceKm <= request.radiusKm)
+          : storeCandidates.slice(0, nearestStoreProbeLimit);
         if (!candidates.length) {
           const message = hasVehicleQuery ? '一嗨在当前范围内没有可用取车点。' : '一嗨当前城市没有可用取车点。';
           return JSON.stringify({ statusKind: 'unavailable', message, sourceUrl, listings: [] });
@@ -579,6 +609,7 @@ func makeEhiSearchScript(json: String) -> String {
         let stockRequests = 0;
         let carsSeen = 0;
         for (const store of candidates) {
+          const listingsBeforeStore = Object.keys(listingsByKey).length;
           const payload = {
             stockType: 1,
             whereFilter: null,
@@ -649,6 +680,7 @@ func makeEhiSearchScript(json: String) -> String {
               };
               if (!listingsByKey[key] || listingsByKey[key].basePrice > listing.basePrice) listingsByKey[key] = listing;
             }
+            if (!hasVehicleQuery && Object.keys(listingsByKey).length > listingsBeforeStore) break;
           } catch (error) {
             const message = String(error && (error.message || error.stack) || error);
             if (message.includes('401')) {
