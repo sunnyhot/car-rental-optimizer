@@ -410,9 +410,24 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
         const days = request.rentalDays || Math.max(1, Math.ceil((Date.parse(request.returnTime.replace(' ', 'T') + ':00+08:00') - Date.parse(request.pickupTime.replace(' ', 'T') + ':00+08:00')) / 86400000));
         const hasVehicleQuery = (request.vehicleQuery || '').trim().length > 0;
         const num = (value) => {
-          if (value === null || value === undefined) return null;
+          if (value === null || value === undefined || value === '') return null;
           const n = Number(String(value).replace(/[^0-9.]/g, ''));
           return Number.isFinite(n) ? n : null;
+        };
+        const firstNumber = (...values) => {
+          for (const value of values) {
+            const n = num(value);
+            if (Number.isFinite(n)) return n;
+          }
+          return null;
+        };
+        const firstText = (...values) => {
+          for (const value of values) {
+            if (value === null || value === undefined) continue;
+            const text = String(value).trim();
+            if (text.length) return text;
+          }
+          return '';
         };
         const distanceKm = (a, b) => {
           const rad = Math.PI / 180;
@@ -423,60 +438,144 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
           const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
           return 6371 * 2 * Math.asin(Math.sqrt(h));
         };
-        const cityListResp = await http.getEncrypt('/Address/City/List', {});
-        const cities = (cityListResp.data && cityListResp.data.result) || [];
+        const responseBody = (resp) => (resp && resp.data && (resp.data.result ?? resp.data.data ?? resp.data)) ?? (resp && (resp.result ?? resp.data)) ?? resp ?? {};
+        const shape = (value) => Array.isArray(value) ? `array(${value.length})` : `${typeof value}:${Object.keys(value || {}).slice(0, 8).join(',')}`;
+        const arraysFrom = (value) => {
+          if (Array.isArray(value)) return value;
+          if (!value || typeof value !== 'object') return [];
+          const direct = ['cities', 'cityList', 'allCities', 'hotCities', 'hotCityList', 'list', 'items', 'records']
+            .flatMap(key => Array.isArray(value[key]) ? value[key] : []);
+          if (direct.length) return direct;
+          return Object.values(value).flatMap(child => Array.isArray(child) ? child : []);
+        };
+        const cityName = (city) => firstText(city.city, city.cityName, city.name, city.shortName);
+        const cityId = (city) => city.cityId ?? city.id ?? city.cityCode;
+        const cityPoint = (city) => {
+          const lat = firstNumber(city.cityLat, city.lat, city.latitude, city.centerLat);
+          const lng = firstNumber(city.cityLon, city.cityLng, city.lon, city.lng, city.longitude, city.centerLng);
+          return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+        };
         const origin = { lat: request.origin.lat, lng: request.origin.lng };
-        let city = cities.find(c => (request.originLabel || '').includes(c.city));
+        const originLabel = request.originLabel || '';
+
+        const cityListResp = await http.getEncrypt('/Address/City/List', {});
+        const cityResult = responseBody(cityListResp);
+        const cities = arraysFrom(cityResult).filter(city => city && typeof city === 'object' && cityId(city) !== undefined);
+        if (!cities.length) {
+          return JSON.stringify({
+            statusKind: 'parse-failed',
+            message: `一嗨城市接口返回成功，但没有可解析城市：${shape(cityResult)}。`,
+            sourceUrl,
+            listings: []
+          });
+        }
+        let city = cities.find(candidate => {
+          const name = cityName(candidate);
+          const normalized = name.replace(/市$/, '');
+          return name && (originLabel.includes(name) || originLabel.includes(normalized));
+        });
         if (!city) {
           city = cities
-            .filter(c => num(c.defaultLocation) !== null || (num(c.cityLat) !== null && num(c.cityLon) !== null))
-            .map(c => ({ city: c, distance: distanceKm(origin, { lat: num(c.cityLat) || origin.lat, lng: num(c.cityLon) || origin.lng }) }))
+            .map(candidate => {
+              const point = cityPoint(candidate);
+              return point ? { city: candidate, distance: distanceKm(origin, point) } : null;
+            })
+            .filter(Boolean)
             .sort((a, b) => a.distance - b.distance)[0]?.city;
         }
         if (!city) {
-          return JSON.stringify({ statusKind: 'unavailable', message: '一嗨没有识别到当前位置对应的可租城市。', sourceUrl, listings: [] });
+          return JSON.stringify({ statusKind: 'unavailable', message: `一嗨没有识别到“${originLabel}”对应的可租城市。`, sourceUrl, listings: [] });
         }
-        const storeResp = await http.getEncrypt('/Address/ReservationBooking/List', { cityId: city.cityId, operationTime: request.pickupTime });
-        const groups = (storeResp.data && storeResp.data.result) || [];
-        const stores = [];
-        for (const group of groups) {
-          for (const district of (group.stores || [])) {
-            for (const store of (district.stores || [])) {
-              if (store.stores) {
-                for (const nested of store.stores) stores.push(nested);
-              } else {
-                stores.push(store);
-              }
-            }
+
+        const collectStores = (value, output = []) => {
+          if (!value) return output;
+          if (Array.isArray(value)) {
+            value.forEach(item => collectStores(item, output));
+            return output;
           }
+          if (typeof value !== 'object') return output;
+          const lat = firstNumber(value.amapPickupLatitude, value.pickupLatitude, value.latitude, value.lat, value.storeLat);
+          const lng = firstNumber(value.amapPickupLongitude, value.pickupLongitude, value.longitude, value.lng, value.storeLng);
+          const id = value.id ?? value.managerId ?? value.storeId ?? value.manageStoreId;
+          const name = firstText(value.name, value.shortName, value.storeName, value.managerName);
+          if (id !== undefined && name && Number.isFinite(lat) && Number.isFinite(lng)) {
+            output.push(value);
+          }
+          ['stores', 'storeList', 'children', 'items', 'list', 'records', 'data', 'result'].forEach(key => collectStores(value[key], output));
+          return output;
+        };
+        const storeResp = await http.getEncrypt('/Address/ReservationBooking/List', { cityId: cityId(city), operationTime: request.pickupTime });
+        const storeResult = responseBody(storeResp);
+        const storesById = {};
+        for (const store of collectStores(storeResult)) {
+          const id = String(store.id ?? store.managerId ?? store.storeId ?? store.manageStoreId);
+          storesById[id] = store;
         }
+        const stores = Object.values(storesById);
         const storeCandidates = stores
           .map(s => ({
             raw: s,
-            id: String(s.id || s.managerId),
-            name: s.name || s.shortName || '一嗨门店',
-            address: s.address || s.pickupAddress || '',
-            lat: num(s.amapPickupLatitude) || num(s.pickupLatitude),
-            lng: num(s.amapPickupLongitude) || num(s.pickupLongitude),
-            hours: ((s.fromTime || '').slice(11,16) || '以平台为准') + '-' + ((s.toTime || '').slice(11,16) || '')
+            id: String(s.id ?? s.managerId ?? s.storeId ?? s.manageStoreId),
+            name: firstText(s.name, s.shortName, s.storeName, '一嗨门店'),
+            address: firstText(s.address, s.pickupAddress, s.pickupDropoffAddress),
+            lat: firstNumber(s.amapPickupLatitude, s.pickupLatitude, s.latitude, s.lat, s.storeLat),
+            lng: firstNumber(s.amapPickupLongitude, s.pickupLongitude, s.longitude, s.lng, s.storeLng),
+            hours: `${firstText(String(s.fromTime || '').slice(11, 16), '以平台为准')}-${firstText(String(s.toTime || '').slice(11, 16), '')}`
           }))
           .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng))
           .map(s => ({ ...s, distanceKm: distanceKm(origin, { lat: s.lat, lng: s.lng }) }))
           .sort((a, b) => a.distanceKm - b.distanceKm);
         const candidates = hasVehicleQuery ? storeCandidates.filter(s => s.distanceKm <= request.radiusKm) : storeCandidates.slice(0, 1);
         if (!candidates.length) {
-          return JSON.stringify({ statusKind: 'unavailable', message: '一嗨在当前范围内没有可用取车点。', sourceUrl, listings: [] });
+          const message = hasVehicleQuery ? '一嗨在当前范围内没有可用取车点。' : '一嗨当前城市没有可用取车点。';
+          return JSON.stringify({ statusKind: 'unavailable', message, sourceUrl, listings: [] });
         }
+
+        const carName = (item, car) => firstText(car.name, car.carTypeName, car.modelName, car.vehicleName, item.carTypeName, item.modelName, item.vehicleName, item.name);
+        const carId = (item, car, name) => firstText(car.id, car.carTypeId, car.modelId, item.carTypeId, item.modelId, item.id, name);
+        const collectCarItems = (value, output = []) => {
+          if (!value) return output;
+          if (Array.isArray(value)) {
+            value.forEach(item => collectCarItems(item, output));
+            return output;
+          }
+          if (typeof value !== 'object') return output;
+          const car = value.carType || value.car || value.vehicle || value.model || value;
+          const looksLikeCar = carName(value, car) && (
+            value.carType ||
+            ['baseAvgAmount', 'avgAmount', 'baseAmount', 'price', 'dailyPrice', 'dayPrice', 'totalAmount', 'totalPrice', 'lowPrice']
+              .some(key => value[key] !== undefined || car[key] !== undefined)
+          );
+          if (looksLikeCar) output.push(value);
+          ['bookingAvailableCarTypes', 'unAvailableCarTypes', 'availableCarTypes', 'carTypes', 'carTypeList', 'vehicleList', 'carList', 'models', 'list', 'items', 'records']
+            .forEach(key => collectCarItems(value[key], output));
+          return output;
+        };
+        const priceFrom = (item, car) => {
+          const daily = firstNumber(
+            item.baseAvgAmount, item.avgAmount, item.baseAmount, item.price, item.dailyPrice, item.dayPrice, item.lowPrice,
+            car.baseAvgAmount, car.avgAmount, car.baseAmount, car.price, car.dailyPrice, car.dayPrice, car.lowPrice
+          );
+          if (Number.isFinite(daily) && daily > 0) return daily * days;
+          const total = firstNumber(
+            item.baseTotalAmount, item.totalAmount, item.totalPrice, item.orderTotalAmount, item.payAmount,
+            car.baseTotalAmount, car.totalAmount, car.totalPrice, car.orderTotalAmount, car.payAmount
+          );
+          return Number.isFinite(total) && total > 0 ? total : null;
+        };
+
         const listingsByKey = {};
         const verifyFailures = [];
+        const queryErrors = [];
         let stockRequests = 0;
+        let carsSeen = 0;
         for (const store of candidates) {
           const payload = {
             stockType: 1,
             whereFilter: null,
-            pickupDto: { cityId: city.cityId, storeId: Number(store.id), operationTime: request.pickupTime, isService: false },
+            pickupDto: { cityId: cityId(city), storeId: Number(store.id), operationTime: request.pickupTime, isService: false },
             pickupAddressDto: null,
-            returnDto: { cityId: city.cityId, storeId: Number(store.id), operationTime: request.returnTime, isService: false },
+            returnDto: { cityId: cityId(city), storeId: Number(store.id), operationTime: request.returnTime, isService: false },
             returnAddressDto: null,
             requestContext: {
               platform: util.getGD('platform'),
@@ -492,12 +591,13 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
             const verifyResp = await http.postEncrypt('/Verify/Step1', '', payload);
             const verify = verifyResp.data || verifyResp;
             if (!verify.isSuccess) {
-              if (verify.message) verifyFailures.push(`${store.name}: ${verify.message}`);
+              verifyFailures.push(`${store.name}: ${verify.message || '取还时间不可用'}`);
               continue;
             }
             stockRequests += 1;
             const stockResp = await http.postEncrypt('/Stock/Step2', '', payload);
-            if (stockResp.code === 401 || stockResp.status === 401) {
+            const code = stockResp.code ?? stockResp.status ?? stockResp.data?.code ?? stockResp.data?.status;
+            if (code === 401) {
               return JSON.stringify({
                 statusKind: 'login-required',
                 message: `一嗨城市和门店 API 可匿名读取，但库存报价 /Stock/Step2 返回 401；请登录一嗨后重试。已识别 ${stores.length} 个门店。`,
@@ -505,26 +605,33 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
                 listings: []
               });
             }
-            const result = (stockResp.data && stockResp.data.result) || stockResp.result || {};
-            const cars = (result.bookingAvailableCarTypes || []).concat(result.unAvailableCarTypes || []);
-            for (const item of cars) {
-              const car = item.carType || item;
-              const daily = num(item.baseAvgAmount) || num(item.avgAmount) || num(item.baseAmount) || num(item.price);
-              if (!daily || !car.name) continue;
-              const key = `${store.id}-${car.name}`;
+            const stockResult = responseBody(stockResp);
+            const carItems = collectCarItems(stockResult);
+            for (const item of carItems) {
+              const car = item.carType || item.car || item.vehicle || item.model || item;
+              const name = carName(item, car);
+              if (!name) continue;
+              carsSeen += 1;
+              const basePrice = priceFrom(item, car);
+              if (!basePrice) continue;
+              const key = `${store.id}-${name}`;
               const listing = {
-                id: `ehi-${store.id}-${car.id || car.carTypeId || car.name}`,
+                id: `ehi-${store.id}-${carId(item, car, name)}`,
                 storeId: store.id,
                 storeName: store.name,
-                city: city.city,
+                city: cityName(city),
                 address: store.address,
                 lat: store.lat,
                 lng: store.lng,
                 distanceKm: store.distanceKm,
                 hours: store.hours,
-                vehicleName: car.name,
-                vehicleClass: [car.gearName, car.structureName, car.maxPassenger ? `${car.maxPassenger}座` : ''].filter(Boolean).join(' | '),
-                basePrice: daily * days,
+                vehicleName: name,
+                vehicleClass: [
+                  firstText(car.gearName, item.gearName),
+                  firstText(car.structureName, item.structureName),
+                  firstText(car.maxPassenger ? `${car.maxPassenger}座` : '', item.maxPassenger ? `${item.maxPassenger}座` : '')
+                ].filter(Boolean).join(' | '),
+                basePrice,
                 platformFees: 0,
                 insuranceFees: 0,
                 oneWayFee: 0,
@@ -534,9 +641,11 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
               if (!listingsByKey[key] || listingsByKey[key].basePrice > listing.basePrice) listingsByKey[key] = listing;
             }
           } catch (error) {
-            if (String(error && error.message || '').includes('401')) {
+            const message = String(error && (error.message || error.stack) || error);
+            if (message.includes('401')) {
               return JSON.stringify({ statusKind: 'login-required', message: '一嗨库存报价接口返回 401，请登录一嗨后重试。', sourceUrl, listings: [] });
             }
+            queryErrors.push(`${store.name}: ${message}`);
           }
         }
         const listings = Object.values(listingsByKey);
@@ -544,6 +653,22 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
           return JSON.stringify({
             statusKind: 'unavailable',
             message: `一嗨真实接口返回成功，但候选门店不满足取还时间：${verifyFailures.slice(0, 2).join('；')}`,
+            sourceUrl,
+            listings: []
+          });
+        }
+        if (!listings.length && carsSeen > 0) {
+          return JSON.stringify({
+            statusKind: 'parse-failed',
+            message: `一嗨库存接口返回了 ${carsSeen} 个车型，但未识别到可用价格字段。`,
+            sourceUrl,
+            listings: []
+          });
+        }
+        if (!listings.length && queryErrors.length) {
+          return JSON.stringify({
+            statusKind: 'parse-failed',
+            message: `一嗨 API 查询失败：${queryErrors.slice(0, 2).join('；')}`,
             sourceUrl,
             listings: []
           });

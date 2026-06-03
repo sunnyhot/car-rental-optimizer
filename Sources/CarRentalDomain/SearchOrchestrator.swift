@@ -59,22 +59,33 @@ public func rankRentalListings(
         return await group.reduce(into: [Recommendation?]()) { $0.append($1) }.compactMap { $0 }
     }
 
-    // Filter out low-confidence matches when user specified a vehicle
-    let filtered = request.vehicleQuery.trimmingCharacters(in: .whitespaces).isEmpty
-        ? recommendations
-        : recommendations.filter { $0.match.kind != .lowConfidence }
+    let vehicleQuery = request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    let hasVehicleQuery = !vehicleQuery.isEmpty
+    let isSpecificVehicleQuery = isSpecificVehicleModelQuery(vehicleQuery)
+
+    let filtered: [Recommendation]
+    if !hasVehicleQuery {
+        filtered = recommendations
+    } else if isSpecificVehicleQuery {
+        filtered = recommendations.filter { $0.match.kind == .exact }
+    } else {
+        filtered = recommendations.filter { $0.match.kind != .lowConfidence }
+    }
 
     let ranked = rankRecommendations(filtered)
-    guard request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    guard !hasVehicleQuery || isSpecificVehicleQuery else {
         return ranked
     }
-    return dedupeUnspecifiedVehicleRecommendations(ranked)
+    return dedupeVehicleRecommendations(ranked, specificVehicleKey: isSpecificVehicleQuery ? vehicleQuery : nil)
 }
 
-private func dedupeUnspecifiedVehicleRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
+private func dedupeVehicleRecommendations(
+    _ recommendations: [Recommendation],
+    specificVehicleKey: String? = nil
+) -> [Recommendation] {
     var seen = Set<String>()
     return recommendations.filter { recommendation in
-        let key = normalizedVehicleKey(recommendation.listing.vehicleName)
+        let key = specificVehicleKey.map(normalizedVehicleKey) ?? normalizedVehicleKey(recommendation.listing.vehicleName)
         return seen.insert(key).inserted
     }
 }

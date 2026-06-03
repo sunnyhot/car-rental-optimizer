@@ -17,11 +17,18 @@ public func matchVehicle(query: String, vehicleName: String, vehicleClass: Strin
     }
 
     // Check for same vehicle family only for generic class queries.
-    if sameVehicleFamily(query: normalizedQuery, vehicleClass: normalizedClass, vehicleName: normalizedName) {
-        return VehicleMatch(kind: .similarClass, score: 0.72, label: "同级 SUV 替代")
+    if let familyLabel = sameVehicleFamilyLabel(query: normalizedQuery, vehicleClass: normalizedClass, vehicleName: normalizedName) {
+        return VehicleMatch(kind: .similarClass, score: 0.72, label: "同级 \(familyLabel) 替代")
     }
 
     return VehicleMatch(kind: .lowConfidence, score: 0.35, label: "低置信替代")
+}
+
+/// Returns true when a non-empty query should be treated as a concrete model rather than a generic class.
+public func isSpecificVehicleModelQuery(_ query: String) -> Bool {
+    let normalizedQuery = normalize(query)
+    guard !normalizedQuery.isEmpty else { return false }
+    return inferGenericQueryFamily(normalizedQuery) == nil
 }
 
 // MARK: - Private Helpers
@@ -39,11 +46,18 @@ private let CLASS_KEYWORDS: [String: [String]] = [
     "mpv": ["mpv", "商务", "多用途"]
 ]
 
-private func sameVehicleFamily(query: String, vehicleClass: String, vehicleName: String) -> Bool {
+private let FAMILY_LABELS: [String: String] = [
+    "suv": "SUV",
+    "sedan": "轿车",
+    "mpv": "MPV"
+]
+
+private func sameVehicleFamilyLabel(query: String, vehicleClass: String, vehicleName: String) -> String? {
     guard let queryFamily = inferGenericQueryFamily(query),
           let candidateFamily = inferFamily("\(vehicleClass) \(vehicleName)")
-    else { return false }
-    return queryFamily == candidateFamily
+    else { return nil }
+    guard queryFamily == candidateFamily else { return nil }
+    return FAMILY_LABELS[queryFamily] ?? queryFamily.uppercased()
 }
 
 private func inferGenericQueryFamily(_ value: String) -> String? {

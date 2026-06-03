@@ -306,6 +306,62 @@ final class SearchOrchestratorTests: XCTestCase {
         XCTAssertTrue(results.allSatisfy { $0.listing.vehicleName.contains("瑞虎8") })
     }
 
+    func testSpecificVehicleQueryKeepsBestExactVehicleOnly() async {
+        let expensiveLavida = RentalListing(
+            id: "expensive-lavida",
+            platform: .carInc,
+            store: makeStore(
+                id: "car-store-expensive",
+                name: "通州站服务点",
+                city: "北京",
+                address: "北京市通州区",
+                lat: 39.916,
+                lng: 116.645,
+                dist: 1.2,
+                hours: "08:00-21:00"
+            ),
+            vehicleName: "大众朗逸",
+            vehicleClass: "紧凑型轿车",
+            basePrice: 880,
+            platformFees: 0,
+            insuranceFees: 0,
+            oneWayFee: 0,
+            sourceUrl: "https://m.zuche.com/",
+            dataCompleteness: 0.9
+        )
+        let cheaperLavida = RentalListing(
+            id: "cheaper-lavida",
+            platform: .ehi,
+            store: makeStore(
+                id: "ehi-store-cheap",
+                name: "通州北苑店",
+                city: "北京",
+                address: "北京市通州区",
+                lat: 39.917,
+                lng: 116.646,
+                dist: 1.0,
+                hours: "08:00-21:00"
+            ),
+            vehicleName: "大众 朗逸 自动",
+            vehicleClass: "紧凑型轿车",
+            basePrice: 620,
+            platformFees: 0,
+            insuranceFees: 0,
+            oneWayFee: 0,
+            sourceUrl: "https://booking.1hai.cn/",
+            dataCompleteness: 0.9
+        )
+
+        let results = await rankRentalListings(
+            request: makeBaseRequest(vehicleQuery: "大众朗逸"),
+            listings: [expensiveLavida, cheaperLavida],
+            mapService: mapService
+        )
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0].listing.id, "cheaper-lavida")
+    }
+
     func testGenericSuvQueryKeepsSuvAlternatives() async {
         let results = await searchRentalOptions(
             request: makeBaseRequest(vehicleQuery: "SUV"),
