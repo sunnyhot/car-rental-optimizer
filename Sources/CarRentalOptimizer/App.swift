@@ -11,7 +11,8 @@ struct CarRentalOptimizerApp: App {
                 .alert(item: $updateChecker.alert) { updateAlert($0) }
         }
         .windowStyle(.titleBar)
-        .defaultSize(width: 1320, height: 860)
+        .windowResizability(.contentSize)
+        .defaultSize(width: AppWindowLayout.defaultWidth, height: AppWindowLayout.defaultHeight)
         .commands {
             // "关于" menu item
             CommandGroup(replacing: .appInfo) {

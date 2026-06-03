@@ -9,13 +9,24 @@ struct MainView: View {
 
             HSplitView {
                 SearchPanelView()
-                    .frame(minWidth: 340, idealWidth: 380, maxWidth: 460)
+                    .frame(
+                        minWidth: AppWindowLayout.searchPanelMinimumWidth,
+                        idealWidth: AppWindowLayout.searchPanelIdealWidth,
+                        maxWidth: AppWindowLayout.searchPanelMaximumWidth
+                    )
 
                 ResultPanelView()
-                    .frame(minWidth: 560, idealWidth: 720)
+                    .frame(
+                        minWidth: AppWindowLayout.resultsPanelMinimumWidth,
+                        idealWidth: AppWindowLayout.resultsPanelIdealWidth
+                    )
 
                 DetailPanelView()
-                    .frame(minWidth: 340, idealWidth: 400, maxWidth: 460)
+                    .frame(
+                        minWidth: AppWindowLayout.detailPanelMinimumWidth,
+                        idealWidth: AppWindowLayout.detailPanelIdealWidth,
+                        maxWidth: AppWindowLayout.detailPanelMaximumWidth
+                    )
             }
         }
         .background(WorkbenchStyle.background)
