@@ -64,5 +64,26 @@ public func rankRentalListings(
         ? recommendations
         : recommendations.filter { $0.match.kind != .lowConfidence }
 
-    return rankRecommendations(filtered)
+    let ranked = rankRecommendations(filtered)
+    guard request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return ranked
+    }
+    return dedupeUnspecifiedVehicleRecommendations(ranked)
+}
+
+private func dedupeUnspecifiedVehicleRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
+    var seen = Set<String>()
+    return recommendations.filter { recommendation in
+        let key = normalizedVehicleKey(recommendation.listing.vehicleName)
+        return seen.insert(key).inserted
+    }
+}
+
+private func normalizedVehicleKey(_ value: String) -> String {
+    value
+        .lowercased()
+        .replacingOccurrences(of: " ", with: "")
+        .replacingOccurrences(of: "　", with: "")
+        .replacingOccurrences(of: "（", with: "(")
+        .replacingOccurrences(of: "）", with: ")")
 }

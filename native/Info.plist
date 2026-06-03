@@ -8,9 +8,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.5.2</string>
+    <string>0.6.0</string>
     <key>CFBundleVersion</key>
-    <string>13</string>
+    <string>14</string>
 
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>
@@ -34,6 +34,6 @@
 
     <!-- macOS privacy prompt used by embedded platform pages when WebKit content attempts local-network discovery. -->
     <key>NSLocalNetworkUsageDescription</key>
-    <string>用于加载一嗨和神州官方网页内容；应用不会扫描或连接本地设备。</string>
+    <string>用于请求一嗨和神州官方 API 以及地图路线服务；应用不会扫描或连接本地设备。</string>
 </dict>
 </plist>

@@ -10,22 +10,34 @@ final class SearchViewModel: ObservableObject {
         PlatformEvidenceStatus(
             platform: $0,
             kind: .waitingForEvidence,
-            message: "等待在\($0.label)官方页面完成搜索。",
+            message: "等待静默调用\($0.label) API。",
             sourceUrl: officialPlatformURL(for: $0)
         )
     }
     @Published var selectedId = ""
     @Published var isSearching = false
-    @Published var status = "在官方页面完成搜索后，点击「开始比较」自动读取当前页面。"
+    @Published var status = "输入条件后点击「开始比较」，应用会静默调用平台 API。"
 
-    private let snapshotProvider: PlatformSnapshotProviding
+    private let searchProvider: RentalSearchProviding
+    private let geocoder: AddressGeocoding
+    private let mapService: MapService
 
     init() {
-        self.snapshotProvider = EmptyPlatformSnapshotProvider()
+        self.searchProvider = LiveRentalSearchService()
+        self.geocoder = AppleAddressGeocoder()
+        self.mapService = AppleMapService()
     }
 
     init(snapshotProvider: PlatformSnapshotProviding) {
-        self.snapshotProvider = snapshotProvider
+        self.searchProvider = SnapshotRentalSearchService(snapshotProvider: snapshotProvider)
+        self.geocoder = CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin)
+        self.mapService = EstimatedMapService()
+    }
+
+    init(searchProvider: RentalSearchProviding, geocoder: AddressGeocoding, mapService: MapService) {
+        self.searchProvider = searchProvider
+        self.geocoder = geocoder
+        self.mapService = mapService
     }
 
     var selected: Recommendation? {
@@ -36,45 +48,42 @@ final class SearchViewModel: ObservableObject {
         isSearching = true
         results = []
         selectedId = ""
-        status = "正在读取官方页面，并计算到店路线估算成本..."
+        status = "正在解析当前位置，并静默调用平台 API..."
 
         defer {
             isSearching = false
         }
 
-        var evidenceResults: [PlatformEvidenceResult] = []
-        for platform in request.platforms {
-            do {
-                let snapshot = try await snapshotProvider.snapshot(for: platform)
-                evidenceResults.append(parsePlatformEvidence(
-                    input: PlatformEvidenceInput(
-                        platform: platform,
-                        text: snapshot.text,
-                        sourceUrl: snapshot.url
-                    ),
-                    request: request
-                ))
-            } catch {
-                evidenceResults.append(snapshotFailureResult(platform: platform, error: error))
+        var liveRequest = request
+        do {
+            liveRequest.origin = try await geocoder.geocode(request.originLabel)
+            request.origin = liveRequest.origin
+        } catch {
+            status = "当前位置解析失败：\(error.localizedDescription)"
+            platformStatuses = request.platforms.map {
+                PlatformEvidenceStatus(platform: $0, kind: .parseFailed, message: "地址解析失败，暂未调用\($0.label)。", sourceUrl: officialPlatformURL(for: $0))
             }
+            return
         }
+
+        let evidenceResults = await searchProvider.search(request: liveRequest)
         platformStatuses = evidenceResults.map(\.status)
 
         let listings = evidenceResults.flatMap(\.listings)
         guard !listings.isEmpty else {
-            status = formatNoOfficialListingsStatus(evidenceResults)
+            status = formatNoAPIListingsStatus(evidenceResults)
             return
         }
 
         let recommendations = await rankRentalListings(
-            request: request,
+            request: liveRequest,
             listings: listings,
-            mapService: EstimatedMapService()
+            mapService: mapService
         )
 
         results = recommendations
         selectedId = recommendations.first?.id ?? ""
-        status = formatSearchCompletionStatus(request: request, resultCount: recommendations.count)
+        status = formatSearchCompletionStatus(request: liveRequest, resultCount: recommendations.count)
     }
 
     func selectResult(_ id: String) {
@@ -99,7 +108,7 @@ final class SearchViewModel: ObservableObject {
         platformStatuses.first { $0.platform == platform } ?? PlatformEvidenceStatus(
             platform: platform,
             kind: .waitingForEvidence,
-            message: "等待在\(platform.label)官方页面完成搜索。",
+            message: "等待静默调用\(platform.label) API。",
             sourceUrl: officialPlatformURL(for: platform)
         )
     }
@@ -120,24 +129,7 @@ func officialPlatformURL(for platform: PlatformId) -> String {
     }
 }
 
-private func formatNoOfficialListingsStatus(_ evidenceResults: [PlatformEvidenceResult]) -> String {
-    if evidenceResults.allSatisfy({ $0.status.kind == .waitingForEvidence }) {
-        return "等待官方页面搜索结果：请在内嵌官方页面完成搜索后再次比较。"
-    }
-
+private func formatNoAPIListingsStatus(_ evidenceResults: [PlatformEvidenceResult]) -> String {
     let messages = evidenceResults.map(\.status.message)
     return messages.joined(separator: "；")
-}
-
-private func snapshotFailureResult(platform: PlatformId, error: Error) -> PlatformEvidenceResult {
-    PlatformEvidenceResult(
-        platform: platform,
-        status: PlatformEvidenceStatus(
-            platform: platform,
-            kind: .parseFailed,
-            message: "\(platform.label)官方页面读取失败：\(error.localizedDescription)",
-            sourceUrl: officialPlatformURL(for: platform)
-        ),
-        listings: []
-    )
 }

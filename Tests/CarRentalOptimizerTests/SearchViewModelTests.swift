@@ -8,15 +8,30 @@ import Testing
 struct SearchViewModelTests {
     @Test("Default search does not fabricate mock recommendations when platform pages are empty")
     func defaultSearchDoesNotFabricateMockRecommendationsWhenPlatformPagesAreEmpty() async {
-        let viewModel = SearchViewModel()
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .loginRequired, message: "一嗨需要登录。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: []
+                ),
+                PlatformEvidenceResult(
+                    platform: .carInc,
+                    status: PlatformEvidenceStatus(platform: .carInc, kind: .unavailable, message: "神州暂无可租车型。", sourceUrl: "https://m.zuche.com/"),
+                    listings: []
+                ),
+            ]),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
 
         await viewModel.runSearch()
 
         #expect(viewModel.results.isEmpty)
         #expect(viewModel.selectedId.isEmpty)
-        #expect(viewModel.status.contains("官方页面"))
+        #expect(viewModel.status.contains("一嗨需要登录"))
         #expect(!viewModel.status.contains("粘贴"))
-        #expect(viewModel.platformStatuses.contains { $0.kind == .waitingForEvidence })
+        #expect(viewModel.platformStatuses.contains { $0.kind == .loginRequired })
     }
 
     @Test("Search reads platform snapshots instead of waiting for pasted evidence")
@@ -85,5 +100,13 @@ private final class StubPlatformSnapshotProvider: PlatformSnapshotProviding {
             url: officialPlatformURL(for: platform),
             text: ""
         )
+    }
+}
+
+private struct StubRentalSearchProvider: RentalSearchProviding {
+    let results: [PlatformEvidenceResult]
+
+    func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
+        results
     }
 }

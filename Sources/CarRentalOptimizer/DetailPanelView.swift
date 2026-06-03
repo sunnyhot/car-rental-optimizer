@@ -76,9 +76,9 @@ private struct RecommendationDetailView: View {
 
                 DetailSection(header: "费用拆分") {
                     VStack(spacing: 0) {
-                        CostLineView(label: "租车基础价", value: recommendation.listing.basePrice)
-                        CostLineView(label: "平台服务费识别值", value: recommendation.listing.platformFees)
-                        CostLineView(label: "保险/保障识别值", value: recommendation.listing.insuranceFees)
+                        CostLineView(label: "平台返回租车价", value: recommendation.listing.basePrice)
+                        CostLineView(label: "平台服务费", value: recommendation.listing.platformFees)
+                        CostLineView(label: "保险/保障", value: recommendation.listing.insuranceFees)
                         CostLineView(label: "异店还车费", value: recommendation.listing.oneWayFee)
                         Divider()
                         CostLineView(label: "租车小计", value: recommendation.rentalTotal, bold: true)

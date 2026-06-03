@@ -3,7 +3,6 @@ import SwiftUI
 
 struct SearchPanelView: View {
     @EnvironmentObject var viewModel: SearchViewModel
-    @EnvironmentObject var browserStore: PlatformBrowserStore
     @State private var pickupDate = AppDateRules.today
     @State private var returnDate = AppDateRules.addingDays(1, to: AppDateRules.today)
 
@@ -14,7 +13,7 @@ struct SearchPanelView: View {
                     Text("搜索条件")
                         .font(.headline)
                     Spacer()
-                    Text("自动读取")
+                    Text("静默 API")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -122,7 +121,6 @@ struct SearchPanelView: View {
 
 private struct PlatformStatusCard: View {
     @EnvironmentObject var viewModel: SearchViewModel
-    @EnvironmentObject var browserStore: PlatformBrowserStore
     let platform: PlatformId
 
     var body: some View {
@@ -133,23 +131,9 @@ private struct PlatformStatusCard: View {
                     .font(.caption)
                     .fontWeight(.semibold)
                 Spacer()
-                Button {
-                    browserStore.select(platform)
-                } label: {
-                    Image(systemName: "safari")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("切换到\(platform.label)官方页面")
-
-                Button {
-                    browserStore.loadHome(platform)
-                } label: {
-                    Image(systemName: "house")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("打开\(platform.label)首页")
+                Text(statusLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             Text(viewModel.platformStatus(for: platform).message)
@@ -160,6 +144,23 @@ private struct PlatformStatusCard: View {
         .padding(10)
         .background(Color(nsColor: .controlBackgroundColor))
         .cornerRadius(6)
+    }
+
+    private var statusLabel: String {
+        switch viewModel.platformStatus(for: platform).kind {
+        case .ready:
+            return "已获取"
+        case .loginRequired:
+            return "需登录"
+        case .captchaRequired:
+            return "需验证"
+        case .unavailable:
+            return "无车"
+        case .parseFailed:
+            return "失败"
+        case .waitingForEvidence:
+            return "等待"
+        }
     }
 }
 
