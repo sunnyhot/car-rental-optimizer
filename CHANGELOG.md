@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-06-03
+
+### Fixed
+- 修复 GitHub Release ZIP 解压后 Sparkle.framework 符号链接丢失，导致 macOS 提示应用已损坏无法打开
+- 发布包验证新增 ZIP 解压回归检查，确保压缩包 round-trip 后 app bundle 签名仍有效
+
 ## [0.3.0] - 2026-06-02
 
 ### Added

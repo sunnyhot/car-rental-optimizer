@@ -16,9 +16,9 @@
 
     <!-- App version info -->
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0</string>
+    <string>0.3.1</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>7</string>
 
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>
