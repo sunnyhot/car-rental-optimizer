@@ -18,9 +18,20 @@ final class VehicleMatcherTests: XCTestCase {
 
     // MARK: - Similar Class (Same Family)
 
-    func testSimilarClassSuvFallback() {
+    func testSpecificModelDoesNotFallbackToSimilarClass() {
         let match = matchVehicle(
             query: "瑞虎8",
+            vehicleName: "哈弗 H6 自动",
+            vehicleClass: "紧凑型SUV"
+        )
+        XCTAssertEqual(match.kind, .lowConfidence)
+        XCTAssertTrue(match.score < 0.5)
+        XCTAssertTrue(match.label.contains("低置信"))
+    }
+
+    func testGenericSuvQueryAllowsSimilarClassFallback() {
+        let match = matchVehicle(
+            query: "SUV",
             vehicleName: "哈弗 H6 自动",
             vehicleClass: "紧凑型SUV"
         )

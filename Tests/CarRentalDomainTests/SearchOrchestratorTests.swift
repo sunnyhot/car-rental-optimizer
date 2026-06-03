@@ -223,7 +223,7 @@ final class SearchOrchestratorTests: XCTestCase {
 
     func testQueriesBothPlatformsAndRanksResults() async {
         let results = await searchRentalOptions(
-            request: makeBaseRequest(),
+            request: makeBaseRequest(vehicleQuery: "SUV"),
             rentalAdapters: adapters,
             mapService: mapService
         )
@@ -261,12 +261,12 @@ final class SearchOrchestratorTests: XCTestCase {
 
     func testRentalDurationAffectsPricing() async {
         let twoDayResults = await searchRentalOptions(
-            request: makeBaseRequest(),
+            request: makeBaseRequest(vehicleQuery: "SUV"),
             rentalAdapters: adapters,
             mapService: mapService
         )
         let thirtyDayResults = await searchRentalOptions(
-            request: makeBaseRequest(pickupAt: "2026-09-11T09:00", returnAt: "2026-10-11T18:00"),
+            request: makeBaseRequest(pickupAt: "2026-09-11T09:00", returnAt: "2026-10-11T18:00", vehicleQuery: "SUV"),
             rentalAdapters: adapters,
             mapService: mapService
         )
@@ -292,6 +292,29 @@ final class SearchOrchestratorTests: XCTestCase {
             mapService: mapService
         )
 
+        XCTAssertFalse(results.contains { $0.listing.vehicleName.contains("朗逸") })
+    }
+
+    func testSpecificVehicleQueryExcludesSameClassAlternatives() async {
+        let results = await searchRentalOptions(
+            request: makeBaseRequest(vehicleQuery: "瑞虎8"),
+            rentalAdapters: adapters,
+            mapService: mapService
+        )
+
+        XCTAssertFalse(results.contains { $0.listing.vehicleName.contains("哈弗") })
+        XCTAssertTrue(results.allSatisfy { $0.listing.vehicleName.contains("瑞虎8") })
+    }
+
+    func testGenericSuvQueryKeepsSuvAlternatives() async {
+        let results = await searchRentalOptions(
+            request: makeBaseRequest(vehicleQuery: "SUV"),
+            rentalAdapters: adapters,
+            mapService: mapService
+        )
+
+        XCTAssertTrue(results.contains { $0.listing.vehicleName.contains("哈弗") })
+        XCTAssertTrue(results.contains { $0.listing.vehicleName.contains("瑞虎8") })
         XCTAssertFalse(results.contains { $0.listing.vehicleName.contains("朗逸") })
     }
 

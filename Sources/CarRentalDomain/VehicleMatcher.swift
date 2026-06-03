@@ -16,7 +16,7 @@ public func matchVehicle(query: String, vehicleName: String, vehicleClass: Strin
         return VehicleMatch(kind: .exact, score: 1, label: "精确车型")
     }
 
-    // Check for same vehicle family (similar class)
+    // Check for same vehicle family only for generic class queries.
     if sameVehicleFamily(query: normalizedQuery, vehicleClass: normalizedClass, vehicleName: normalizedName) {
         return VehicleMatch(kind: .similarClass, score: 0.72, label: "同级 SUV 替代")
     }
@@ -40,10 +40,22 @@ private let CLASS_KEYWORDS: [String: [String]] = [
 ]
 
 private func sameVehicleFamily(query: String, vehicleClass: String, vehicleName: String) -> Bool {
-    guard let queryFamily = inferFamily(query),
+    guard let queryFamily = inferGenericQueryFamily(query),
           let candidateFamily = inferFamily("\(vehicleClass) \(vehicleName)")
     else { return false }
     return queryFamily == candidateFamily
+}
+
+private func inferGenericQueryFamily(_ value: String) -> String? {
+    if value.contains("suv") {
+        return "suv"
+    }
+    for (family, keywords) in CLASS_KEYWORDS {
+        if keywords.contains(where: { value.contains($0) }) {
+            return family
+        }
+    }
+    return nil
 }
 
 private func inferFamily(_ value: String) -> String? {

@@ -161,7 +161,7 @@ spctl --assess --type execute --verbose=4 "租车比价助手.app"
 本机测试安装：
 
 ```bash
-scripts/install-local-app.sh build/CarRentalOptimizer-v0.6.4.zip
+scripts/install-local-app.sh build/CarRentalOptimizer-v0.6.5.zip
 ```
 
 启动 smoke test：
