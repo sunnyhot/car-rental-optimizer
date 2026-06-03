@@ -5,6 +5,7 @@ struct SearchPanelView: View {
     @EnvironmentObject var viewModel: SearchViewModel
     @State private var pickupDate = AppDateRules.today
     @State private var returnDate = AppDateRules.addingDays(1, to: AppDateRules.today)
+    @State private var showingEhiLogin = false
 
     var body: some View {
         WorkbenchPanel(
@@ -45,6 +46,11 @@ struct SearchPanelView: View {
             }
             .onChange(of: returnDate) { _, _ in
                 viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
+            }
+            .sheet(isPresented: $showingEhiLogin) {
+                EhiLoginSheet {
+                    Task { await viewModel.runSearch() }
+                }
             }
         }
     }
@@ -139,7 +145,9 @@ struct SearchPanelView: View {
 
                 VStack(spacing: 0) {
                     ForEach(Array(viewModel.request.platforms.enumerated()), id: \.element) { index, platform in
-                        PlatformStatusRow(platform: platform)
+                        PlatformStatusRow(platform: platform) {
+                            showingEhiLogin = true
+                        }
 
                         if index < viewModel.request.platforms.count - 1 {
                             Divider()
@@ -239,6 +247,7 @@ private struct PlatformToggleButton: View {
 private struct PlatformStatusRow: View {
     @EnvironmentObject var viewModel: SearchViewModel
     let platform: PlatformId
+    let loginAction: () -> Void
 
     var body: some View {
         let status = viewModel.platformStatus(for: platform)
@@ -265,6 +274,17 @@ private struct PlatformStatusRow: View {
                     .foregroundStyle(WorkbenchStyle.muted)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if platform == .ehi && status.kind == .loginRequired {
+                    Button {
+                        loginAction()
+                    } label: {
+                        Label("登录一嗨", systemImage: "person.badge.key.fill")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             }
         }
         .padding(.vertical, 8)

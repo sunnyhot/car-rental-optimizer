@@ -296,6 +296,26 @@ private final class ZucheAPIClient {
 private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     private var webView: WKWebView?
     private var continuation: CheckedContinuation<Void, Never>?
+    private var sessionObserver: NSObjectProtocol?
+
+    override init() {
+        super.init()
+        sessionObserver = NotificationCenter.default.addObserver(
+            forName: EhiLoginSession.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.resetWebView()
+            }
+        }
+    }
+
+    deinit {
+        if let sessionObserver {
+            NotificationCenter.default.removeObserver(sessionObserver)
+        }
+    }
 
     func search(request: SearchRequest) async -> PlatformEvidenceResult {
         do {
@@ -352,6 +372,11 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         continuation?.resume()
         continuation = nil
+    }
+
+    private func resetWebView() {
+        webView?.navigationDelegate = nil
+        webView = nil
     }
 
     private func status(_ kind: PlatformEvidenceStatusKind, _ message: String) -> PlatformEvidenceResult {
