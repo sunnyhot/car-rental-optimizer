@@ -1,0 +1,96 @@
+# Car Rental Optimizer Coding Rules
+
+Read this file before writing code in this repository.
+
+## General Workflow
+
+- Inspect the existing implementation before editing.
+- Keep changes scoped to the requested behavior.
+- Do not revert unrelated local changes.
+- Prefer existing local patterns over new abstractions.
+- Add an abstraction only when it removes real duplication or clarifies a boundary.
+- Use `rg` / `rg --files` for repository search.
+- Use `apply_patch` for manual file edits.
+
+## TDD And Verification
+
+For behavior changes and bug fixes:
+- Write or update the smallest failing test first.
+- Run the focused test and confirm it fails for the expected reason.
+- Implement the minimal code change.
+- Run the focused test again and confirm it passes.
+- Run broader verification before claiming completion.
+
+Recommended commands:
+
+```bash
+swift test --filter <TestName>
+swift test
+npm test
+```
+
+For release work, also run:
+
+```bash
+scripts/build-app.sh
+scripts/verify-launch.sh build/租车比价助手.app
+python3 scripts/create-zip.py build/租车比价助手.app build/CarRentalOptimizer-vX.Y.Z.zip
+scripts/verify-release-zip.sh build/CarRentalOptimizer-vX.Y.Z.zip
+scripts/install-local-app.sh build/CarRentalOptimizer-vX.Y.Z.zip
+```
+
+## Swift Style
+
+- Use Swift 5.9+ syntax compatible with the package target.
+- Prefer `struct` value types for domain models and small views.
+- Keep `@MainActor` on UI-facing observable objects and WebKit/AppKit coordination where needed.
+- Keep domain functions pure when possible.
+- Prefer explicit typed statuses over stringly control flow.
+- Avoid force unwraps except for static constants that are guaranteed by source code, such as fixed URL literals.
+- Avoid broad catch-all behavior that hides platform failures. Surface typed errors or statuses.
+- Use concise comments only when a block is non-obvious.
+
+## Domain Rules
+
+- Domain code must not import SwiftUI, WebKit, AppKit, or MapKit.
+- Production ranking must not create mock cars or guessed rental prices.
+- `matchVehicle` must distinguish exact specific-model queries from generic class queries.
+- If `SearchRequest.vehicleQuery` is non-empty and specific, downstream ranking should only expose exact model matches.
+- If `SearchRequest.vehicleQuery` is empty, ranking should de-duplicate repeated vehicle names and keep the best total cost.
+
+## App Integration Rules
+
+- Platform clients belong in `Sources/CarRentalOptimizer`.
+- Keep WebKit bridge code isolated from SwiftUI views.
+- eHi login should use the official page and the default persistent `WKWebsiteDataStore`.
+- After login/session changes, refresh or recreate hidden WebKit bridge state before the next silent query.
+- CAR Inc. API polling must remain conservative to avoid rate-limit failures.
+
+## SwiftUI Rules
+
+- Keep the three-column workbench structure unless the product direction changes.
+- Reuse `WorkbenchStyle`, `WorkbenchPanel`, `SurfaceBox`, `StatusPill`, and `EmptyStateBlock` for visual consistency.
+- Use native macOS controls where possible.
+- Keep primary actions visible, especially the compare/search button.
+- Do not add decorative cards inside cards.
+- Avoid long instructional text in the main UI; prefer short status labels.
+- UI changes must be visually checked with a launched app when they affect layout.
+
+## Version And Release Rules
+
+When publishing a user-facing change:
+- Increment semantic version in `Sources/CarRentalOptimizer/AppInfo.swift`.
+- Increment build number in `Sources/CarRentalOptimizer/AppInfo.swift` and `native/Info.plist`.
+- Keep `CFBundleShortVersionString` and `CFBundleVersion` in sync.
+- Update `CHANGELOG.md`.
+- Update install examples in `README.md`, `scripts/install-release.sh`, and `docs/release-guide.md`.
+- Tag releases as `vX.Y.Z`.
+- Upload `CarRentalOptimizer-vX.Y.Z.zip` and checksum file to GitHub Releases.
+- Verify release download with `scripts/install-release.sh`.
+
+## Documentation Rules
+
+- Keep README focused on how to build, run, install, and understand current capabilities.
+- Keep changelog entries short and user-facing.
+- Do not document speculative platform behavior as fact.
+- If live platform behavior changes, mention whether it was observed from official API responses, app code, or an inference.

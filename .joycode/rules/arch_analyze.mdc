@@ -1,0 +1,95 @@
+# Car Rental Optimizer Architecture Rules
+
+These rules define the expected architecture for this repository. Read this file before adding or changing code.
+
+## Product Shape
+
+This project is a macOS desktop app named `租车比价助手`. It silently queries official rental platform data, ranks real rental options by total cost, and shows route-adjusted recommendations.
+
+The app must prefer verified platform data over guessed or mock data. If a platform has no usable official result, show a typed platform status instead of fabricating listings.
+
+## Targets And Boundaries
+
+### `Sources/CarRentalDomain`
+
+Pure domain logic only.
+
+Allowed:
+- Value types and enums used across the app.
+- Vehicle matching.
+- Search orchestration and ranking.
+- Recommendation total-cost calculation.
+- Platform evidence parsing.
+- Date/rental-day summary logic.
+- Pure distance math.
+
+Not allowed:
+- SwiftUI, AppKit, WebKit, MapKit UI, `URLSession`, browser automation, filesystem writes, or GitHub release logic.
+- UI strings that only make sense in one screen.
+- Network calls or platform-specific encrypted API clients.
+
+Domain code should be deterministic and easy to test with in-memory fixtures.
+
+### `Sources/CarRentalOptimizer`
+
+Application and integration layer.
+
+Allowed:
+- SwiftUI views and reusable UI styling.
+- `SearchViewModel` and app state coordination.
+- Live platform clients, including WebKit bridge code for eHi and H5 gateway calls for CAR Inc.
+- Address geocoding and route estimation integrations.
+- App version constants, update checking, release installation, and login sheets.
+
+Keep platform integration isolated from ranking logic. A live platform client should return `PlatformEvidenceResult` or `RentalListing` values; ranking must remain in `CarRentalDomain`.
+
+### `Tests/CarRentalDomainTests`
+
+Tests for pure domain behavior:
+- Vehicle matching and filtering.
+- Recommendation total calculation.
+- Ranking and de-duplication.
+- Evidence parser states.
+- Date/rental-day behavior.
+
+### `Tests/CarRentalOptimizerTests`
+
+Tests for app-layer behavior:
+- View model orchestration.
+- Update checker/version logic.
+- Live-search helper formatting.
+- Login/session helpers.
+
+## Data And Platform Rules
+
+- Do not add mock listings to production search results.
+- Do not label a platform as unavailable when the real issue is login, captcha, parsing, or API failure.
+- eHi city and store APIs may be anonymous, but stock pricing can require a logged-in WebKit session. Preserve that distinction.
+- CAR Inc. calls should avoid high-volume repeated polling that can trigger rate limits.
+- When vehicle query is empty, return nearest-store results and de-duplicate repeated vehicle names by best total cost.
+- When vehicle query is a specific model, only exact model matches should be returned.
+- Generic class queries such as `SUV`, `MPV`, or `sedan` may use same-family matching.
+
+## UI Structure
+
+The primary UI is a three-column SwiftUI workbench:
+- Left: query controls and platform states.
+- Center: ranked candidate cards.
+- Right: receipt-style recommendation detail.
+
+Keep the app utilitarian and decision-focused. Avoid marketing pages, decorative panels, and explanations that duplicate obvious controls.
+
+## Release Shape
+
+Release artifacts are ad-hoc signed ZIP files generated from `build/租车比价助手.app`.
+
+When changing user-facing behavior:
+- Update `CHANGELOG.md`.
+- Bump `Sources/CarRentalOptimizer/AppInfo.swift`.
+- Bump `native/Info.plist`.
+- Update release install examples when the package version changes.
+- Build, verify, install locally, and only then publish a GitHub Release.
+
+## Compatibility
+
+Minimum macOS target is macOS 14. Do not introduce dependencies that require a higher OS version unless the minimum target is intentionally changed everywhere.
