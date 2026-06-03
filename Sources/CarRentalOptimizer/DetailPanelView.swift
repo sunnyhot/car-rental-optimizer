@@ -5,24 +5,17 @@ struct DetailPanelView: View {
     @EnvironmentObject var viewModel: SearchViewModel
 
     var body: some View {
-        Group {
-            if let recommendation = viewModel.selected {
-                RecommendationDetailView(recommendation: recommendation)
-            } else {
-                VStack(spacing: 12) {
-                    Spacer()
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.secondary)
-                    Text("等待结果")
-                        .font(.headline)
-                    Text("读取到官方车源后，这里会显示费用拆分和路线估算。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Spacer()
+        WorkbenchPanel(title: "推荐明细", subtitle: "成本拆解和路线") {
+            Group {
+                if let recommendation = viewModel.selected {
+                    RecommendationDetailView(recommendation: recommendation)
+                } else {
+                    EmptyStateBlock(
+                        icon: "receipt",
+                        title: "等待选择",
+                        message: "读取到官方车源后，这里会显示费用拆分和路线估算。"
+                    )
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -33,98 +26,76 @@ private struct RecommendationDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("推荐明细")
-                        .font(.headline)
-                    Spacer()
-                    Text(recommendation.match.label)
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.green.opacity(0.15))
-                        .cornerRadius(4)
-                }
+            VStack(alignment: .leading, spacing: 14) {
+                TotalReceiptHeader(recommendation: recommendation)
 
-                VStack(spacing: 4) {
-                    Text("推荐总成本")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(formatMoney(recommendation.bestTotal))
-                        .font(.system(size: 32, weight: .bold))
-                    Text("按\(recommendation.bestRouteMode.label)到店估算")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(Color.accentColor.opacity(0.06))
-                .cornerRadius(8)
+                SurfaceBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        DetailTitleRow(
+                            icon: "building.2.fill",
+                            title: recommendation.listing.store.name,
+                            badge: recommendation.match.label
+                        )
 
-                DetailSection {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(recommendation.listing.store.name)
-                            .font(.headline)
-                        Text("\(recommendation.listing.store.city) · \(recommendation.listing.store.address)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(recommendation.listing.store.hours) · 距离约 \(recommendation.listing.store.distanceKm, specifier: "%.1f") km")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 5) {
+                            FactLine(icon: "mappin.circle.fill", text: "\(recommendation.listing.store.city) · \(recommendation.listing.store.address)")
+                            FactLine(icon: "location.fill", text: String(format: "距离约 %.1f km", recommendation.listing.store.distanceKm))
+                            FactLine(icon: "clock.fill", text: recommendation.listing.store.hours)
+                            FactLine(icon: "car.fill", text: "\(recommendation.listing.vehicleName) · \(recommendation.listing.vehicleClass)")
+                        }
                     }
                 }
 
-                DetailSection(header: "费用拆分") {
-                    VStack(spacing: 0) {
-                        CostLineView(label: "平台返回租车价", value: recommendation.listing.basePrice)
-                        CostLineView(label: "平台服务费", value: recommendation.listing.platformFees)
-                        CostLineView(label: "保险/保障", value: recommendation.listing.insuranceFees)
-                        CostLineView(label: "异店还车费", value: recommendation.listing.oneWayFee)
-                        Divider()
-                        CostLineView(label: "租车小计", value: recommendation.rentalTotal, bold: true)
+                SurfaceBox {
+                    VStack(alignment: .leading, spacing: 9) {
+                        DetailTitleRow(icon: "list.bullet.clipboard", title: "费用拆分")
+
+                        VStack(spacing: 0) {
+                            CostLineView(label: "平台返回租车价", value: recommendation.listing.basePrice)
+                            CostLineView(label: "平台服务费", value: recommendation.listing.platformFees)
+                            CostLineView(label: "保险/保障", value: recommendation.listing.insuranceFees)
+                            CostLineView(label: "异店还车费", value: recommendation.listing.oneWayFee)
+
+                            Divider()
+                                .padding(.vertical, 5)
+
+                            CostLineView(label: "租车小计", value: recommendation.rentalTotal, bold: true)
+                        }
                     }
                 }
 
-                HStack(spacing: 12) {
-                    RouteBoxView(
-                        title: "打车",
-                        total: recommendation.taxiTotal,
-                        route: recommendation.taxiRoute
-                    )
-                    RouteBoxView(
-                        title: "公共交通",
-                        total: recommendation.transitTotal,
-                        route: recommendation.transitRoute
-                    )
+                VStack(alignment: .leading, spacing: 9) {
+                    DetailTitleRow(icon: "map.fill", title: "到店路线")
+
+                    HStack(spacing: 10) {
+                        RouteBoxView(
+                            title: "打车",
+                            total: recommendation.taxiTotal,
+                            route: recommendation.taxiRoute,
+                            isBest: recommendation.bestRouteMode == .taxi
+                        )
+                        RouteBoxView(
+                            title: "公共交通",
+                            total: recommendation.transitTotal,
+                            route: recommendation.transitRoute,
+                            isBest: recommendation.bestRouteMode == .transit
+                        )
+                    }
                 }
 
                 if !recommendation.warnings.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.yellow)
-                            Text("提醒")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                        }
-                        Text(renderWarnings(recommendation.warnings))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.yellow.opacity(0.08))
-                    .cornerRadius(6)
+                    WarningBox(warnings: recommendation.warnings)
                 }
 
                 if let url = URL(string: recommendation.listing.sourceUrl) {
                     Link(destination: url) {
-                        HStack {
+                        HStack(spacing: 6) {
                             Spacer()
                             Text("打开原始平台")
                             Image(systemName: "arrow.up.right.square")
                         }
-                        .font(.caption)
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -135,24 +106,96 @@ private struct RecommendationDetailView: View {
     }
 }
 
-private struct DetailSection<Content: View>: View {
-    let header: String?
-    @ViewBuilder let content: Content
-
-    init(header: String? = nil, @ViewBuilder content: () -> Content) {
-        self.header = header
-        self.content = content()
-    }
+private struct TotalReceiptHeader: View {
+    let recommendation: Recommendation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let header {
-                Text(header)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
+        SurfaceBox(
+            fill: WorkbenchStyle.accentSoft,
+            stroke: WorkbenchStyle.accent.opacity(0.18),
+            padding: 16
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center) {
+                    StatusPill(
+                        text: recommendation.listing.platform.label,
+                        color: recommendation.listing.platform == .ehi ? WorkbenchStyle.teal : WorkbenchStyle.accent,
+                        systemImage: "building.2.fill"
+                    )
+                    Spacer()
+                    StatusPill(
+                        text: recommendation.bestRouteMode.label,
+                        color: WorkbenchStyle.green,
+                        systemImage: recommendation.bestRouteMode == .taxi ? "car.fill" : "bus.fill"
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("推荐总成本")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.muted)
+                    Text(formatMoney(recommendation.bestTotal))
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                        .monospacedDigit()
+                    Text("租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost))")
+                        .font(.caption)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .lineLimit(1)
+                }
             }
-            content
+        }
+    }
+
+    private var bestRouteCost: Double {
+        recommendation.bestRouteMode == .taxi ? recommendation.taxiRoute.cost : recommendation.transitRoute.cost
+    }
+}
+
+private struct DetailTitleRow: View {
+    let icon: String
+    let title: String
+    var badge: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(WorkbenchStyle.accent)
+                .frame(width: 18)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WorkbenchStyle.ink)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if let badge {
+                Text(badge)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.green)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(WorkbenchStyle.green.opacity(0.12))
+                    )
+            }
+        }
+    }
+}
+
+private struct FactLine: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(WorkbenchStyle.muted)
+                .frame(width: 14, height: 14)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(WorkbenchStyle.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -165,10 +208,13 @@ private struct CostLineView: View {
     var body: some View {
         HStack {
             Text(label)
-                .font(bold ? .caption.bold() : .caption)
+                .font(bold ? .caption.weight(.semibold) : .caption)
+                .foregroundStyle(bold ? WorkbenchStyle.ink : WorkbenchStyle.muted)
             Spacer()
             Text(formatMoney(value))
-                .font(bold ? .caption.bold() : .caption)
+                .font(bold ? .caption.weight(.semibold) : .caption)
+                .foregroundStyle(WorkbenchStyle.ink)
+                .monospacedDigit()
         }
         .padding(.vertical, 3)
     }
@@ -178,24 +224,65 @@ private struct RouteBoxView: View {
     let title: String
     let total: Double
     let route: RouteEstimate
+    let isBest: Bool
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(formatMoney(total))
-                .font(.caption.bold())
-            Text(route.summary)
+        SurfaceBox(
+            fill: isBest ? WorkbenchStyle.accentSoft : WorkbenchStyle.surface,
+            stroke: isBest ? WorkbenchStyle.accent.opacity(0.35) : WorkbenchStyle.line,
+            padding: 11
+        ) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                    Spacer()
+                    if isBest {
+                        Text("推荐")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(WorkbenchStyle.accent)
+                    }
+                }
+
+                Text(formatMoney(total))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(WorkbenchStyle.ink)
+                    .monospacedDigit()
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(route.summary)
+                    Text("\(Int(route.durationMinutes.rounded())) 分钟 · \(route.distanceKm, specifier: "%.1f") km")
+                }
                 .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("\(route.distanceKm, specifier: "%.1f") km")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(WorkbenchStyle.muted)
+                .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity)
-        .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(6)
+    }
+}
+
+private struct WarningBox: View {
+    let warnings: [ResultWarning]
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.orange.opacity(0.08), stroke: WorkbenchStyle.orange.opacity(0.22)) {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(WorkbenchStyle.orange)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("提醒")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                    Text(renderWarnings(warnings))
+                        .font(.caption)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 }

@@ -16,7 +16,7 @@ final class SearchViewModel: ObservableObject {
     }
     @Published var selectedId = ""
     @Published var isSearching = false
-    @Published var status = "输入条件后点击「开始比较」，应用会静默调用平台 API。"
+    @Published var status = "待查询：静默 API 准备就绪。"
 
     private let searchProvider: RentalSearchProviding
     private let geocoder: AddressGeocoding
