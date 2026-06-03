@@ -91,32 +91,38 @@ private final class ZucheAPIClient {
                 return status(.unavailable, "神州在当前范围内没有可用取车点。")
             }
 
-            let pickupTime = platformDateTime(request.pickupAt)
-            let returnTime = platformDateTime(request.returnAt)
+            let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
             let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             var listingsByKey: [String: RentalListing] = [:]
+            var queryErrors: [String] = []
 
-            for candidate in candidates {
-                let chooseCar: ZucheChooseCarContent = try await postGateway(
-                    uri: "/resource/carrctapi/order/chooseCar/v3",
-                    payload: [
-                        "pickupCityId": city.cityId,
-                        "pickupTime": pickupTime,
-                        "returnCityId": city.cityId,
-                        "returnTime": returnTime,
-                        "entrance": 1,
-                        "userChooseLat": String(candidate.location.lat),
-                        "userChooseLon": String(candidate.location.lng),
-                        "holidaysWaitingFlag": 0,
-                    ]
-                )
+            for anchor in queryAnchors(candidates: candidates, request: request) {
+                let chooseCar: ZucheChooseCarContent
+                do {
+                    chooseCar = try await postGateway(
+                        uri: "/resource/carrctapi/order/chooseCar/v3",
+                        payload: [
+                            "pickupCityId": city.cityId,
+                            "pickupTime": timeRange.pickupTime,
+                            "returnCityId": city.cityId,
+                            "returnTime": timeRange.returnTime,
+                            "entrance": 1,
+                            "userChooseLat": String(anchor.lat),
+                            "userChooseLon": String(anchor.lng),
+                            "holidaysWaitingFlag": 0,
+                        ]
+                    )
+                } catch {
+                    queryErrors.append(error.localizedDescription)
+                    continue
+                }
 
                 for dept in chooseCar.deptHangModels {
                     guard let store = makeStore(from: dept, request: request) else { continue }
                     if hasVehicleQuery {
                         guard store.distanceKm <= request.radiusKm else { continue }
                     } else {
-                        guard store.id == candidate.id else { continue }
+                        guard store.id == candidates.first?.id else { continue }
                     }
 
                     for model in dept.models where model.bookFlag != false && model.havePriceFlag != false {
@@ -146,6 +152,9 @@ private final class ZucheAPIClient {
 
             let listings = Array(listingsByKey.values)
             guard !listings.isEmpty else {
+                if !queryErrors.isEmpty {
+                    return status(.parseFailed, "神州 API 部分查询失败：\(queryErrors.prefix(2).joined(separator: "；"))")
+                }
                 return status(.unavailable, "神州真实接口返回成功，但当前条件没有可订车型。")
             }
 
@@ -221,6 +230,29 @@ private final class ZucheAPIClient {
         return hasVehicleQuery ? sorted.filter { $0.distanceKm <= request.radiusKm } : Array(sorted.prefix(1))
     }
 
+    private func queryAnchors(candidates: [Store], request: SearchRequest) -> [GeoPoint] {
+        let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasVehicleQuery else {
+            return candidates.first.map { [$0.location] } ?? []
+        }
+
+        let maxAnchorCount = 6
+        let minimumSpacingKm = max(8, request.radiusKm / 4)
+        var anchors = [request.origin]
+
+        for candidate in candidates {
+            guard anchors.count < maxAnchorCount else { break }
+            let isFarEnough = anchors.allSatisfy {
+                distanceKmBetween(from: $0, to: candidate.location) >= minimumSpacingKm
+            }
+            if isFarEnough {
+                anchors.append(candidate.location)
+            }
+        }
+
+        return anchors
+    }
+
     private func makeStore(from dept: ZucheDept, request: SearchRequest) -> Store? {
         guard let location = dept.location else { return nil }
         return Store(
@@ -268,7 +300,8 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     func search(request: SearchRequest) async -> PlatformEvidenceResult {
         do {
             let webView = try await readyWebView()
-            let payload = try JSONEncoder().encode(EhiBridgeRequest(request: request))
+            let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
+            let payload = try JSONEncoder().encode(EhiBridgeRequest(request: request, timeRange: timeRange))
             let json = String(data: payload, encoding: .utf8) ?? "{}"
             let result = try await webView.callAsyncJavaScript(ehiSearchScript(json: json), arguments: [:], in: nil, contentWorld: .page)
             guard let resultString = result as? String else {
@@ -349,9 +382,8 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
         window.webpackChunkbooking.push([[reqId], {}, function(r) { requireFn = r; }]);
         const http = requireFn(4211).A;
         const util = requireFn(2780).A;
-        const days = Math.max(1, Math.ceil((Date.parse(request.returnAt + 'T10:00:00+08:00') - Date.parse(request.pickupAt + 'T10:00:00+08:00')) / 86400000));
+        const days = request.rentalDays || Math.max(1, Math.ceil((Date.parse(request.returnTime.replace(' ', 'T') + ':00+08:00') - Date.parse(request.pickupTime.replace(' ', 'T') + ':00+08:00')) / 86400000));
         const hasVehicleQuery = (request.vehicleQuery || '').trim().length > 0;
-        const toTime = (date) => date.includes(' ') ? date : date + ' 10:00';
         const num = (value) => {
           if (value === null || value === undefined) return null;
           const n = Number(String(value).replace(/[^0-9.]/g, ''));
@@ -379,7 +411,7 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
         if (!city) {
           return JSON.stringify({ statusKind: 'unavailable', message: '一嗨没有识别到当前位置对应的可租城市。', sourceUrl, listings: [] });
         }
-        const storeResp = await http.getEncrypt('/Address/ReservationBooking/List', { cityId: city.cityId, operationTime: toTime(request.pickupAt) });
+        const storeResp = await http.getEncrypt('/Address/ReservationBooking/List', { cityId: city.cityId, operationTime: request.pickupTime });
         const groups = (storeResp.data && storeResp.data.result) || [];
         const stores = [];
         for (const group of groups) {
@@ -411,13 +443,15 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
           return JSON.stringify({ statusKind: 'unavailable', message: '一嗨在当前范围内没有可用取车点。', sourceUrl, listings: [] });
         }
         const listingsByKey = {};
+        const verifyFailures = [];
+        let stockRequests = 0;
         for (const store of candidates) {
           const payload = {
             stockType: 1,
             whereFilter: null,
-            pickupDto: { cityId: city.cityId, storeId: Number(store.id), operationTime: toTime(request.pickupAt), isService: false },
+            pickupDto: { cityId: city.cityId, storeId: Number(store.id), operationTime: request.pickupTime, isService: false },
             pickupAddressDto: null,
-            returnDto: { cityId: city.cityId, storeId: Number(store.id), operationTime: toTime(request.returnAt), isService: false },
+            returnDto: { cityId: city.cityId, storeId: Number(store.id), operationTime: request.returnTime, isService: false },
             returnAddressDto: null,
             requestContext: {
               platform: util.getGD('platform'),
@@ -432,7 +466,11 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
           try {
             const verifyResp = await http.postEncrypt('/Verify/Step1', '', payload);
             const verify = verifyResp.data || verifyResp;
-            if (!verify.isSuccess) continue;
+            if (!verify.isSuccess) {
+              if (verify.message) verifyFailures.push(`${store.name}: ${verify.message}`);
+              continue;
+            }
+            stockRequests += 1;
             const stockResp = await http.postEncrypt('/Stock/Step2', '', payload);
             if (stockResp.code === 401 || stockResp.status === 401) {
               return JSON.stringify({
@@ -477,6 +515,14 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
           }
         }
         const listings = Object.values(listingsByKey);
+        if (!listings.length && !stockRequests && verifyFailures.length) {
+          return JSON.stringify({
+            statusKind: 'unavailable',
+            message: `一嗨真实接口返回成功，但候选门店不满足取还时间：${verifyFailures.slice(0, 2).join('；')}`,
+            sourceUrl,
+            listings: []
+          });
+        }
         return JSON.stringify({
           statusKind: listings.length ? 'ready' : 'unavailable',
           message: listings.length ? `已从一嗨 API 读取 ${listings.length} 个真实候选车型。` : '一嗨真实接口返回成功，但当前条件没有可订车型。',
@@ -573,14 +619,20 @@ private struct EhiBridgeRequest: Encodable {
     let originLabel: String
     let pickupAt: String
     let returnAt: String
+    let pickupTime: String
+    let returnTime: String
+    let rentalDays: Int
     let radiusKm: Double
     let vehicleQuery: String
 
-    init(request: SearchRequest) {
+    init(request: SearchRequest, timeRange: PlatformQueryTimeRange) {
         origin = request.origin
         originLabel = request.originLabel
         pickupAt = request.pickupAt
         returnAt = request.returnAt
+        pickupTime = timeRange.pickupTime
+        returnTime = timeRange.returnTime
+        rentalDays = CarRentalOptimizer.rentalDays(request)
         radiusKm = request.radiusKm
         vehicleQuery = request.vehicleQuery
     }
@@ -651,8 +703,77 @@ private enum PlatformAPIError: LocalizedError {
     }
 }
 
-private func platformDateTime(_ date: String) -> String {
-    date.contains(" ") ? date : "\(date) 10:00"
+struct PlatformQueryTimeRange: Equatable {
+    let pickupTime: String
+    let returnTime: String
+}
+
+func platformQueryTimeRange(pickupDate: String, returnDate: String, now: Date = Date()) -> PlatformQueryTimeRange {
+    let pickup = platformDateTime(for: pickupDate, alignedWith: nil, now: now)
+    let returnValue = platformDateTime(for: returnDate, alignedWith: pickup.date, now: now)
+    let adjustedReturn = returnValue.date <= pickup.date
+        ? PlatformDateTime(date: AppDateRules.calendar.date(byAdding: .day, value: 1, to: pickup.date) ?? pickup.date)
+        : returnValue
+    return PlatformQueryTimeRange(pickupTime: pickup.formatted, returnTime: adjustedReturn.formatted)
+}
+
+private struct PlatformDateTime {
+    let date: Date
+
+    var formatted: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        return formatter.string(from: date)
+    }
+}
+
+private func platformDateTime(for value: String, alignedWith pickupDate: Date?, now: Date) -> PlatformDateTime {
+    if let explicit = parsePlatformDateTime(value) {
+        return PlatformDateTime(date: explicit)
+    }
+
+    guard let day = AppDateRules.parseRequestDate(value) else {
+        return PlatformDateTime(date: now)
+    }
+
+    if let pickupDate {
+        return PlatformDateTime(date: date(on: day, hour: AppDateRules.calendar.component(.hour, from: pickupDate)))
+    }
+
+    if AppDateRules.calendar.isDate(day, inSameDayAs: now) {
+        let leadTime = AppDateRules.calendar.date(byAdding: .hour, value: 2, to: now) ?? now
+        let rounded = roundUpToNextHour(leadTime)
+        let tenAM = date(on: day, hour: 10)
+        return PlatformDateTime(date: max(rounded, tenAM))
+    }
+
+    return PlatformDateTime(date: date(on: day, hour: 10))
+}
+
+private func parsePlatformDateTime(_ value: String) -> Date? {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm"
+    formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+    return formatter.date(from: value)
+}
+
+private func date(on day: Date, hour: Int) -> Date {
+    var components = AppDateRules.calendar.dateComponents([.year, .month, .day], from: day)
+    components.hour = hour
+    components.minute = 0
+    components.second = 0
+    return AppDateRules.calendar.date(from: components) ?? day
+}
+
+private func roundUpToNextHour(_ value: Date) -> Date {
+    let calendar = AppDateRules.calendar
+    var components = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: value)
+    let shouldRoundUp = (components.minute ?? 0) > 0 || (components.second ?? 0) > 0
+    components.minute = 0
+    components.second = 0
+    let roundedDown = calendar.date(from: components) ?? value
+    return shouldRoundUp ? (calendar.date(byAdding: .hour, value: 1, to: roundedDown) ?? roundedDown) : roundedDown
 }
 
 private func rentalDays(_ request: SearchRequest) -> Int {
