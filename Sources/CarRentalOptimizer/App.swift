@@ -26,13 +26,23 @@ struct CarRentalOptimizerApp: App {
             }
 
             CommandGroup(after: .appInfo) {
-                Button(updateChecker.isChecking ? "正在检查更新…" : "检查更新…") {
+                Button(updateMenuTitle) {
                     Task { await updateChecker.checkForUpdates() }
                 }
                 .keyboardShortcut("u", modifiers: [.command])
-                .disabled(updateChecker.isChecking)
+                .disabled(updateChecker.isChecking || updateChecker.isInstalling)
             }
         }
+    }
+
+    private var updateMenuTitle: String {
+        if updateChecker.isInstalling {
+            return "正在自动升级…"
+        }
+        if updateChecker.isChecking {
+            return "正在检查更新…"
+        }
+        return "检查更新…"
     }
 
     private func updateAlert(_ alert: UpdateAlert) -> Alert {
@@ -41,10 +51,19 @@ struct CarRentalOptimizerApp: App {
             return Alert(
                 title: Text(alert.title),
                 message: Text(alert.message),
+                primaryButton: .default(Text("自动升级")) {
+                    Task { await updateChecker.installAvailableUpdate() }
+                },
+                secondaryButton: .cancel(Text("稍后"))
+            )
+        case .installFailed:
+            return Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
                 primaryButton: .default(Text("打开下载页")) {
                     updateChecker.openReleasePage(alert.releaseURL)
                 },
-                secondaryButton: .cancel(Text("稍后"))
+                secondaryButton: .cancel(Text("好"))
             )
         case .upToDate, .failed:
             return Alert(

@@ -1,4 +1,4 @@
-# 发布与更新指南（原生 macOS + Sparkle 2）
+# 发布与更新指南（原生 macOS + GitHub Release）
 
 本文档说明如何打包、签名、发布和验证 Car Rental Optimizer 原生 macOS 应用的更新。
 
@@ -20,27 +20,27 @@
 
 ## 架构概览
 
-本项目设计上使用 **Sparkle 2**（macOS 原生软件更新框架）实现自动更新。
-当前 GitHub Release 的 ad-hoc 分发包暂时不嵌入 Sparkle.framework，因为未经过 Developer ID 签名与公证的下载包会被 macOS Gatekeeper 拒绝加载嵌入框架。恢复应用内自动更新前，需要先完成 Developer ID 签名和 notarization 配置。
+当前发布包使用 GitHub Release ZIP 分发。应用内「检查更新…」通过 GitHub latest release 跳转获取新版本号，发现新版本后直接下载约定命名的 ZIP 包，解压并校验 `.app`，然后启动独立安装脚本，在当前应用退出后替换安装并重新打开。
+
+Sparkle 2 的 appcast 方案仍保留为未来选项；在没有 Developer ID 签名和 notarization 前，发布版不嵌入 Sparkle.framework，避免 ad-hoc 下载包被 Gatekeeper 拒绝加载嵌入框架。
 
 ```
 ┌───────────────────┐         ┌────────────────────────┐
-│  SwiftUI App Menu │         │  Sparkle 2 Framework   │
-│  检查更新… (Cmd+?) │────────▶│  SPUStandardUpdater    │
-│                   │         │  Controller            │
-└───────────────────┘         └──────────┬─────────────┘
-                                         │
-                                         ▼
-                           ┌──────────────────────────┐
-                           │  appcast.xml (RSS feed)  │
-                           │  GitHub Pages hosting    │
-                           └──────────────────────────┘
+│  SwiftUI App Menu │         │ GitHub Release latest  │
+│  检查更新… (Cmd+U)│────────▶│ HEAD redirect/tag read │
+│                   │         └──────────┬─────────────┘
+└─────────┬─────────┘                    │
+          │                              ▼
+          │                 ┌──────────────────────────┐
+          └────────────────▶│ Release ZIP asset        │
+                            │ download / verify / swap │
+                            └──────────────────────────┘
 ```
 
-**更新框架**: Sparkle 2（通过 Swift Package Manager 集成）
-**更新源**: appcast.xml 托管在 GitHub Pages（零成本）
-**更新触发**: 自动（每 24h 后台检查）+ 手动（菜单「检查更新…」）
-**签名方案**: Ed25519（Sparkle 内置）+ Apple Developer ID（可选）
+**更新框架**: 自定义轻量安装器（`UpdateChecker` + `MacReleaseInstaller`）
+**更新源**: GitHub Release latest + `CarRentalOptimizer-vX.Y.Z.zip`
+**更新触发**: 手动（菜单「检查更新…」）
+**签名方案**: 当前为 ad-hoc codesign 校验；Developer ID + notarization 为后续正式分发方向
 
 ## 版本号管理
 
@@ -57,7 +57,7 @@
 | 新增功能 | MINOR +1 | 0.2.0 → 0.3.0 |
 | 重大变更 | MAJOR +1 | 0.2.0 → 1.0.0 |
 
-⚠️ `CFBundleVersion`（build number）每次发版必须递增（如 1 → 2 → 3），Sparkle 用它来判断新旧版本。
+⚠️ `CFBundleVersion`（build number）每次发版必须递增（如 1 → 2 → 3）。当前更新检查用 semantic version 判断新旧，build number 用于 macOS bundle 版本一致性和未来 Sparkle 兼容。
 
 ## 生成 EdDSA 签名密钥
 
@@ -161,7 +161,7 @@ spctl --assess --type execute --verbose=4 "租车比价助手.app"
 本机测试安装：
 
 ```bash
-scripts/install-local-app.sh build/CarRentalOptimizer-v0.6.0.zip
+scripts/install-local-app.sh build/CarRentalOptimizer-v0.6.1.zip
 ```
 
 启动 smoke test：

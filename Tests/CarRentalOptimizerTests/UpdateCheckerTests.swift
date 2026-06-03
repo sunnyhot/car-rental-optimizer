@@ -20,7 +20,8 @@ struct UpdateCheckerTests {
                 tagName: "v0.5.2",
                 name: "租车比价助手 v0.5.2",
                 htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.5.2")!
-            ))
+            )),
+            installer: StubUpdateInstaller()
         )
 
         await checker.checkForUpdates()
@@ -31,6 +32,66 @@ struct UpdateCheckerTests {
         #expect(checker.alert?.releaseURL?.absoluteString.contains("v0.5.2") == true)
     }
 
+    @Test("Release package URL uses the GitHub asset naming convention")
+    func releasePackageURLUsesGitHubAssetNamingConvention() {
+        let release = GitHubRelease(
+            tagName: "v0.6.1",
+            name: nil,
+            htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.6.1")!
+        )
+
+        #expect(release.packageURL.absoluteString == "https://github.com/sunnyhot/car-rental-optimizer/releases/download/v0.6.1/CarRentalOptimizer-v0.6.1.zip")
+    }
+
+    @Test("Checker installs the available release and requests app quit")
+    func checkerInstallsAvailableReleaseAndRequestsAppQuit() async {
+        let installer = StubUpdateInstaller()
+        var quitRequested = false
+        let checker = UpdateChecker(
+            currentVersion: "0.6.0",
+            releaseFetcher: StubReleaseFetcher(release: GitHubRelease(
+                tagName: "v0.6.1",
+                name: "租车比价助手 v0.6.1",
+                htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.6.1")!
+            )),
+            installer: installer,
+            quitHandler: { quitRequested = true }
+        )
+
+        await checker.checkForUpdates()
+        await checker.installAvailableUpdate()
+
+        #expect(installer.installedReleases.map(\.tagName) == ["v0.6.1"])
+        #expect(installer.installedReleases.first?.packageURL.absoluteString.contains("CarRentalOptimizer-v0.6.1.zip") == true)
+        #expect(quitRequested)
+        #expect(checker.isInstalling == false)
+    }
+
+    @Test("Checker reports automatic install failures without quitting")
+    func checkerReportsAutomaticInstallFailuresWithoutQuitting() async {
+        let installer = StubUpdateInstaller(error: URLError(.cannotWriteToFile))
+        var quitRequested = false
+        let checker = UpdateChecker(
+            currentVersion: "0.6.0",
+            releaseFetcher: StubReleaseFetcher(release: GitHubRelease(
+                tagName: "v0.6.1",
+                name: "租车比价助手 v0.6.1",
+                htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.6.1")!
+            )),
+            installer: installer,
+            quitHandler: { quitRequested = true }
+        )
+
+        await checker.checkForUpdates()
+        await checker.installAvailableUpdate()
+
+        #expect(checker.alert?.kind == .installFailed)
+        #expect(checker.alert?.title == "自动升级失败")
+        #expect(checker.alert?.releaseURL?.absoluteString.contains("v0.6.1") == true)
+        #expect(!quitRequested)
+        #expect(checker.isInstalling == false)
+    }
+
     @Test("Checker reports current version up to date")
     func checkerReportsCurrentVersionUpToDate() async {
         let checker = UpdateChecker(
@@ -39,7 +100,8 @@ struct UpdateCheckerTests {
                 tagName: "v0.5.2",
                 name: "租车比价助手 v0.5.2",
                 htmlURL: URL(string: "https://github.com/sunnyhot/car-rental-optimizer/releases/tag/v0.5.2")!
-            ))
+            )),
+            installer: StubUpdateInstaller()
         )
 
         await checker.checkForUpdates()
@@ -52,7 +114,8 @@ struct UpdateCheckerTests {
     func checkerReportsFetchFailures() async {
         let checker = UpdateChecker(
             currentVersion: "0.5.2",
-            releaseFetcher: StubReleaseFetcher(error: URLError(.notConnectedToInternet))
+            releaseFetcher: StubReleaseFetcher(error: URLError(.notConnectedToInternet)),
+            installer: StubUpdateInstaller()
         )
 
         await checker.checkForUpdates()
@@ -120,6 +183,22 @@ private final class StubReleaseDataLoader: ReleaseDataLoading {
             throw URLError(.badServerResponse)
         }
         return try results.removeFirst().get()
+    }
+}
+
+private final class StubUpdateInstaller: UpdateInstalling {
+    private let error: Error?
+    private(set) var installedReleases: [GitHubRelease] = []
+
+    init(error: Error? = nil) {
+        self.error = error
+    }
+
+    func prepareAndLaunchInstaller(for release: GitHubRelease) async throws {
+        if let error {
+            throw error
+        }
+        installedReleases.append(release)
     }
 }
 
