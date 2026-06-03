@@ -2,27 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Sparkle update feed URL.
-         Replace with your actual appcast hosting URL before distributing. -->
-    <key>SUFeedURL</key>
-    <string>https://sunnyhot.github.io/car-rental-optimizer/appcast.xml</string>
-
-    <!-- Sparkle EdDSA public key (placeholder).
-         To generate real keys, run Sparkle's generate_keys tool:
-           .build/release/generate_keys  (or from Sparkle distribution bin/)
-         Then replace the value below with the printed public key. -->
-    <key>SUPublicEDKey</key>
-    <string>PLACEHOLDER_GENERATE_REAL_KEY_WITH_SPARKLE_GENERATE_KEYS</string>
-
     <!-- App version info -->
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.2</string>
+    <string>0.3.3</string>
     <key>CFBundleVersion</key>
-    <string>8</string>
+    <string>9</string>
 
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>

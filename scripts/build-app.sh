@@ -36,13 +36,18 @@ else
     echo "    WARNING: native/Info.plist not found"
 fi
 
-# Copy Sparkle framework (find it in the build artifacts)
-SPARKLE_FW=$(find .build -name "Sparkle.framework" -type d -maxdepth 5 | head -1)
-if [ -n "${SPARKLE_FW}" ]; then
-    cp -R "${SPARKLE_FW}" "${APP_BUNDLE}/Contents/Frameworks/"
-    echo "    Copied Sparkle.framework"
+# Copy Sparkle only when the executable links it. Stale .build caches may contain
+# Sparkle.framework even when the current release target no longer uses it.
+if otool -L "${EXECUTABLE_PATH}" | grep -q "@rpath/Sparkle.framework"; then
+    SPARKLE_FW=$(find .build -name "Sparkle.framework" -type d -maxdepth 5 | head -1)
+    if [ -n "${SPARKLE_FW}" ]; then
+        cp -R "${SPARKLE_FW}" "${APP_BUNDLE}/Contents/Frameworks/"
+        echo "    Copied Sparkle.framework"
+    else
+        echo "    WARNING: Sparkle.framework not found in .build"
+    fi
 else
-    echo "    WARNING: Sparkle.framework not found in .build"
+    echo "    Sparkle.framework not linked; skipping embedded framework copy"
 fi
 
 # Create PkgInfo

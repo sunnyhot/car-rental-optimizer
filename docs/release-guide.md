@@ -20,7 +20,8 @@
 
 ## 架构概览
 
-本项目使用 **Sparkle 2**（macOS 原生软件更新框架）实现自动更新。
+本项目设计上使用 **Sparkle 2**（macOS 原生软件更新框架）实现自动更新。
+当前 GitHub Release 的 ad-hoc 分发包暂时不嵌入 Sparkle.framework，因为未经过 Developer ID 签名与公证的下载包会被 macOS Gatekeeper 拒绝加载嵌入框架。恢复应用内自动更新前，需要先完成 Developer ID 签名和 notarization 配置。
 
 ```
 ┌───────────────────┐         ┌────────────────────────┐

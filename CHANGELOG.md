@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.3] - 2026-06-03
+
+### Fixed
+- 移除发布版 Sparkle 动态框架依赖，避免未公证 ad-hoc 下载包在启动时被 Gatekeeper 拒绝加载嵌入框架
+- 发布验证新增 ad-hoc 包不得链接 Sparkle.framework 的检查
+
+### Changed
+- 暂停应用内自动更新菜单；待 Developer ID 签名和 notarization 配置完成后再恢复
+
 ## [0.3.2] - 2026-06-03
 
 ### Fixed

@@ -14,14 +14,11 @@ let package = Package(
         ),
         .library(name: "CarRentalDomain", targets: ["CarRentalDomain"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.4.0")
-    ],
+    dependencies: [],
     targets: [
         .executableTarget(
             name: "CarRentalOptimizer",
             dependencies: [
-                .product(name: "Sparkle", package: "Sparkle"),
                 "CarRentalDomain",
             ],
             path: "Sources/CarRentalOptimizer"

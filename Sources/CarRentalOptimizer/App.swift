@@ -3,8 +3,6 @@ import SwiftUI
 @MainActor
 @main
 struct CarRentalOptimizerApp: App {
-    private let updaterManager = UpdaterManager()
-
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -23,9 +21,6 @@ struct CarRentalOptimizerApp: App {
                     )
                 }
             }
-
-            // Sparkle "检查更新" menu item — inserted right after "关于"
-            updaterManager.commands
         }
     }
 }

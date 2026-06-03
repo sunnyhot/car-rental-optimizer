@@ -26,10 +26,12 @@ if [ ! -d "${APP_BUNDLE}" ]; then
 fi
 
 SPARKLE_FRAMEWORK="${APP_BUNDLE}/Contents/Frameworks/Sparkle.framework"
-SYMLINK_COUNT=$(find "${SPARKLE_FRAMEWORK}" -maxdepth 3 -type l | wc -l | tr -d ' ')
-if [ "${SYMLINK_COUNT}" -eq 0 ]; then
-    echo "ERROR: ZIP extraction did not preserve Sparkle.framework symlinks" >&2
-    exit 1
+if [ -d "${SPARKLE_FRAMEWORK}" ]; then
+    SYMLINK_COUNT=$(find "${SPARKLE_FRAMEWORK}" -maxdepth 3 -type l | wc -l | tr -d ' ')
+    if [ "${SYMLINK_COUNT}" -eq 0 ]; then
+        echo "ERROR: ZIP extraction did not preserve Sparkle.framework symlinks" >&2
+        exit 1
+    fi
 fi
 
 "$(dirname "$0")/verify-app-bundle.sh" "${APP_BUNDLE}"

@@ -40,5 +40,11 @@ if ! otool -l "${EXECUTABLE_PATH}" | grep -q "${FRAMEWORK_RPATH}"; then
     exit 1
 fi
 
+SIGNATURE_KIND=$(codesign -dv --verbose=4 "${APP_BUNDLE}" 2>&1 | awk -F= '/^Signature=/{print $2}')
+if [ "${SIGNATURE_KIND}" = "adhoc" ] && otool -L "${EXECUTABLE_PATH}" | grep -q "@rpath/Sparkle.framework"; then
+    echo "ERROR: Ad-hoc release app must not link Sparkle.framework; Gatekeeper blocks the nested framework" >&2
+    exit 1
+fi
+
 codesign --verify --deep --strict "${APP_BUNDLE}"
 echo "App bundle verification OK: ${APP_BUNDLE}"
