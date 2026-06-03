@@ -388,6 +388,11 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     }
 
     private func ehiSearchScript(json: String) -> String {
+        makeEhiSearchScript(json: json)
+    }
+}
+
+func makeEhiSearchScript(json: String) -> String {
         """
         const request = \(json);
         const sourceUrl = 'https://booking.1hai.cn/order/firstStep';
@@ -409,9 +414,13 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
         const util = requireFn(2780).A;
         const days = request.rentalDays || Math.max(1, Math.ceil((Date.parse(request.returnTime.replace(' ', 'T') + ':00+08:00') - Date.parse(request.pickupTime.replace(' ', 'T') + ':00+08:00')) / 86400000));
         const hasVehicleQuery = (request.vehicleQuery || '').trim().length > 0;
+        const decodeObfuscatedDigits = (value) => String(value).split('').map(ch => {
+          const code = ch.charCodeAt(0);
+          return code >= 57345 && code <= 57354 ? String(code - 57345) : ch;
+        }).join('');
         const num = (value) => {
           if (value === null || value === undefined || value === '') return null;
-          const n = Number(String(value).replace(/[^0-9.]/g, ''));
+          const n = Number(decodeObfuscatedDigits(value).replace(/[^0-9.]/g, ''));
           return Number.isFinite(n) ? n : null;
         };
         const firstNumber = (...values) => {
@@ -680,7 +689,6 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
           listings
         });
         """
-    }
 }
 
 // MARK: - Shared Models
