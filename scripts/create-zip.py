@@ -53,7 +53,7 @@ def create_zip_with_ditto(app_path, output_path):
 
 def create_zip_with_python(app_path, output_path):
     """Portable ZIP fallback that preserves symlink entries."""
-    # Get just the app name (e.g., "租车总成本比较.app")
+    # Get just the app name (e.g., "租车比价助手.app")
     app_name = os.path.basename(app_path)
     parent_dir = os.path.dirname(app_path)
 

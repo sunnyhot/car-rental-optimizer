@@ -12,10 +12,10 @@ struct CarRentalOptimizerApp: App {
         .commands {
             // "关于" menu item
             CommandGroup(replacing: .appInfo) {
-                Button("关于租车总成本比较") {
+                Button("关于\(AppInfo.appName)") {
                     NSApplication.shared.orderFrontStandardAboutPanel(
                         options: [
-                            .applicationName: "租车总成本比较",
+                            .applicationName: AppInfo.appName,
                             .applicationVersion: AppInfo.version,
                         ]
                     )

@@ -1,7 +1,7 @@
 import CarRentalDomain
 import Foundation
 
-struct MockMapService: MapService {
+struct EstimatedMapService: MapService {
     func estimateRoutes(origin: GeoPoint, store: Store) async -> (taxi: RouteEstimate, transit: RouteEstimate) {
         if store.distanceKm >= 80 {
             let taxiMinutes = (store.distanceKm * 0.75).rounded()
@@ -14,14 +14,14 @@ struct MockMapService: MapService {
                     cost: (90 + store.distanceKm * 2.5).rounded(),
                     durationMinutes: taxiMinutes,
                     distanceKm: store.distanceKm,
-                    summary: "跨城打车约 \(Int(taxiMinutes)) 分钟"
+                    summary: "跨城打车估算约 \(Int(taxiMinutes)) 分钟"
                 ),
                 transit: RouteEstimate(
                     mode: .transit,
                     cost: transitCost,
                     durationMinutes: transitMinutes,
                     distanceKm: store.distanceKm,
-                    summary: "高铁+市内交通约 \(Int(transitMinutes)) 分钟"
+                    summary: "高铁+市内交通估算约 \(Int(transitMinutes)) 分钟"
                 )
             )
         }
@@ -36,14 +36,14 @@ struct MockMapService: MapService {
                 cost: max(12, (14 + store.distanceKm * 2.3).rounded()),
                 durationMinutes: taxiMinutes,
                 distanceKm: store.distanceKm,
-                summary: "打车约 \(Int(taxiMinutes)) 分钟"
+                summary: "打车估算约 \(Int(taxiMinutes)) 分钟"
             ),
             transit: RouteEstimate(
                 mode: .transit,
                 cost: transitCost,
                 durationMinutes: transitMinutes,
                 distanceKm: store.distanceKm,
-                summary: "公交/地铁约 \(Int(transitMinutes)) 分钟"
+                summary: "公交/地铁估算约 \(Int(transitMinutes)) 分钟"
             )
         )
     }

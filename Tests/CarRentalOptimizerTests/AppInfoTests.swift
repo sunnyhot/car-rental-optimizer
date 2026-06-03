@@ -10,7 +10,7 @@ struct AppInfoTests {
 
     @Test("App name matches product name")
     func appNameMatches() {
-        #expect(AppInfo.appName == "租车总成本比较")
+        #expect(AppInfo.appName == "租车比价助手")
     }
 
     @Test("Bundle identifier follows reverse DNS")

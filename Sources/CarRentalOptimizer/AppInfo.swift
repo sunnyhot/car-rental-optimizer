@@ -9,8 +9,8 @@
 /// 2. Update `CFBundleShortVersionString` and increment `CFBundleVersion` in Info.plist
 /// 3. Build, archive, generate_appcast, and publish
 enum AppInfo {
-    static let appName = "租车总成本比较"
+    static let appName = "租车比价助手"
     static let bundleIdentifier = "com.carrental.optimizer"
-    static let version = "0.3.3"
-    static let build = "9"
+    static let version = "0.4.0"
+    static let build = "10"
 }

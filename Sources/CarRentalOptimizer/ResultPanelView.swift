@@ -24,7 +24,7 @@ struct ResultPanelView: View {
             if viewModel.isSearching {
                 LoadingResultsView()
             } else if viewModel.results.isEmpty {
-                EmptyResultsView()
+                EmptyResultsView(statuses: viewModel.platformStatuses)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -58,7 +58,7 @@ private struct LoadingResultsView: View {
                 .controlSize(.large)
             Text("正在比较")
                 .font(.headline)
-            Text("正在计算车辆价格和交通成本。")
+            Text("正在解析官方页面证据，并计算到店路线估算。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -68,21 +68,79 @@ private struct LoadingResultsView: View {
 }
 
 private struct EmptyResultsView: View {
+    let statuses: [PlatformEvidenceStatus]
+
     var body: some View {
         VStack(spacing: 12) {
             Spacer()
-            Image(systemName: "car.2")
+            Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("等待查询")
+            Text("等待官方数据")
                 .font(.headline)
-            Text("设置搜索条件后，点击「开始比较」查看排序结果。")
+            Text("没有可排序的官方车源时，这里不会显示推测价格。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(statuses) { status in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: statusIcon(status.kind))
+                            .foregroundStyle(statusColor(status.kind))
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(status.platform.label)
+                                .font(.caption.bold())
+                            Text(status.message)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: 360, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
+
             Spacer()
         }
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func statusIcon(_ kind: PlatformEvidenceStatusKind) -> String {
+        switch kind {
+        case .ready:
+            return "checkmark.circle.fill"
+        case .unavailable:
+            return "calendar.badge.exclamationmark"
+        case .loginRequired:
+            return "person.crop.circle.badge.exclamationmark"
+        case .captchaRequired:
+            return "shield.lefthalf.filled"
+        case .parseFailed:
+            return "exclamationmark.triangle.fill"
+        case .waitingForEvidence:
+            return "clock"
+        }
+    }
+
+    private func statusColor(_ kind: PlatformEvidenceStatusKind) -> Color {
+        switch kind {
+        case .ready:
+            return .green
+        case .unavailable:
+            return .orange
+        case .loginRequired, .captchaRequired:
+            return .yellow
+        case .parseFailed:
+            return .red
+        case .waitingForEvidence:
+            return .secondary
+        }
     }
 }
 
@@ -118,8 +176,8 @@ private struct ResultRowView: View {
 
                 HStack(spacing: 12) {
                     CostBadge(title: "最佳", value: recommendation.bestTotal, highlight: true)
-                    CostBadge(title: "打车", value: recommendation.taxiTotal, highlight: false)
-                    CostBadge(title: "公交", value: recommendation.transitTotal, highlight: false)
+                    CostBadge(title: "打车估", value: recommendation.taxiTotal, highlight: false)
+                    CostBadge(title: "公交估", value: recommendation.transitTotal, highlight: false)
                 }
             }
 

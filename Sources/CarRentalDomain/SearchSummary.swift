@@ -3,6 +3,13 @@ import Foundation
 /// Calculates the number of billable rental days from pickup to return timestamps.
 /// Returns at least 1 day, ceiling fractional days.
 public func calculateRentalDays(pickupAt: String, returnAt: String) -> Int {
+    if let pickupDate = parseDateOnly(pickupAt),
+       let returnDate = parseDateOnly(returnAt) {
+        let calendar = chinaCalendar()
+        let days = calendar.dateComponents([.day], from: pickupDate, to: returnDate).day ?? 0
+        return max(1, days)
+    }
+
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime]
 
@@ -34,11 +41,35 @@ private func parseLenient(_ string: String) -> Date? {
     return formatter.date(from: string)
 }
 
+private func parseDateOnly(_ string: String) -> Date? {
+    guard string.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else {
+        return nil
+    }
+
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+    return formatter.date(from: string)
+}
+
 private func formatDateTime(_ value: String) -> String {
+    if let date = parseDateOnly(value) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/MM/dd"
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        return formatter.string(from: date)
+    }
+
     guard let date = parseLenient(value) else { return value }
 
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy/MM/dd HH:mm"
     formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
     return formatter.string(from: date)
+}
+
+private func chinaCalendar() -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+    return calendar
 }

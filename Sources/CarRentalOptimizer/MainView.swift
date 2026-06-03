@@ -10,7 +10,7 @@ struct MainView: View {
                     Text("Car rental optimizer")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("租车总成本比较")
+                    Text(AppInfo.appName)
                         .font(.title2.bold())
                 }
 
@@ -18,9 +18,9 @@ struct MainView: View {
 
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(Color.green)
+                        .fill(Color.blue)
                         .frame(width: 8, height: 8)
-                    Text("本地 Mock 比价模式")
+                    Text("真实数据工作流")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -33,7 +33,7 @@ struct MainView: View {
 
             HSplitView {
                 SearchPanelView()
-                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+                    .frame(minWidth: 320, idealWidth: 360, maxWidth: 440)
 
                 ResultPanelView()
                     .frame(minWidth: 360, idealWidth: 440)

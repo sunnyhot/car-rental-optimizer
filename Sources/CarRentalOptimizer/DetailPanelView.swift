@@ -16,7 +16,7 @@ struct DetailPanelView: View {
                         .foregroundStyle(.secondary)
                     Text("等待结果")
                         .font(.headline)
-                    Text("点击「开始比较」后，这里会显示最优方案、费用拆分和路线明细。")
+                    Text("识别到官方车源后，这里会显示费用拆分和路线估算。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -52,7 +52,7 @@ private struct RecommendationDetailView: View {
                         .foregroundStyle(.secondary)
                     Text(formatMoney(recommendation.bestTotal))
                         .font(.system(size: 32, weight: .bold))
-                    Text("按\(recommendation.bestRouteMode.label)到店计算")
+                    Text("按\(recommendation.bestRouteMode.label)到店估算")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -77,8 +77,8 @@ private struct RecommendationDetailView: View {
                 DetailSection(header: "费用拆分") {
                     VStack(spacing: 0) {
                         CostLineView(label: "租车基础价", value: recommendation.listing.basePrice)
-                        CostLineView(label: "平台服务费", value: recommendation.listing.platformFees)
-                        CostLineView(label: "保险/保障", value: recommendation.listing.insuranceFees)
+                        CostLineView(label: "平台服务费识别值", value: recommendation.listing.platformFees)
+                        CostLineView(label: "保险/保障识别值", value: recommendation.listing.insuranceFees)
                         CostLineView(label: "异店还车费", value: recommendation.listing.oneWayFee)
                         Divider()
                         CostLineView(label: "租车小计", value: recommendation.rentalTotal, bold: true)

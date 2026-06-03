@@ -121,22 +121,22 @@ swift build -c release
 # 产物位于 .build/release/CarRentalOptimizer
 
 # 创建 .app bundle 目录结构
-mkdir -p "build/租车总成本比较.app/Contents/MacOS"
-mkdir -p "build/租车总成本比较.app/Contents/Frameworks"
-mkdir -p "build/租车总成本比较.app/Contents/Resources"
+mkdir -p "build/租车比价助手.app/Contents/MacOS"
+mkdir -p "build/租车比价助手.app/Contents/Frameworks"
+mkdir -p "build/租车比价助手.app/Contents/Resources"
 
 # 复制可执行文件
-cp .build/release/CarRentalOptimizer "build/租车总成本比较.app/Contents/MacOS/"
+cp .build/release/CarRentalOptimizer "build/租车比价助手.app/Contents/MacOS/"
 
 # 复制 Info.plist
-cp native/Info.plist "build/租车总成本比较.app/Contents/"
+cp native/Info.plist "build/租车比价助手.app/Contents/"
 
 # 复制 Sparkle.framework
-cp -R .build/release/Sparkle.framework "build/租车总成本比较.app/Contents/Frameworks/"
+cp -R .build/release/Sparkle.framework "build/租车比价助手.app/Contents/Frameworks/"
 
 # 创建 DMG
-hdiutil create -volname "租车总成本比较" \
-    -srcfolder "build/租车总成本比较.app" \
+hdiutil create -volname "租车比价助手" \
+    -srcfolder "build/租车比价助手.app" \
     -ov -format UDZO \
     "build/CarRentalOptimizer-0.2.0.dmg"
 ```
@@ -154,10 +154,10 @@ hdiutil create -volname "租车总成本比较" \
 codesign --deep --force --verify --verbose \
     --sign "Developer ID Application: Your Name (TEAMID)" \
     --options runtime \
-    "build/租车总成本比较.app"
+    "build/租车比价助手.app"
 
 # 验证签名
-codesign --deep --verify --strict "build/租车总成本比较.app"
+codesign --deep --verify --strict "build/租车比价助手.app"
 ```
 
 ### 公证（Notarization）
@@ -202,7 +202,7 @@ generate_appcast update_archives/
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>租车总成本比较 更新</title>
+    <title>租车比价助手 更新</title>
     <item>
       <title>版本 0.2.0</title>
       <sparkle:version>1</sparkle:version>
@@ -265,7 +265,7 @@ git push origin gh-pages
 
 ### 手动检查
 
-- 点击菜单栏 **租车总成本比较** → **检查更新…**
+- 点击菜单栏 **租车比价助手** → **检查更新…**
 - 立即检查是否有新版本
 - 菜单项在更新检查进行时自动禁用（由 `canCheckForUpdates` 属性控制）
 

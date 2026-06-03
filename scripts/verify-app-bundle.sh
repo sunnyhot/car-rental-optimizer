@@ -2,7 +2,7 @@
 # Verify that the packaged macOS app can resolve its embedded frameworks.
 set -euo pipefail
 
-APP_BUNDLE="${1:-build/租车总成本比较.app}"
+APP_BUNDLE="${1:-build/租车比价助手.app}"
 EXECUTABLE_NAME="CarRentalOptimizer"
 EXECUTABLE_PATH="${APP_BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}"
 FRAMEWORK_RPATH="@executable_path/../Frameworks"

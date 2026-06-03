@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ZIP_PATH="${1:?Usage: $0 <release-zip>}"
-EXPECTED_APP_NAME="${2:-租车总成本比较.app}"
+EXPECTED_APP_NAME="${2:-租车比价助手.app}"
 
 if [ ! -f "${ZIP_PATH}" ]; then
     echo "ERROR: Release ZIP not found: ${ZIP_PATH}" >&2

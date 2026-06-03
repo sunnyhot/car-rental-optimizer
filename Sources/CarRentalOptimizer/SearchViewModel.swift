@@ -6,9 +6,18 @@ import SwiftUI
 final class SearchViewModel: ObservableObject {
     @Published var request = AppDefaults.searchRequest
     @Published var results: [Recommendation] = []
+    @Published var platformEvidenceText: [PlatformId: String] = [:]
+    @Published var platformStatuses: [PlatformEvidenceStatus] = AppDefaults.searchRequest.platforms.map {
+        PlatformEvidenceStatus(
+            platform: $0,
+            kind: .waitingForEvidence,
+            message: "等待粘贴\($0.label)官方搜索页面内容。",
+            sourceUrl: officialPlatformURL(for: $0)
+        )
+    }
     @Published var selectedId = ""
     @Published var isSearching = false
-    @Published var status = "点击「开始比较」进行查询。"
+    @Published var status = "粘贴官方页面数据后，点击「开始比较」进行查询。"
 
     var selected: Recommendation? {
         results.first { $0.id == selectedId } ?? results.first
@@ -18,16 +27,34 @@ final class SearchViewModel: ObservableObject {
         isSearching = true
         results = []
         selectedId = ""
-        status = "正在使用 Mock 数据计算租车价格、打车成本和公共交通成本..."
+        status = "正在读取官方页面证据，并计算到店路线估算成本..."
 
         defer {
             isSearching = false
         }
 
-        let recommendations = await searchRentalOptions(
+        let evidenceResults = request.platforms.map { platform in
+            parsePlatformEvidence(
+                input: PlatformEvidenceInput(
+                    platform: platform,
+                    text: platformEvidenceText[platform] ?? "",
+                    sourceUrl: officialPlatformURL(for: platform)
+                ),
+                request: request
+            )
+        }
+        platformStatuses = evidenceResults.map(\.status)
+
+        let listings = evidenceResults.flatMap(\.listings)
+        guard !listings.isEmpty else {
+            status = formatNoOfficialListingsStatus(evidenceResults)
+            return
+        }
+
+        let recommendations = await rankRentalListings(
             request: request,
-            rentalAdapters: [EhiMockAdapter(), CarIncMockAdapter()],
-            mapService: MockMapService()
+            listings: listings,
+            mapService: EstimatedMapService()
         )
 
         results = recommendations
@@ -53,15 +80,47 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
-    func applyDates(pickup: Date, returnDate: Date) {
-        request.pickupAt = formatDateTime(pickup)
-        request.returnAt = formatDateTime(returnDate)
+    func updateEvidenceText(_ text: String, for platform: PlatformId) {
+        platformEvidenceText[platform] = text
+        if !results.isEmpty {
+            status = "官方页面数据已变更，点击「开始比较」重新计算总成本。"
+        }
     }
 
-    private func formatDateTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        return formatter.string(from: date)
+    func evidenceText(for platform: PlatformId) -> String {
+        platformEvidenceText[platform] ?? ""
     }
+
+    func platformStatus(for platform: PlatformId) -> PlatformEvidenceStatus {
+        platformStatuses.first { $0.platform == platform } ?? PlatformEvidenceStatus(
+            platform: platform,
+            kind: .waitingForEvidence,
+            message: "等待粘贴\(platform.label)官方搜索页面内容。",
+            sourceUrl: officialPlatformURL(for: platform)
+        )
+    }
+
+    func applyDates(pickup: Date, returnDate: Date) {
+        let normalized = AppDateRules.normalizedRange(pickup: pickup, returnDate: returnDate)
+        request.pickupAt = AppDateRules.formatRequestDate(normalized.pickup)
+        request.returnAt = AppDateRules.formatRequestDate(normalized.returnDate)
+    }
+}
+
+func officialPlatformURL(for platform: PlatformId) -> String {
+    switch platform {
+    case .ehi:
+        return "https://www.1hai.cn/"
+    case .carInc:
+        return "https://www.zuche.com/"
+    }
+}
+
+private func formatNoOfficialListingsStatus(_ evidenceResults: [PlatformEvidenceResult]) -> String {
+    if evidenceResults.allSatisfy({ $0.status.kind == .waitingForEvidence }) {
+        return "等待官方页面数据：请打开平台完成搜索后，把页面文本粘贴进来。"
+    }
+
+    let messages = evidenceResults.map(\.status.message)
+    return messages.joined(separator: "；")
 }

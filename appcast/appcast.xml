@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
     <channel>
-        <title>租车总成本比较 更新</title>
+        <title>租车比价助手 更新</title>
         <link>https://sunnyhot.github.io/car-rental-optimizer/appcast.xml</link>
         <description>Car Rental Optimizer 自动更新 feed</description>
         <language>zh-CN</language>

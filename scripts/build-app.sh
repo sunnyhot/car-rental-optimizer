@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build a proper macOS .app bundle with Sparkle framework embedded.
+# Build a proper macOS .app bundle.
 # This script creates the bundle structure that swift build alone does not produce.
 set -euo pipefail
 
-APP_NAME="租车总成本比较"
+APP_NAME="租车比价助手"
 BUNDLE_ID="com.carrental.optimizer"
 BUILD_DIR="build"
 APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
@@ -34,6 +34,13 @@ if [ -f "native/Info.plist" ]; then
     echo "    Copied native/Info.plist"
 else
     echo "    WARNING: native/Info.plist not found"
+fi
+
+if [ -f "native/AppIcon.icns" ]; then
+    cp "native/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
+    echo "    Copied native/AppIcon.icns"
+else
+    echo "    WARNING: native/AppIcon.icns not found"
 fi
 
 # Copy Sparkle only when the executable links it. Stale .build caches may contain
