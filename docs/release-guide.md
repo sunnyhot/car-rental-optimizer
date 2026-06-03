@@ -147,6 +147,29 @@ hdiutil create -volname "租车比价助手" \
 
 ## 代码签名与公证（macOS）
 
+### Gatekeeper 结论
+
+ad-hoc 签名只证明 bundle 内部结构自洽，不能让浏览器下载的应用通过 Gatekeeper。被 Safari、Chrome 或 GitHub 网页下载后的 ZIP 会带 quarantine，解压出的 app 首次双击会被 `spctl` 拒绝：
+
+```bash
+spctl --assess --type execute --verbose=4 "租车比价助手.app"
+# 租车比价助手.app: rejected
+```
+
+这不是 SwiftUI 崩溃，也不是 Info.plist 损坏。面向其他用户的“下载后双击打开”分发必须使用 Developer ID Application 证书签名，并完成 Apple notarization。没有有效 Developer ID 证书时，只能用于本机测试或让用户明确执行 quarantine 清理。
+
+本机测试安装：
+
+```bash
+scripts/install-local-app.sh build/CarRentalOptimizer-v0.4.0.zip
+```
+
+启动 smoke test：
+
+```bash
+scripts/verify-launch.sh /Applications/租车比价助手.app
+```
+
 ### 签名（推荐，生产环境）
 
 ```bash

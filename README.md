@@ -22,6 +22,24 @@ swift build
 swift run CarRentalOptimizer
 ```
 
+### 安装本机测试包
+
+GitHub Release 里的当前 ZIP 是 ad-hoc 签名包。macOS 会对浏览器下载的应用加 quarantine；如果没有 Developer ID 签名和公证，直接双击可能被 Gatekeeper 拦截。
+
+本机测试安装请用：
+
+```bash
+scripts/install-local-app.sh build/CarRentalOptimizer-v0.4.0.zip
+```
+
+或下载 release 后：
+
+```bash
+scripts/install-local-app.sh ~/Downloads/CarRentalOptimizer-v0.4.0.zip
+```
+
+脚本会复制到 `/Applications/租车比价助手.app`、清除 quarantine、验证 bundle，并做一次启动 smoke test。
+
 ### 运行测试
 
 ```bash
