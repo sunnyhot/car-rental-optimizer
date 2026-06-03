@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.2] - 2026-06-03
+
+### Fixed
+- 补齐 macOS app bundle 标准元信息，避免 Gatekeeper/LaunchServices 将包识别为非标准 bundle
+- 发布包验证新增 bundle 元信息检查，覆盖 `CFBundlePackageType` 和 `CFBundleInfoDictionaryVersion`
+
 ## [0.3.1] - 2026-06-03
 
 ### Fixed

@@ -15,10 +15,14 @@
     <string>PLACEHOLDER_GENERATE_REAL_KEY_WITH_SPARKLE_GENERATE_KEYS</string>
 
     <!-- App version info -->
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.1</string>
+    <string>0.3.2</string>
     <key>CFBundleVersion</key>
-    <string>7</string>
+    <string>8</string>
 
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>

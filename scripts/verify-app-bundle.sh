@@ -23,6 +23,18 @@ if [ "${PLIST_EXECUTABLE}" != "${EXECUTABLE_NAME}" ]; then
     exit 1
 fi
 
+PLIST_PACKAGE_TYPE=$(/usr/libexec/PlistBuddy -c "Print :CFBundlePackageType" "${APP_BUNDLE}/Contents/Info.plist")
+if [ "${PLIST_PACKAGE_TYPE}" != "APPL" ]; then
+    echo "ERROR: CFBundlePackageType is ${PLIST_PACKAGE_TYPE}, expected APPL" >&2
+    exit 1
+fi
+
+PLIST_INFO_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleInfoDictionaryVersion" "${APP_BUNDLE}/Contents/Info.plist")
+if [ "${PLIST_INFO_VERSION}" != "6.0" ]; then
+    echo "ERROR: CFBundleInfoDictionaryVersion is ${PLIST_INFO_VERSION}, expected 6.0" >&2
+    exit 1
+fi
+
 if ! otool -l "${EXECUTABLE_PATH}" | grep -q "${FRAMEWORK_RPATH}"; then
     echo "ERROR: Missing framework rpath ${FRAMEWORK_RPATH}" >&2
     exit 1
