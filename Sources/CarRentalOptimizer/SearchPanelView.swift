@@ -64,29 +64,7 @@ struct SearchPanelView: View {
                         .controlSize(.large)
                 }
 
-                HStack(alignment: .top, spacing: 10) {
-                    FieldView(label: "取车日期") {
-                        DatePicker(
-                            "",
-                            selection: $pickupDate,
-                            in: AppDateRules.today...,
-                            displayedComponents: [.date]
-                        )
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                    }
-
-                    FieldView(label: "还车日期") {
-                        DatePicker(
-                            "",
-                            selection: $returnDate,
-                            in: pickupDate...,
-                            displayedComponents: [.date]
-                        )
-                        .labelsHidden()
-                        .datePickerStyle(.compact)
-                    }
-                }
+                DateRangeField(pickupDate: $pickupDate, returnDate: $returnDate)
             }
 
             QuerySection(icon: "car", title: "车辆与范围") {
@@ -182,6 +160,151 @@ struct SearchPanelView: View {
         .controlSize(.large)
         .tint(WorkbenchStyle.accent)
         .disabled(viewModel.isSearching)
+    }
+}
+
+private struct DateRangeField: View {
+    @Binding var pickupDate: Date
+    @Binding var returnDate: Date
+
+    private var rentalDays: Int {
+        AppDateRules.rentalDaySpan(pickup: pickupDate, returnDate: returnDate)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            CalendarDateButton(
+                title: "取车",
+                date: $pickupDate,
+                minimumDate: AppDateRules.today,
+                accent: WorkbenchStyle.accent
+            )
+
+            DateRangeDurationBadge(days: rentalDays)
+
+            CalendarDateButton(
+                title: "还车",
+                date: $returnDate,
+                minimumDate: pickupDate,
+                accent: WorkbenchStyle.teal
+            )
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct CalendarDateButton: View {
+    let title: String
+    @Binding var date: Date
+    let minimumDate: Date
+    let accent: Color
+    @State private var showingCalendar = false
+
+    var body: some View {
+        Button {
+            showingCalendar = true
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: "calendar")
+                        .font(.caption2.weight(.bold))
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(WorkbenchStyle.muted)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(AppDateRules.formatDisplayDate(date))
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .monospacedDigit()
+                    Text(AppDateRules.formatWeekday(date))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(accent.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(accent.opacity(0.28), lineWidth: 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title)日期 \(AppDateRules.formatDisplayDate(date)) \(AppDateRules.formatWeekday(date))")
+        .popover(isPresented: $showingCalendar) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("\(title)日期")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.ink)
+
+                DatePicker(
+                    "",
+                    selection: $date,
+                    in: minimumDate...,
+                    displayedComponents: [.date]
+                )
+                .labelsHidden()
+                .datePickerStyle(.graphical)
+                .environment(\.calendar, AppDateRules.calendar)
+                .environment(\.locale, Locale(identifier: "zh_CN"))
+                .frame(width: 300)
+
+                Divider()
+
+                HStack {
+                    Text("\(AppDateRules.formatDisplayDate(date)) \(AppDateRules.formatWeekday(date))")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.muted)
+                    Spacer()
+                    Button("完成") {
+                        showingCalendar = false
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(14)
+            .frame(width: 324)
+        }
+        .onChange(of: date) { _, newValue in
+            let normalized = AppDateRules.calendar.startOfDay(for: newValue)
+            if date != normalized {
+                date = normalized
+            }
+        }
+    }
+}
+
+private struct DateRangeDurationBadge: View {
+    let days: Int
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Image(systemName: "arrow.right")
+                .font(.caption2.weight(.bold))
+            Text("\(days)天")
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+        }
+        .foregroundStyle(WorkbenchStyle.muted)
+        .frame(width: 42, height: 44)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.black.opacity(0.035))
+        )
+        .accessibilityLabel("租期 \(days) 天")
     }
 }
 

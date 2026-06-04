@@ -47,6 +47,24 @@ enum AppDateRules {
         return formatter.string(from: calendar.startOfDay(for: date))
     }
 
+    static func formatDisplayDate(_ date: Date) -> String {
+        let components = calendar.dateComponents([.month, .day], from: calendar.startOfDay(for: date))
+        return "\(components.month ?? 0)月\(components.day ?? 0)日"
+    }
+
+    static func formatWeekday(_ date: Date) -> String {
+        let weekdaySymbols = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        let weekday = calendar.component(.weekday, from: calendar.startOfDay(for: date))
+        return weekdaySymbols[max(0, min(weekday - 1, weekdaySymbols.count - 1))]
+    }
+
+    static func rentalDaySpan(pickup: Date, returnDate: Date) -> Int {
+        let pickupDay = calendar.startOfDay(for: pickup)
+        let returnDay = calendar.startOfDay(for: returnDate)
+        let days = calendar.dateComponents([.day], from: pickupDay, to: returnDay).day ?? 1
+        return max(1, days)
+    }
+
     static func parseRequestDate(_ value: String) -> Date? {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
