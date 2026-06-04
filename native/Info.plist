@@ -8,9 +8,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.6.11</string>
+    <string>0.6.12</string>
     <key>CFBundleVersion</key>
-    <string>25</string>
+    <string>26</string>
 
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>
@@ -35,5 +35,9 @@
     <!-- macOS privacy prompt used by embedded platform pages when WebKit content attempts local-network discovery. -->
     <key>NSLocalNetworkUsageDescription</key>
     <string>用于请求一嗨和神州官方 API 以及地图路线服务；应用不会扫描或连接本地设备。</string>
+    <key>NSLocationUsageDescription</key>
+    <string>用于自动获取当前位置，计算附近租车门店和到店交通成本。</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>用于自动获取当前位置，计算附近租车门店和到店交通成本。</string>
 </dict>
 </plist>

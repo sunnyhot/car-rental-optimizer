@@ -6,6 +6,7 @@ struct SearchPanelView: View {
     @State private var pickupDate = AppDateRules.today
     @State private var returnDate = AppDateRules.addingDays(1, to: AppDateRules.today)
     @State private var showingEhiLogin = false
+    @State private var originInputTask: Task<Void, Never>?
 
     var body: some View {
         WorkbenchPanel(
@@ -27,6 +28,7 @@ struct SearchPanelView: View {
                             pickupDate = AppDateRules.parseRequestDate(viewModel.request.pickupAt) ?? AppDateRules.today
                             returnDate = AppDateRules.parseRequestDate(viewModel.request.returnAt) ?? AppDateRules.addingDays(1, to: pickupDate)
                             viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
+                            Task { await viewModel.refreshCurrentLocationIfNeeded() }
                         }
                 }
 
@@ -58,11 +60,7 @@ struct SearchPanelView: View {
     private var searchControls: some View {
         VStack(alignment: .leading, spacing: 14) {
             QuerySection(icon: "mappin.and.ellipse", title: "行程") {
-                FieldView(label: "当前位置") {
-                    TextField("北京通州", text: $viewModel.request.originLabel)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.large)
-                }
+                OriginLocationField(originInputTask: $originInputTask)
 
                 DateRangeField(pickupDate: $pickupDate, returnDate: $returnDate)
             }
@@ -160,6 +158,112 @@ struct SearchPanelView: View {
         .controlSize(.large)
         .tint(WorkbenchStyle.accent)
         .disabled(viewModel.isSearching)
+    }
+}
+
+private struct OriginLocationField: View {
+    @EnvironmentObject var viewModel: SearchViewModel
+    @Binding var originInputTask: Task<Void, Never>?
+
+    var body: some View {
+        FieldView(label: "当前位置") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    TextField(
+                        "自动定位或输入地址",
+                        text: Binding(
+                            get: { viewModel.request.originLabel },
+                            set: { value in
+                                originInputTask?.cancel()
+                                viewModel.request.originLabel = value
+                                originInputTask = Task {
+                                    try? await Task.sleep(nanoseconds: 280_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    await viewModel.updateOriginInput(value)
+                                }
+                            }
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.large)
+
+                    Button {
+                        originInputTask?.cancel()
+                        Task { await viewModel.refreshCurrentLocation() }
+                    } label: {
+                        if viewModel.isLocatingOrigin {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 16, height: 16)
+                        } else {
+                            Image(systemName: "location.fill")
+                                .font(.caption.weight(.bold))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(viewModel.isLocatingOrigin)
+                    .help("获取当前定位")
+                }
+
+                if viewModel.isLoadingOriginSuggestions {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在联想地址")
+                            .font(.caption2)
+                            .foregroundStyle(WorkbenchStyle.muted)
+                    }
+                } else if !viewModel.originSuggestions.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(viewModel.originSuggestions) { suggestion in
+                            Button {
+                                originInputTask?.cancel()
+                                Task { await viewModel.selectOriginSuggestion(suggestion) }
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .foregroundStyle(WorkbenchStyle.accent)
+                                        .frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(suggestion.title)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(WorkbenchStyle.ink)
+                                            .lineLimit(1)
+                                        if !suggestion.subtitle.isEmpty {
+                                            Text(suggestion.subtitle)
+                                                .font(.caption2)
+                                                .foregroundStyle(WorkbenchStyle.muted)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer(minLength: 8)
+                                }
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            if suggestion.id != viewModel.originSuggestions.last?.id {
+                                Divider()
+                                    .padding(.leading, 33)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.black.opacity(0.035))
+                    )
+                } else if !viewModel.originStatus.isEmpty {
+                    Text(viewModel.originStatus)
+                        .font(.caption2)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 }
 
