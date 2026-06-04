@@ -107,26 +107,28 @@ struct LiveRentalSearchServiceTests {
         #expect(script.contains("aliasMatchesCity"))
     }
 
-    @Test("Blank vehicle query uses nearest store with available listings")
-    func blankVehicleQueryUsesNearestStoreWithAvailableListings() {
-        let emptyNearest = StoreListingsBatch(distanceKm: 1.2, listings: [])
-        let availableSecond = StoreListingsBatch(
-            distanceKm: 1.8,
+    @Test("Blank vehicle query samples nearby stores until enough distinct vehicles are found")
+    func blankVehicleQuerySamplesNearbyStoresUntilEnoughDistinctVehiclesAreFound() {
+        let sparseNearest = StoreListingsBatch(
+            distanceKm: 0.3,
             listings: [
-                makeListing(id: "second-lavida", storeId: "second", distanceKm: 1.8),
-                makeListing(id: "second-kruze", storeId: "second", distanceKm: 1.8),
+                makeListing(id: "nearest-lavida", storeId: "nearest", vehicleName: "大众朗逸", basePrice: 175, distanceKm: 0.3),
+                makeListing(id: "nearest-kruze", storeId: "nearest", vehicleName: "雪佛兰科鲁泽", basePrice: 178, distanceKm: 0.3),
             ]
         )
-        let fartherAvailable = StoreListingsBatch(
-            distanceKm: 3.4,
+        let richerNearby = StoreListingsBatch(
+            distanceKm: 4.7,
             listings: [
-                makeListing(id: "farther-camry", storeId: "farther", distanceKm: 3.4),
+                makeListing(id: "nearby-lavida", storeId: "nearby", vehicleName: "大众朗逸", basePrice: 168, distanceKm: 4.7),
+                makeListing(id: "nearby-camry", storeId: "nearby", vehicleName: "丰田凯美瑞", basePrice: 198, distanceKm: 4.7),
+                makeListing(id: "nearby-a6", storeId: "nearby", vehicleName: "奥迪A6L", basePrice: 408, distanceKm: 4.7),
             ]
         )
 
-        let selected = nearestAvailableStoreListings(from: [fartherAvailable, emptyNearest, availableSecond])
+        let selected = blankVehicleCandidateListings(from: [richerNearby, sparseNearest], minimumVehicleCount: 4)
 
-        #expect(selected.map(\.id) == ["second-lavida", "second-kruze"])
+        #expect(Set(selected.map(\.vehicleName)) == ["大众朗逸", "雪佛兰科鲁泽", "丰田凯美瑞", "奥迪A6L"])
+        #expect(selected.first { $0.vehicleName == "大众朗逸" }?.id == "nearby-lavida")
     }
 }
 
@@ -137,7 +139,13 @@ private func date(_ value: String) -> Date {
     return formatter.date(from: value)!
 }
 
-private func makeListing(id: String, storeId: String, distanceKm: Double) -> RentalListing {
+private func makeListing(
+    id: String,
+    storeId: String,
+    vehicleName: String = "大众朗逸",
+    basePrice: Double = 100,
+    distanceKm: Double
+) -> RentalListing {
     RentalListing(
         id: id,
         platform: .carInc,
@@ -151,9 +159,9 @@ private func makeListing(id: String, storeId: String, distanceKm: Double) -> Ren
             distanceKm: distanceKm,
             hours: "08:00-21:00"
         ),
-        vehicleName: id,
+        vehicleName: vehicleName,
         vehicleClass: "",
-        basePrice: 100,
+        basePrice: basePrice,
         platformFees: 0,
         insuranceFees: 0,
         oneWayFee: 0,

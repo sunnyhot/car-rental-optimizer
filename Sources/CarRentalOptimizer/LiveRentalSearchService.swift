@@ -66,11 +66,49 @@ struct StoreListingsBatch {
     let listings: [RentalListing]
 }
 
-func nearestAvailableStoreListings(from batches: [StoreListingsBatch]) -> [RentalListing] {
-    batches
-        .sorted { $0.distanceKm < $1.distanceKm }
-        .first { !$0.listings.isEmpty }?
-        .listings ?? []
+func blankVehicleCandidateListings(
+    from batches: [StoreListingsBatch],
+    minimumVehicleCount: Int = 12,
+    maxStoreCount: Int = 6
+) -> [RentalListing] {
+    var listingsByVehicle: [String: RentalListing] = [:]
+    var sampledStores = 0
+
+    for batch in batches.sorted(by: { $0.distanceKm < $1.distanceKm }) where !batch.listings.isEmpty {
+        sampledStores += 1
+        for listing in batch.listings {
+            let key = normalizedVehicleKey(listing.vehicleName)
+            if let existing = listingsByVehicle[key], !isBetterBlankVehicleListing(listing, than: existing) {
+                continue
+            }
+            listingsByVehicle[key] = listing
+        }
+
+        if listingsByVehicle.count >= minimumVehicleCount || sampledStores >= maxStoreCount {
+            break
+        }
+    }
+
+    return listingsByVehicle.values.sorted {
+        if $0.basePrice != $1.basePrice {
+            return $0.basePrice < $1.basePrice
+        }
+        if $0.store.distanceKm != $1.store.distanceKm {
+            return $0.store.distanceKm < $1.store.distanceKm
+        }
+        return $0.vehicleName.localizedStandardCompare($1.vehicleName) == .orderedAscending
+    }
+}
+
+private func normalizedVehicleKey(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+}
+
+private func isBetterBlankVehicleListing(_ candidate: RentalListing, than current: RentalListing) -> Bool {
+    if candidate.basePrice != current.basePrice {
+        return candidate.basePrice < current.basePrice
+    }
+    return candidate.store.distanceKm < current.store.distanceKm
 }
 
 // MARK: - Zuche
@@ -154,7 +192,7 @@ private final class ZucheAPIClient {
 
             let listings = hasVehicleQuery
                 ? Array(listingsByKey.values)
-                : nearestAvailableStoreListings(from: nearestStoreBatches)
+                : blankVehicleCandidateListings(from: nearestStoreBatches)
             guard !listings.isEmpty else {
                 if !queryErrors.isEmpty {
                     return status(.parseFailed, "神州 API 部分查询失败：\(queryErrors.prefix(2).joined(separator: "；"))")
