@@ -41,12 +41,16 @@ struct SearchPanelView: View {
                     .background(WorkbenchStyle.panel)
             }
             .onChange(of: pickupDate) { _, newValue in
+                originInputTask?.cancel()
+                viewModel.dismissOriginSuggestions()
                 if returnDate < newValue {
                     returnDate = newValue
                 }
                 viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
             }
             .onChange(of: returnDate) { _, _ in
+                originInputTask?.cancel()
+                viewModel.dismissOriginSuggestions()
                 viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
             }
             .sheet(isPresented: $showingEhiLogin) {
@@ -62,7 +66,13 @@ struct SearchPanelView: View {
             QuerySection(icon: "mappin.and.ellipse", title: "行程") {
                 OriginLocationField(originInputTask: $originInputTask)
 
-                DateRangeField(pickupDate: $pickupDate, returnDate: $returnDate)
+                DateRangeField(
+                    pickupDate: $pickupDate,
+                    returnDate: $returnDate
+                ) {
+                    originInputTask?.cancel()
+                    viewModel.dismissOriginSuggestions()
+                }
             }
 
             QuerySection(icon: "car", title: "车辆与范围") {
@@ -137,6 +147,8 @@ struct SearchPanelView: View {
 
     private var compareButton: some View {
         Button {
+            originInputTask?.cancel()
+            viewModel.dismissOriginSuggestions()
             Task { await viewModel.runSearch() }
         } label: {
             HStack(spacing: 8) {
@@ -189,6 +201,7 @@ private struct OriginLocationField: View {
 
                     Button {
                         originInputTask?.cancel()
+                        viewModel.dismissOriginSuggestions()
                         Task { await viewModel.refreshCurrentLocation() }
                     } label: {
                         if viewModel.isLocatingOrigin {
@@ -206,7 +219,7 @@ private struct OriginLocationField: View {
                     .help("获取当前定位")
                 }
 
-                if viewModel.isLoadingOriginSuggestions {
+                if viewModel.isOriginSuggestionPanelVisible && viewModel.isLoadingOriginSuggestions {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.small)
@@ -214,7 +227,7 @@ private struct OriginLocationField: View {
                             .font(.caption2)
                             .foregroundStyle(WorkbenchStyle.muted)
                     }
-                } else if !viewModel.originSuggestions.isEmpty {
+                } else if viewModel.isOriginSuggestionPanelVisible && !viewModel.originSuggestions.isEmpty {
                     VStack(spacing: 0) {
                         ForEach(viewModel.originSuggestions) { suggestion in
                             Button {
@@ -270,6 +283,7 @@ private struct OriginLocationField: View {
 private struct DateRangeField: View {
     @Binding var pickupDate: Date
     @Binding var returnDate: Date
+    let onCalendarOpen: () -> Void
 
     private var rentalDays: Int {
         AppDateRules.rentalDaySpan(pickup: pickupDate, returnDate: returnDate)
@@ -281,7 +295,8 @@ private struct DateRangeField: View {
                 title: "取车",
                 date: $pickupDate,
                 minimumDate: AppDateRules.today,
-                accent: WorkbenchStyle.accent
+                accent: WorkbenchStyle.accent,
+                onOpen: onCalendarOpen
             )
 
             DateRangeDurationBadge(days: rentalDays)
@@ -290,7 +305,8 @@ private struct DateRangeField: View {
                 title: "还车",
                 date: $returnDate,
                 minimumDate: pickupDate,
-                accent: WorkbenchStyle.teal
+                accent: WorkbenchStyle.teal,
+                onOpen: onCalendarOpen
             )
         }
         .frame(maxWidth: .infinity)
@@ -302,10 +318,12 @@ private struct CalendarDateButton: View {
     @Binding var date: Date
     let minimumDate: Date
     let accent: Color
+    let onOpen: () -> Void
     @State private var showingCalendar = false
 
     var body: some View {
         Button {
+            onOpen()
             showingCalendar = true
         } label: {
             VStack(alignment: .leading, spacing: 8) {

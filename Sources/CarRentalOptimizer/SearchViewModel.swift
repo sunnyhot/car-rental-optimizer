@@ -18,6 +18,7 @@ final class SearchViewModel: ObservableObject {
     @Published var isSearching = false
     @Published var isLocatingOrigin = false
     @Published var isLoadingOriginSuggestions = false
+    @Published var isOriginSuggestionPanelVisible = false
     @Published var originSuggestions: [AddressSuggestion] = []
     @Published var originStatus = "正在获取当前位置。"
     @Published var status = "待查询：静默 API 准备就绪。"
@@ -28,6 +29,7 @@ final class SearchViewModel: ObservableObject {
     private let currentLocationProvider: CurrentLocationProviding
     private let addressSuggestionProvider: AddressSuggestionProviding
     private var hasRequestedInitialLocation = false
+    private var originSuggestionRequestID = 0
     private var resolvedOriginLabel: String?
 
     init() {
@@ -68,6 +70,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     func runSearch() async {
+        dismissOriginSuggestions()
         isSearching = true
         results = []
         selectedId = ""
@@ -154,6 +157,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     func refreshCurrentLocation() async {
+        dismissOriginSuggestions()
         isLocatingOrigin = true
         originStatus = "正在获取当前位置。"
         defer {
@@ -175,35 +179,54 @@ final class SearchViewModel: ObservableObject {
     func updateOriginInput(_ value: String) async {
         request.originLabel = value
         resolvedOriginLabel = nil
+        originSuggestionRequestID += 1
+        let requestID = originSuggestionRequestID
 
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else {
             originSuggestions = []
             isLoadingOriginSuggestions = false
+            isOriginSuggestionPanelVisible = false
             originStatus = "输入地址后会联想候选位置。"
             return
         }
 
+        originSuggestions = []
         isLoadingOriginSuggestions = true
-        defer {
-            isLoadingOriginSuggestions = false
-        }
+        isOriginSuggestionPanelVisible = true
 
         do {
-            originSuggestions = try await addressSuggestionProvider.suggestions(for: trimmed, near: request.origin)
+            let suggestions = try await addressSuggestionProvider.suggestions(for: trimmed, near: request.origin)
+            guard requestID == originSuggestionRequestID else { return }
+            isLoadingOriginSuggestions = false
+            originSuggestions = suggestions
+            isOriginSuggestionPanelVisible = !suggestions.isEmpty
             originStatus = originSuggestions.isEmpty ? "没有找到匹配地址，可继续输入。" : "选择一个候选位置。"
         } catch {
+            guard requestID == originSuggestionRequestID else { return }
+            isLoadingOriginSuggestions = false
             originSuggestions = []
+            isOriginSuggestionPanelVisible = false
             originStatus = "地址联想失败：\(error.localizedDescription)"
         }
     }
 
     func selectOriginSuggestion(_ suggestion: AddressSuggestion) async {
+        originSuggestionRequestID += 1
         request.originLabel = suggestion.displayName
         request.origin = suggestion.point
         resolvedOriginLabel = request.originLabel
         originSuggestions = []
+        isLoadingOriginSuggestions = false
+        isOriginSuggestionPanelVisible = false
         originStatus = "已选择候选位置。"
+    }
+
+    func dismissOriginSuggestions() {
+        originSuggestionRequestID += 1
+        originSuggestions = []
+        isLoadingOriginSuggestions = false
+        isOriginSuggestionPanelVisible = false
     }
 }
 

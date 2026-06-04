@@ -46,12 +46,47 @@ struct LocationInputTests {
 
         #expect(suggestionProvider.queries == ["北京站"])
         #expect(viewModel.originSuggestions == suggestions)
+        #expect(viewModel.isOriginSuggestionPanelVisible)
 
         await viewModel.selectOriginSuggestion(suggestions[0])
 
         #expect(viewModel.request.originLabel == "北京南站，北京市丰台区")
         #expect(viewModel.request.origin == GeoPoint(lat: 39.8652, lng: 116.3786))
         #expect(viewModel.originSuggestions.isEmpty)
+        #expect(!viewModel.isOriginSuggestionPanelVisible)
+    }
+
+    @Test("Dismissed origin suggestions stay hidden when stale lookup finishes")
+    func dismissedOriginSuggestionsStayHiddenWhenStaleLookupFinishes() async {
+        let suggestion = AddressSuggestion(
+            id: "1",
+            title: "北京南站",
+            subtitle: "北京市丰台区",
+            point: GeoPoint(lat: 39.8652, lng: 116.3786)
+        )
+        let suggestionProvider = DelayedAddressSuggestionProvider()
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: StubCurrentLocationProvider(),
+            addressSuggestionProvider: suggestionProvider
+        )
+
+        let lookupTask = Task {
+            await viewModel.updateOriginInput("北京站")
+        }
+        while suggestionProvider.continuation == nil {
+            await Task.yield()
+        }
+
+        viewModel.dismissOriginSuggestions()
+        suggestionProvider.resume(with: [suggestion])
+        await lookupTask.value
+
+        #expect(viewModel.originSuggestions.isEmpty)
+        #expect(!viewModel.isLoadingOriginSuggestions)
+        #expect(!viewModel.isOriginSuggestionPanelVisible)
     }
 
     @Test("English Apple location output is normalized to Chinese display text")
@@ -127,5 +162,21 @@ private struct StubRentalSearchProvider: RentalSearchProviding {
 
     func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
         results
+    }
+}
+
+@MainActor
+private final class DelayedAddressSuggestionProvider: AddressSuggestionProviding {
+    private(set) var continuation: CheckedContinuation<[AddressSuggestion], Error>?
+
+    func suggestions(for query: String, near origin: GeoPoint?) async throws -> [AddressSuggestion] {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume(with suggestions: [AddressSuggestion]) {
+        continuation?.resume(returning: suggestions)
+        continuation = nil
     }
 }
