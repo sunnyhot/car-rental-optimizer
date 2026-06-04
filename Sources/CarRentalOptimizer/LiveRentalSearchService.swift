@@ -493,6 +493,7 @@ func makeEhiSearchScript(json: String) -> String {
         };
         const origin = { lat: request.origin.lat, lng: request.origin.lng };
         const originLabel = request.originLabel || '';
+        const originCityCandidates = Array.isArray(request.originCityCandidates) ? request.originCityCandidates : [];
 
         const cityListResp = await http.getEncrypt('/Address/City/List', {});
         const cityResult = responseBody(cityListResp);
@@ -505,10 +506,17 @@ func makeEhiSearchScript(json: String) -> String {
             listings: []
           });
         }
+        const aliasMatchesCity = (name) => {
+          const normalized = name.replace(/市$/, '');
+          return originCityCandidates.some(alias => {
+            const value = String(alias || '').trim();
+            return value && (name.includes(value) || normalized.includes(value) || value.includes(name) || value.includes(normalized));
+          });
+        };
         let city = cities.find(candidate => {
           const name = cityName(candidate);
           const normalized = name.replace(/市$/, '');
-          return name && (originLabel.includes(name) || originLabel.includes(normalized));
+          return name && (originLabel.includes(name) || originLabel.includes(normalized) || aliasMatchesCity(name));
         });
         if (!city) {
           city = cities
@@ -807,6 +815,7 @@ private struct ZucheModel: Decodable {
 private struct EhiBridgeRequest: Encodable {
     let origin: GeoPoint
     let originLabel: String
+    let originCityCandidates: [String]
     let pickupAt: String
     let returnAt: String
     let pickupTime: String
@@ -817,7 +826,8 @@ private struct EhiBridgeRequest: Encodable {
 
     init(request: SearchRequest, timeRange: PlatformQueryTimeRange) {
         origin = request.origin
-        originLabel = request.originLabel
+        originLabel = localizedChineseLocationText(request.originLabel)
+        originCityCandidates = CarRentalOptimizer.originCityCandidates(from: request.originLabel)
         pickupAt = request.pickupAt
         returnAt = request.returnAt
         pickupTime = timeRange.pickupTime

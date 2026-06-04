@@ -54,6 +54,28 @@ struct LocationInputTests {
         #expect(viewModel.originSuggestions.isEmpty)
     }
 
+    @Test("English Apple location output is normalized to Chinese display text")
+    func englishAppleLocationOutputIsNormalizedToChineseDisplayText() async {
+        let englishSuggestion = AddressSuggestion(
+            id: "jd-hq",
+            title: "Jingdong Group Quanqiu Headquarters Beijing No.2Park",
+            subtitle: "Beijing Tongzhou Beijing Economic and Technological Development Zone",
+            point: GeoPoint(lat: 39.7784, lng: 116.5629)
+        )
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: StubCurrentLocationProvider(),
+            addressSuggestionProvider: StubAddressSuggestionProvider(suggestions: [englishSuggestion])
+        )
+
+        await viewModel.updateOriginInput("京东总部")
+        await viewModel.selectOriginSuggestion(englishSuggestion)
+
+        #expect(viewModel.request.originLabel == "京东集团全球总部2号园区，北京通州 北京经济技术开发区")
+    }
+
     @Test("Blank origin input clears suggestions")
     func blankOriginInputClearsSuggestions() async {
         let suggestionProvider = StubAddressSuggestionProvider(suggestions: [

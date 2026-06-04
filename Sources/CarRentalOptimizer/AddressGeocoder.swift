@@ -14,7 +14,11 @@ struct AppleAddressGeocoder: AddressGeocoding {
         }
 
         let geocoder = CLGeocoder()
-        let placemarks = try await geocoder.geocodeAddressString(trimmed)
+        let placemarks = try await geocoder.geocodeAddressString(
+            trimmed,
+            in: nil,
+            preferredLocale: preferredChineseLocationLocale
+        )
         guard let coordinate = placemarks.first?.location?.coordinate else {
             throw AddressGeocodingError.notFound
         }

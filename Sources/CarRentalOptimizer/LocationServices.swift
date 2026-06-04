@@ -15,7 +15,9 @@ struct AddressSuggestion: Equatable, Identifiable {
     let point: GeoPoint
 
     var displayName: String {
-        subtitle.isEmpty ? title : "\(title)，\(subtitle)"
+        let localizedTitle = localizedChineseLocationText(title)
+        let localizedSubtitle = localizedChineseLocationText(subtitle)
+        return localizedSubtitle.isEmpty ? localizedTitle : "\(localizedTitle)，\(localizedSubtitle)"
     }
 }
 
@@ -133,7 +135,7 @@ final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, @p
     private func reverseGeocodeLabel(for location: CLLocation) async -> String {
         let fallback = String(format: "%.5f, %.5f", location.coordinate.latitude, location.coordinate.longitude)
         let geocoder = CLGeocoder()
-        guard let placemark = try? await geocoder.reverseGeocodeLocation(location).first else {
+        guard let placemark = try? await geocoder.reverseGeocodeLocation(location, preferredLocale: preferredChineseLocationLocale).first else {
             return fallback
         }
 
@@ -146,7 +148,7 @@ final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, @p
         .filter { !$0.isEmpty }
 
         let label = unique(parts).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        return label.isEmpty ? fallback : label
+        return label.isEmpty ? fallback : localizedChineseLocationText(label)
     }
 }
 
@@ -167,18 +169,61 @@ struct AppleAddressSuggestionProvider: AddressSuggestionProviding {
         }
 
         let response = try await MKLocalSearch(request: request).start()
-        return uniqueSuggestions(response.mapItems.prefix(8).compactMap { item in
-            guard let point = item.placemark.location?.coordinate else { return nil }
-            let title = item.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let subtitle = suggestionSubtitle(for: item.placemark)
-            let displayTitle = title?.isEmpty == false ? title! : trimmed
-            return AddressSuggestion(
-                id: "\(displayTitle)-\(subtitle)-\(point.latitude)-\(point.longitude)",
-                title: displayTitle,
-                subtitle: subtitle,
-                point: GeoPoint(lat: point.latitude, lng: point.longitude)
+        var suggestions: [AddressSuggestion] = []
+        for item in response.mapItems.prefix(8) {
+            guard let point = item.placemark.location?.coordinate else { continue }
+            let fallbackTitle = item.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallbackSubtitle = suggestionSubtitle(for: item.placemark)
+            let text = await localizedSuggestionText(
+                for: point,
+                fallbackTitle: fallbackTitle?.isEmpty == false ? fallbackTitle! : trimmed,
+                fallbackSubtitle: fallbackSubtitle
             )
-        })
+            suggestions.append(AddressSuggestion(
+                id: "\(text.title)-\(text.subtitle)-\(point.latitude)-\(point.longitude)",
+                title: text.title,
+                subtitle: text.subtitle,
+                point: GeoPoint(lat: point.latitude, lng: point.longitude)
+            ))
+        }
+        return uniqueSuggestions(suggestions)
+    }
+
+    private func localizedSuggestionText(
+        for coordinate: CLLocationCoordinate2D,
+        fallbackTitle: String,
+        fallbackSubtitle: String
+    ) async -> (title: String, subtitle: String) {
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        if let placemark = try? await CLGeocoder().reverseGeocodeLocation(location, preferredLocale: preferredChineseLocationLocale).first {
+            let title = unique([
+                placemark.name,
+                placemark.subLocality,
+            ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })
+            .joined(separator: " ")
+            let subtitle = unique([
+                placemark.locality,
+                placemark.administrativeArea,
+                placemark.thoroughfare,
+            ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })
+            .joined(separator: " ")
+
+            if !title.isEmpty || !subtitle.isEmpty {
+                return (
+                    localizedChineseLocationText(title.isEmpty ? fallbackTitle : title),
+                    localizedChineseLocationText(subtitle)
+                )
+            }
+        }
+
+        return (
+            localizedChineseLocationText(fallbackTitle),
+            localizedChineseLocationText(fallbackSubtitle)
+        )
     }
 
     private func suggestionSubtitle(for placemark: MKPlacemark) -> String {
@@ -211,3 +256,69 @@ private func unique(_ values: [String]) -> [String] {
         return true
     }
 }
+
+let preferredChineseLocationLocale = Locale(identifier: "zh_CN")
+
+func localizedChineseLocationText(_ text: String) -> String {
+    var result = text.replacingOccurrences(of: "\n", with: " ")
+        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    for replacement in chineseLocationReplacements {
+        result = result.replacingOccurrences(
+            of: replacement.english,
+            with: replacement.chinese,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        )
+    }
+    return result.replacingOccurrences(of: "  ", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+func originCityCandidates(from label: String) -> [String] {
+    let localized = localizedChineseLocationText(label)
+    let lowercased = label.lowercased()
+    var candidates: [String] = []
+    for city in chineseCityAliases {
+        if localized.contains(city.chinese) || city.aliases.contains(where: { lowercased.contains($0) }) {
+            candidates.append(city.chinese)
+        }
+    }
+    return unique(candidates)
+}
+
+private let chineseLocationReplacements: [(english: String, chinese: String)] = [
+    ("Jingdong Group Quanqiu Headquarters Beijing No.2Park", "京东集团全球总部2号园区"),
+    ("Jinghai Road Subway Station West Entrance Exit A1 Pedestrian 120 Meters", "经海路地铁站A1西口步行120米"),
+    ("Beijing Economic and Technological Development Zone", "北京经济技术开发区"),
+    ("Beijing Tongzhou", "北京通州"),
+    ("Tongzhou District", "通州区"),
+    ("Beijing", "北京"),
+    ("Tongzhou", "通州"),
+    ("Shanghai", "上海"),
+    ("Guangzhou", "广州"),
+    ("Shenzhen", "深圳"),
+    ("Hangzhou", "杭州"),
+    ("Nanjing", "南京"),
+    ("Suzhou", "苏州"),
+    ("Chengdu", "成都"),
+    ("Wuhan", "武汉"),
+    ("Tianjin", "天津"),
+    ("Chongqing", "重庆"),
+    ("Xi'an", "西安"),
+]
+
+private let chineseCityAliases: [(chinese: String, aliases: [String])] = [
+    ("北京", ["beijing", "peking"]),
+    ("通州", ["tongzhou"]),
+    ("上海", ["shanghai"]),
+    ("广州", ["guangzhou", "canton"]),
+    ("深圳", ["shenzhen"]),
+    ("杭州", ["hangzhou"]),
+    ("南京", ["nanjing"]),
+    ("苏州", ["suzhou"]),
+    ("成都", ["chengdu"]),
+    ("武汉", ["wuhan"]),
+    ("天津", ["tianjin"]),
+    ("重庆", ["chongqing"]),
+    ("西安", ["xi'an", "xian"]),
+]

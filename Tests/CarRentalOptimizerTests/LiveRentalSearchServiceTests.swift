@@ -90,6 +90,23 @@ struct LiveRentalSearchServiceTests {
         #expect(!script.contains("storeCandidates.slice(0, 1)"))
     }
 
+    @Test("eHi city matching recognizes English Beijing address from Apple location")
+    func ehiCityMatchingRecognizesEnglishBeijingAddressFromAppleLocation() {
+        let candidates = originCityCandidates(
+            from: """
+            Jingdong Group Quanqiu Headquarters Beijing No.2Park
+            Beijing Tongzhou Beijing Economic and Technological Development Zone
+            (Jinghai Road Subway Station West Entrance Exit A1 Pedestrian 120 Meters)
+            """
+        )
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(candidates.contains("北京"))
+        #expect(candidates.contains("通州"))
+        #expect(script.contains("originCityCandidates"))
+        #expect(script.contains("aliasMatchesCity"))
+    }
+
     @Test("Blank vehicle query uses nearest store with available listings")
     func blankVehicleQueryUsesNearestStoreWithAvailableListings() {
         let emptyNearest = StoreListingsBatch(distanceKm: 1.2, listings: [])
