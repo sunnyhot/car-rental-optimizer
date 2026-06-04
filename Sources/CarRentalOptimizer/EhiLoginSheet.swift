@@ -5,6 +5,7 @@ struct EhiLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pageTitle = "一嗨登录"
     @State private var currentURL = EhiLoginSession.loginURL.absoluteString
+    @State private var reloadToken = 0
 
     let onCompleted: () -> Void
 
@@ -28,6 +29,13 @@ struct EhiLoginSheet: View {
 
                 Spacer()
 
+                Button {
+                    reloadToken += 1
+                } label: {
+                    Label("刷新登录页", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+
                 Button("取消") {
                     dismiss()
                 }
@@ -47,7 +55,7 @@ struct EhiLoginSheet: View {
             .background(WorkbenchStyle.surface)
             .subtleDividerOverlay()
 
-            EhiLoginWebView(pageTitle: $pageTitle, currentURL: $currentURL)
+            EhiLoginWebView(pageTitle: $pageTitle, currentURL: $currentURL, reloadToken: reloadToken)
                 .frame(minWidth: 760, minHeight: 620)
         }
         .frame(minWidth: 760, minHeight: 680)
@@ -57,6 +65,7 @@ struct EhiLoginSheet: View {
 private struct EhiLoginWebView: NSViewRepresentable {
     @Binding var pageTitle: String
     @Binding var currentURL: String
+    let reloadToken: Int
 
     func makeCoordinator() -> Coordinator {
         Coordinator(pageTitle: $pageTitle, currentURL: $currentURL)
@@ -69,18 +78,25 @@ private struct EhiLoginWebView: NSViewRepresentable {
         webView.allowsBackForwardNavigationGestures = true
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         webView.navigationDelegate = context.coordinator
-        webView.load(URLRequest(url: EhiLoginSession.loginURL))
+        context.coordinator.lastReloadToken = reloadToken
+        context.coordinator.loadLoginPage(in: webView, resetChallengeData: false, resetAutoRefreshGuard: false)
         return webView
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.pageTitle = $pageTitle
         context.coordinator.currentURL = $currentURL
+        if context.coordinator.lastReloadToken != reloadToken {
+            context.coordinator.lastReloadToken = reloadToken
+            context.coordinator.loadLoginPage(in: nsView, resetChallengeData: true, resetAutoRefreshGuard: true)
+        }
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var pageTitle: Binding<String>
         var currentURL: Binding<String>
+        var lastReloadToken = 0
+        private var hasAutoRefreshedCaptchaError = false
 
         init(pageTitle: Binding<String>, currentURL: Binding<String>) {
             self.pageTitle = pageTitle
@@ -89,15 +105,49 @@ private struct EhiLoginWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             update(from: webView)
+            inspectCaptchaError(in: webView)
         }
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
             update(from: webView)
         }
 
+        func loadLoginPage(
+            in webView: WKWebView,
+            resetChallengeData: Bool,
+            resetAutoRefreshGuard: Bool
+        ) {
+            if resetAutoRefreshGuard {
+                hasAutoRefreshedCaptchaError = false
+            }
+
+            let load = { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                self.pageTitle.wrappedValue = "一嗨登录"
+                self.currentURL.wrappedValue = EhiLoginSession.loginURL.absoluteString
+                webView.stopLoading()
+                webView.load(EhiLoginSession.makeLoginRequest())
+            }
+
+            if resetChallengeData {
+                EhiLoginSession.resetLoginChallengeData(completion: load)
+            } else {
+                load()
+            }
+        }
+
         private func update(from webView: WKWebView) {
             pageTitle.wrappedValue = webView.title ?? "一嗨登录"
             currentURL.wrappedValue = webView.url?.absoluteString ?? EhiLoginSession.loginURL.absoluteString
+        }
+
+        private func inspectCaptchaError(in webView: WKWebView) {
+            webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self, weak webView] result, _ in
+                guard let self, let webView, let text = result as? String else { return }
+                guard EhiLoginSession.containsCaptchaValidationError(text), !self.hasAutoRefreshedCaptchaError else { return }
+                self.hasAutoRefreshedCaptchaError = true
+                self.loadLoginPage(in: webView, resetChallengeData: true, resetAutoRefreshGuard: false)
+            }
         }
     }
 }

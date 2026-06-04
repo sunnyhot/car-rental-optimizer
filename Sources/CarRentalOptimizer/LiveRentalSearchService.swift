@@ -381,7 +381,7 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
 
         await withCheckedContinuation { continuation in
             self.continuation = continuation
-            webView.load(URLRequest(url: URL(string: "https://booking.1hai.cn/order/firstStep")!))
+            webView.load(EhiLoginSession.makeLoginRequest())
         }
         return webView
     }
