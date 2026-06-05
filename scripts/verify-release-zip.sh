@@ -34,5 +34,5 @@ if [ -d "${SPARKLE_FRAMEWORK}" ]; then
     fi
 fi
 
-"$(dirname "$0")/verify-app-bundle.sh" "${APP_BUNDLE}"
+REQUIRE_CODESIGN=1 bash "$(dirname "$0")/verify-app-bundle.sh" "${APP_BUNDLE}"
 echo "Release ZIP verification OK: ${ZIP_PATH}"

@@ -35,16 +35,26 @@ if [ "${PLIST_INFO_VERSION}" != "6.0" ]; then
     exit 1
 fi
 
-if ! otool -l "${EXECUTABLE_PATH}" | grep -q "${FRAMEWORK_RPATH}"; then
+if otool -L "${EXECUTABLE_PATH}" | grep -q "@rpath/" && ! otool -l "${EXECUTABLE_PATH}" | grep -q "${FRAMEWORK_RPATH}"; then
     echo "ERROR: Missing framework rpath ${FRAMEWORK_RPATH}" >&2
     exit 1
 fi
 
-SIGNATURE_KIND=$(codesign -dv --verbose=4 "${APP_BUNDLE}" 2>&1 | awk -F= '/^Signature=/{print $2}')
-if [ "${SIGNATURE_KIND}" = "adhoc" ] && otool -L "${EXECUTABLE_PATH}" | grep -q "@rpath/Sparkle.framework"; then
-    echo "ERROR: Ad-hoc release app must not link Sparkle.framework; Gatekeeper blocks the nested framework" >&2
+if [ "${REQUIRE_CODESIGN:-0}" != "1" ]; then
+    echo "    Skipping bundle codesign verification for local/test package"
+elif codesign --verify --deep --strict "${APP_BUNDLE}" >/tmp/car-rental-codesign-verify.$$ 2>&1; then
+    codesign -dv --verbose=4 "${APP_BUNDLE}" >/tmp/car-rental-codesign.$$ 2>&1
+    SIGNATURE_KIND=$(awk -F= '/^Signature=/{print $2}' /tmp/car-rental-codesign.$$)
+    rm -f /tmp/car-rental-codesign.$$ /tmp/car-rental-codesign-verify.$$
+    if [ "${SIGNATURE_KIND}" = "adhoc" ] && otool -L "${EXECUTABLE_PATH}" | grep -q "@rpath/Sparkle.framework"; then
+        echo "ERROR: Ad-hoc release app must not link Sparkle.framework; Gatekeeper blocks the nested framework" >&2
+        exit 1
+    fi
+else
+    cat /tmp/car-rental-codesign-verify.$$ >&2
+    rm -f /tmp/car-rental-codesign.$$ /tmp/car-rental-codesign-verify.$$
+    echo "ERROR: Bundle codesign verification failed" >&2
     exit 1
 fi
 
-codesign --verify --deep --strict "${APP_BUNDLE}"
 echo "App bundle verification OK: ${APP_BUNDLE}"

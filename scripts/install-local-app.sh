@@ -42,15 +42,30 @@ echo "==> Installing ${APP_NAME} to /Applications"
 rm -rf "${DESTINATION}"
 ditto "${SOURCE_APP}" "${DESTINATION}"
 
+echo "==> Installing launch runtime"
+RUNTIME_DIR="${HOME}/Library/Application Support/CarRentalOptimizer/runtime"
+RUNTIME_EXECUTABLE="${RUNTIME_DIR}/CarRentalOptimizer"
+BUNDLED_EXECUTABLE="${DESTINATION}/Contents/MacOS/CarRentalOptimizer"
+TMP_RUNTIME="${RUNTIME_EXECUTABLE}.$$"
+mkdir -p "${RUNTIME_DIR}"
+cp "${BUNDLED_EXECUTABLE}" "${TMP_RUNTIME}"
+chmod +x "${TMP_RUNTIME}"
+mv -f "${TMP_RUNTIME}" "${RUNTIME_EXECUTABLE}"
+rm -f "${BUNDLED_EXECUTABLE}"
+ln -s "${RUNTIME_EXECUTABLE}" "${BUNDLED_EXECUTABLE}"
+
 echo "==> Clearing quarantine attributes"
-xattr -cr "${DESTINATION}"
+xattr -cr "${DESTINATION}" "${RUNTIME_EXECUTABLE}"
+
+echo "==> Clearing saved window state"
+rm -rf "${HOME}/Library/Saved Application State/com.carrental.optimizer.savedState"
 
 echo "==> Verifying installed bundle"
-"$(dirname "$0")/verify-app-bundle.sh" "${DESTINATION}"
+bash "$(dirname "$0")/verify-app-bundle.sh" "${DESTINATION}"
 
 if [ "${LAUNCH_AFTER_INSTALL}" = "1" ]; then
     echo "==> Launch smoke test"
-    "$(dirname "$0")/verify-launch.sh" "${DESTINATION}"
+    bash "$(dirname "$0")/verify-launch.sh" "${DESTINATION}"
 fi
 
 echo "Installed: ${DESTINATION}"

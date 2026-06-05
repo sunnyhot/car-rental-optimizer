@@ -21,7 +21,19 @@ let package = Package(
             dependencies: [
                 "CarRentalDomain",
             ],
-            path: "Sources/CarRentalOptimizer"
+            path: "Sources/CarRentalOptimizer",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker",
+                    "-sectcreate",
+                    "-Xlinker",
+                    "__TEXT",
+                    "-Xlinker",
+                    "__info_plist",
+                    "-Xlinker",
+                    "native/Info.plist",
+                ])
+            ]
         ),
         .target(name: "CarRentalDomain", path: "Sources/CarRentalDomain"),
         .testTarget(

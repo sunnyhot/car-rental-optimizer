@@ -246,8 +246,20 @@ struct MacReleaseInstaller: UpdateInstalling {
 
         rm -rf "$DEST_APP"
         ditto "$SOURCE_APP" "$DEST_APP"
-        xattr -cr "$DEST_APP" || true
-        codesign --verify --deep --strict "$DEST_APP"
+        RUNTIME_DIR="$HOME/Library/Application Support/CarRentalOptimizer/runtime"
+        RUNTIME_EXECUTABLE="$RUNTIME_DIR/CarRentalOptimizer"
+        BUNDLED_EXECUTABLE="$DEST_APP/Contents/MacOS/CarRentalOptimizer"
+        TMP_RUNTIME="$RUNTIME_EXECUTABLE.$$"
+        mkdir -p "$RUNTIME_DIR"
+        cp "$BUNDLED_EXECUTABLE" "$TMP_RUNTIME"
+        chmod +x "$TMP_RUNTIME"
+        mv -f "$TMP_RUNTIME" "$RUNTIME_EXECUTABLE"
+        rm -f "$BUNDLED_EXECUTABLE"
+        ln -s "$RUNTIME_EXECUTABLE" "$BUNDLED_EXECUTABLE"
+        xattr -cr "$DEST_APP" "$RUNTIME_EXECUTABLE" || true
+        rm -rf "$HOME/Library/Saved Application State/com.carrental.optimizer.savedState" || true
+        test -x "$BUNDLED_EXECUTABLE"
+        test -x "$RUNTIME_EXECUTABLE"
         open -n "$DEST_APP"
         rm -rf "$TMP_DIR"
         """

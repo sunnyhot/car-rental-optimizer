@@ -5,6 +5,8 @@
     <!-- App version info -->
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -15,6 +17,8 @@
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSQuitAlwaysKeepsWindows</key>
+    <false/>
 
     <!-- Bundle identifier -->
     <key>CFBundleIdentifier</key>
@@ -27,6 +31,8 @@
     <string>租车比价助手</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
 
     <!-- Executable name -->
     <key>CFBundleExecutable</key>

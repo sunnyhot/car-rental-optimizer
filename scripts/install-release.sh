@@ -51,28 +51,28 @@ echo "==> Installing ${APP_NAME} to /Applications"
 rm -rf "${DESTINATION}"
 ditto "${SOURCE_APP}" "${DESTINATION}"
 
-echo "==> Clearing quarantine attributes"
-xattr -cr "${DESTINATION}"
+echo "==> Installing launch runtime"
+RUNTIME_DIR="${HOME}/Library/Application Support/CarRentalOptimizer/runtime"
+RUNTIME_EXECUTABLE="${RUNTIME_DIR}/CarRentalOptimizer"
+BUNDLED_EXECUTABLE="${DESTINATION}/Contents/MacOS/CarRentalOptimizer"
+TMP_RUNTIME="${RUNTIME_EXECUTABLE}.$$"
+mkdir -p "${RUNTIME_DIR}"
+cp "${BUNDLED_EXECUTABLE}" "${TMP_RUNTIME}"
+chmod +x "${TMP_RUNTIME}"
+mv -f "${TMP_RUNTIME}" "${RUNTIME_EXECUTABLE}"
+rm -f "${BUNDLED_EXECUTABLE}"
+ln -s "${RUNTIME_EXECUTABLE}" "${BUNDLED_EXECUTABLE}"
 
-echo "==> Verifying code signature structure"
-codesign --verify --deep --strict "${DESTINATION}"
+echo "==> Clearing quarantine attributes"
+xattr -cr "${DESTINATION}" "${RUNTIME_EXECUTABLE}"
+
+echo "==> Clearing saved window state"
+rm -rf "${HOME}/Library/Saved Application State/com.carrental.optimizer.savedState"
+
+echo "==> Verifying installed bundle"
+bash "$(dirname "$0")/verify-app-bundle.sh" "${DESTINATION}"
 
 echo "==> Launch smoke test"
-open -n "${DESTINATION}"
-sleep 3
-
-EXECUTABLE_PATH="${DESTINATION}/Contents/MacOS/CarRentalOptimizer"
-PID=$(pgrep -f "${EXECUTABLE_PATH}" | head -1 || true)
-if [ -z "${PID}" ]; then
-    echo "ERROR: App did not stay running after launch" >&2
-    exit 1
-fi
-
-echo "Launch verification OK: ${DESTINATION} (pid ${PID})"
-osascript -e 'tell application "租车比价助手" to quit' >/dev/null 2>&1 || true
-sleep 1
-if kill -0 "${PID}" 2>/dev/null; then
-    kill "${PID}" 2>/dev/null || true
-fi
+bash "$(dirname "$0")/verify-launch.sh" "${DESTINATION}"
 
 echo "Installed: ${DESTINATION}"

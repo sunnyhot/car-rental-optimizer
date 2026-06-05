@@ -5,6 +5,7 @@ set -euo pipefail
 APP_BUNDLE="${1:-build/租车比价助手.app}"
 EXECUTABLE_NAME="CarRentalOptimizer"
 EXECUTABLE_PATH="${APP_BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}"
+PROCESS_PATH="${EXECUTABLE_PATH}"
 KEEP_RUNNING="${KEEP_RUNNING:-0}"
 
 if [ ! -d "${APP_BUNDLE}" ]; then
@@ -17,10 +18,22 @@ if [ ! -x "${EXECUTABLE_PATH}" ]; then
     exit 1
 fi
 
+if [ -L "${EXECUTABLE_PATH}" ]; then
+    LINK_TARGET=$(readlink "${EXECUTABLE_PATH}")
+    case "${LINK_TARGET}" in
+        /*)
+            PROCESS_PATH="${LINK_TARGET}"
+            ;;
+        *)
+            PROCESS_PATH="$(cd "$(dirname "${EXECUTABLE_PATH}")" && cd "$(dirname "${LINK_TARGET}")" && pwd)/$(basename "${LINK_TARGET}")"
+            ;;
+    esac
+fi
+
 open -n "${APP_BUNDLE}"
 sleep 3
 
-PID=$(pgrep -f "${EXECUTABLE_PATH}" | head -1 || true)
+PID=$(pgrep -f "${PROCESS_PATH}" | head -1 || true)
 if [ -z "${PID}" ]; then
     echo "ERROR: App did not stay running after launch: ${APP_BUNDLE}" >&2
     exit 1
