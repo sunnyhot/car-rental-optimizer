@@ -7,6 +7,7 @@ struct SearchPanelView: View {
     @State private var returnDate = AppDateRules.addingDays(1, to: AppDateRules.today)
     @State private var showingEhiLogin = false
     @State private var originInputTask: Task<Void, Never>?
+    @State private var originInputDismissRequest = 0
 
     var body: some View {
         WorkbenchPanel(
@@ -41,16 +42,14 @@ struct SearchPanelView: View {
                     .background(WorkbenchStyle.panel)
             }
             .onChange(of: pickupDate) { _, newValue in
-                originInputTask?.cancel()
-                viewModel.dismissOriginSuggestions()
+                dismissOriginInput()
                 if returnDate < newValue {
                     returnDate = newValue
                 }
                 viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
             }
             .onChange(of: returnDate) { _, _ in
-                originInputTask?.cancel()
-                viewModel.dismissOriginSuggestions()
+                dismissOriginInput()
                 viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
             }
             .sheet(isPresented: $showingEhiLogin) {
@@ -64,14 +63,16 @@ struct SearchPanelView: View {
     private var searchControls: some View {
         VStack(alignment: .leading, spacing: 14) {
             QuerySection(icon: "mappin.and.ellipse", title: "行程") {
-                OriginLocationField(originInputTask: $originInputTask)
+                OriginLocationField(
+                    originInputTask: $originInputTask,
+                    dismissRequest: originInputDismissRequest
+                )
 
                 DateRangeField(
                     pickupDate: $pickupDate,
                     returnDate: $returnDate
                 ) {
-                    originInputTask?.cancel()
-                    viewModel.dismissOriginSuggestions()
+                    dismissOriginInput()
                 }
             }
 
@@ -147,8 +148,7 @@ struct SearchPanelView: View {
 
     private var compareButton: some View {
         Button {
-            originInputTask?.cancel()
-            viewModel.dismissOriginSuggestions()
+            dismissOriginInput()
             Task { await viewModel.runSearch() }
         } label: {
             HStack(spacing: 8) {
@@ -171,14 +171,25 @@ struct SearchPanelView: View {
         .tint(WorkbenchStyle.accent)
         .disabled(viewModel.isSearching)
     }
+
+    private func dismissOriginInput() {
+        originInputTask?.cancel()
+        originInputDismissRequest += 1
+        viewModel.dismissOriginSuggestions()
+    }
 }
 
 private struct OriginLocationField: View {
     @EnvironmentObject var viewModel: SearchViewModel
     @Binding var originInputTask: Task<Void, Never>?
+    let dismissRequest: Int
+    @FocusState private var isOriginFieldFocused: Bool
+    @State private var isEditingOrigin = false
 
     private var shouldShowSuggestionPanel: Bool {
-        viewModel.isOriginSuggestionPanelVisible
+        isEditingOrigin
+            && isOriginFieldFocused
+            && viewModel.isOriginSuggestionPanelVisible
             && (viewModel.isLoadingOriginSuggestions || !viewModel.originSuggestions.isEmpty)
     }
 
@@ -186,20 +197,16 @@ private struct OriginLocationField: View {
         FieldView(label: "当前位置") {
             VStack(alignment: .leading, spacing: 8) {
                 originInputRow
-                    .overlay(alignment: .topLeading) {
-                        if shouldShowSuggestionPanel {
-                            OriginSuggestionDropdown(
-                                isLoading: viewModel.isLoadingOriginSuggestions,
-                                suggestions: viewModel.originSuggestions
-                            ) { suggestion in
-                                originInputTask?.cancel()
-                                Task { await viewModel.selectOriginSuggestion(suggestion) }
-                            }
-                            .offset(y: 40)
-                            .zIndex(50)
-                        }
+
+                if shouldShowSuggestionPanel {
+                    OriginSuggestionDropdown(
+                        isLoading: viewModel.isLoadingOriginSuggestions,
+                        suggestions: viewModel.originSuggestions
+                    ) { suggestion in
+                        closeEditor()
+                        Task { await viewModel.selectOriginSuggestion(suggestion) }
                     }
-                    .zIndex(shouldShowSuggestionPanel ? 50 : 0)
+                }
 
                 if !shouldShowSuggestionPanel && !viewModel.originStatus.isEmpty {
                     Text(viewModel.originStatus)
@@ -209,7 +216,9 @@ private struct OriginLocationField: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .zIndex(shouldShowSuggestionPanel ? 50 : 0)
+            .onChange(of: dismissRequest) { _, _ in
+                closeEditor()
+            }
         }
     }
 
@@ -221,6 +230,7 @@ private struct OriginLocationField: View {
                     get: { viewModel.request.originLabel },
                     set: { value in
                         originInputTask?.cancel()
+                        isEditingOrigin = true
                         viewModel.request.originLabel = value
                         originInputTask = Task {
                             try? await Task.sleep(nanoseconds: 280_000_000)
@@ -232,14 +242,13 @@ private struct OriginLocationField: View {
             )
             .textFieldStyle(.roundedBorder)
             .controlSize(.large)
+            .focused($isOriginFieldFocused)
             .onSubmit {
-                originInputTask?.cancel()
-                viewModel.dismissOriginSuggestions()
+                closeEditor()
             }
 
             Button {
-                originInputTask?.cancel()
-                viewModel.dismissOriginSuggestions()
+                closeEditor()
                 Task { await viewModel.refreshCurrentLocation() }
             } label: {
                 if viewModel.isLocatingOrigin {
@@ -256,6 +265,13 @@ private struct OriginLocationField: View {
             .disabled(viewModel.isLocatingOrigin)
             .help("获取当前定位")
         }
+    }
+
+    private func closeEditor() {
+        originInputTask?.cancel()
+        isEditingOrigin = false
+        isOriginFieldFocused = false
+        viewModel.dismissOriginSuggestions()
     }
 }
 
@@ -292,7 +308,7 @@ private struct OriginSuggestionDropdown: View {
                         }
                     }
                 }
-                .frame(maxHeight: 310)
+                .frame(maxHeight: 260)
             }
         }
         .frame(maxWidth: .infinity)
