@@ -21,4 +21,15 @@ struct AppDateRulesTests {
         #expect(AppDateRules.rentalDaySpan(pickup: pickup, returnDate: nextDay) == 1)
         #expect(AppDateRules.rentalDaySpan(pickup: pickup, returnDate: sameDay) == 1)
     }
+
+    @Test("Normalized range keeps return date linked to pickup date")
+    func normalizedRangeKeepsReturnDateLinkedToPickupDate() {
+        let pickup = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 10))!
+        let earlierReturn = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
+
+        let range = AppDateRules.normalizedRange(pickup: pickup, returnDate: earlierReturn)
+
+        #expect(range.pickup == pickup)
+        #expect(range.returnDate == pickup)
+    }
 }

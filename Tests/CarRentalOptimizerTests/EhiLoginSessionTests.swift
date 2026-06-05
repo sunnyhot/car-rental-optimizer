@@ -51,4 +51,56 @@ struct EhiLoginSessionTests {
 
         #expect(received)
     }
+
+    @Test("Ehi cookie vault keeps one-hai session cookies and ignores other platforms")
+    func ehiCookieVaultKeepsEhiSessionCookiesOnly() throws {
+        let ehiCookie = try #require(HTTPCookie(properties: [
+            .domain: ".1hai.cn",
+            .path: "/",
+            .name: "SESSION",
+            .value: "session-value",
+            .secure: "TRUE",
+            HTTPCookiePropertyKey("HttpOnly"): "TRUE"
+        ]))
+        let carIncCookie = try #require(HTTPCookie(properties: [
+            .domain: "m.zuche.com",
+            .path: "/",
+            .name: "SESSION",
+            .value: "wrong-platform"
+        ]))
+
+        let persisted = EhiCookieVault.persistableCookies(from: [ehiCookie, carIncCookie])
+        let restored = EhiCookieVault.restoredCookies(from: persisted)
+
+        #expect(persisted.count == 1)
+        #expect(persisted.first?.name == "SESSION")
+        #expect(persisted.first?.expiresDate == nil)
+        #expect(restored.first?.domain == ".1hai.cn")
+        #expect(restored.first?.value == "session-value")
+    }
+
+    @Test("Ehi cookie vault drops expired cookies before restoring")
+    func ehiCookieVaultDropsExpiredCookiesBeforeRestoring() throws {
+        let now = Date(timeIntervalSince1970: 1_780_203_600)
+        let expired = try #require(HTTPCookie(properties: [
+            .domain: "booking.1hai.cn",
+            .path: "/",
+            .name: "OLD_TOKEN",
+            .value: "expired",
+            .expires: now.addingTimeInterval(-60)
+        ]))
+        let valid = try #require(HTTPCookie(properties: [
+            .domain: "booking.1hai.cn",
+            .path: "/",
+            .name: "NEW_TOKEN",
+            .value: "valid",
+            .expires: now.addingTimeInterval(3600)
+        ]))
+
+        let persisted = EhiCookieVault.persistableCookies(from: [expired, valid], now: now)
+        let restored = EhiCookieVault.restoredCookies(from: persisted, now: now)
+
+        #expect(persisted.map(\.name) == ["NEW_TOKEN"])
+        #expect(restored.map(\.name) == ["NEW_TOKEN"])
+    }
 }

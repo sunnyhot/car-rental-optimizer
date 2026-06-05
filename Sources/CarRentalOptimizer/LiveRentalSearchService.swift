@@ -410,8 +410,11 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
             return webView
         }
 
+        let dataStore = WKWebsiteDataStore.default()
+        await EhiCookieVault.restore(into: dataStore.httpCookieStore)
+
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = dataStore
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         webView.navigationDelegate = self
@@ -421,6 +424,7 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
             self.continuation = continuation
             webView.load(EhiLoginSession.makeLoginRequest())
         }
+        await EhiCookieVault.save(from: dataStore.httpCookieStore)
         return webView
     }
 

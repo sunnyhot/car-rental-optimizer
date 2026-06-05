@@ -177,98 +177,31 @@ private struct OriginLocationField: View {
     @EnvironmentObject var viewModel: SearchViewModel
     @Binding var originInputTask: Task<Void, Never>?
 
+    private var shouldShowSuggestionPanel: Bool {
+        viewModel.isOriginSuggestionPanelVisible
+            && (viewModel.isLoadingOriginSuggestions || !viewModel.originSuggestions.isEmpty)
+    }
+
     var body: some View {
         FieldView(label: "当前位置") {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    TextField(
-                        "自动定位或输入地址",
-                        text: Binding(
-                            get: { viewModel.request.originLabel },
-                            set: { value in
-                                originInputTask?.cancel()
-                                viewModel.request.originLabel = value
-                                originInputTask = Task {
-                                    try? await Task.sleep(nanoseconds: 280_000_000)
-                                    guard !Task.isCancelled else { return }
-                                    await viewModel.updateOriginInput(value)
-                                }
-                            }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.large)
-
-                    Button {
-                        originInputTask?.cancel()
-                        viewModel.dismissOriginSuggestions()
-                        Task { await viewModel.refreshCurrentLocation() }
-                    } label: {
-                        if viewModel.isLocatingOrigin {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(width: 16, height: 16)
-                        } else {
-                            Image(systemName: "location.fill")
-                                .font(.caption.weight(.bold))
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(viewModel.isLocatingOrigin)
-                    .help("获取当前定位")
-                }
-
-                if viewModel.isOriginSuggestionPanelVisible && viewModel.isLoadingOriginSuggestions {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("正在联想地址")
-                            .font(.caption2)
-                            .foregroundStyle(WorkbenchStyle.muted)
-                    }
-                } else if viewModel.isOriginSuggestionPanelVisible && !viewModel.originSuggestions.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(viewModel.originSuggestions) { suggestion in
-                            Button {
+                originInputRow
+                    .overlay(alignment: .topLeading) {
+                        if shouldShowSuggestionPanel {
+                            OriginSuggestionDropdown(
+                                isLoading: viewModel.isLoadingOriginSuggestions,
+                                suggestions: viewModel.originSuggestions
+                            ) { suggestion in
                                 originInputTask?.cancel()
                                 Task { await viewModel.selectOriginSuggestion(suggestion) }
-                            } label: {
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "mappin.circle.fill")
-                                        .foregroundStyle(WorkbenchStyle.accent)
-                                        .frame(width: 16)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(suggestion.title)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(WorkbenchStyle.ink)
-                                            .lineLimit(1)
-                                        if !suggestion.subtitle.isEmpty {
-                                            Text(suggestion.subtitle)
-                                                .font(.caption2)
-                                                .foregroundStyle(WorkbenchStyle.muted)
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                    Spacer(minLength: 8)
-                                }
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 7)
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
-
-                            if suggestion.id != viewModel.originSuggestions.last?.id {
-                                Divider()
-                                    .padding(.leading, 33)
-                            }
+                            .offset(y: 40)
+                            .zIndex(50)
                         }
                     }
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.black.opacity(0.035))
-                    )
-                } else if !viewModel.originStatus.isEmpty {
+                    .zIndex(shouldShowSuggestionPanel ? 50 : 0)
+
+                if !shouldShowSuggestionPanel && !viewModel.originStatus.isEmpty {
                     Text(viewModel.originStatus)
                         .font(.caption2)
                         .foregroundStyle(WorkbenchStyle.muted)
@@ -276,7 +209,132 @@ private struct OriginLocationField: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .zIndex(shouldShowSuggestionPanel ? 50 : 0)
         }
+    }
+
+    private var originInputRow: some View {
+        HStack(spacing: 8) {
+            TextField(
+                "自动定位或输入地址",
+                text: Binding(
+                    get: { viewModel.request.originLabel },
+                    set: { value in
+                        originInputTask?.cancel()
+                        viewModel.request.originLabel = value
+                        originInputTask = Task {
+                            try? await Task.sleep(nanoseconds: 280_000_000)
+                            guard !Task.isCancelled else { return }
+                            await viewModel.updateOriginInput(value)
+                        }
+                    }
+                )
+            )
+            .textFieldStyle(.roundedBorder)
+            .controlSize(.large)
+            .onSubmit {
+                originInputTask?.cancel()
+                viewModel.dismissOriginSuggestions()
+            }
+
+            Button {
+                originInputTask?.cancel()
+                viewModel.dismissOriginSuggestions()
+                Task { await viewModel.refreshCurrentLocation() }
+            } label: {
+                if viewModel.isLocatingOrigin {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: "location.fill")
+                        .font(.caption.weight(.bold))
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(viewModel.isLocatingOrigin)
+            .help("获取当前定位")
+        }
+    }
+}
+
+private struct OriginSuggestionDropdown: View {
+    let isLoading: Bool
+    let suggestions: [AddressSuggestion]
+    let onSelect: (AddressSuggestion) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在联想地址")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.muted)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+            }
+
+            if !suggestions.isEmpty {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(suggestions) { suggestion in
+                            suggestionButton(suggestion)
+
+                            if suggestion.id != suggestions.last?.id {
+                                Divider()
+                                    .padding(.leading, 35)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 310)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(WorkbenchStyle.panel)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(WorkbenchStyle.accent.opacity(0.2), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.13), radius: 14, x: 0, y: 8)
+    }
+
+    private func suggestionButton(_ suggestion: AddressSuggestion) -> some View {
+        Button {
+            onSelect(suggestion)
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "mappin.circle.fill")
+                    .foregroundStyle(WorkbenchStyle.accent)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(suggestion.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                        .lineLimit(1)
+                    if !suggestion.subtitle.isEmpty {
+                        Text(suggestion.subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(WorkbenchStyle.muted)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color.black.opacity(0.001))
     }
 }
 
@@ -284,6 +342,8 @@ private struct DateRangeField: View {
     @Binding var pickupDate: Date
     @Binding var returnDate: Date
     let onCalendarOpen: () -> Void
+    @State private var showingRangePicker = false
+    @State private var focusedEndpoint: DateRangeEndpoint = .pickup
 
     private var rentalDays: Int {
         AppDateRules.rentalDaySpan(pickup: pickupDate, returnDate: returnDate)
@@ -291,41 +351,75 @@ private struct DateRangeField: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            CalendarDateButton(
+            CalendarDateCard(
                 title: "取车",
-                date: $pickupDate,
-                minimumDate: AppDateRules.today,
+                date: pickupDate,
                 accent: WorkbenchStyle.accent,
-                onOpen: onCalendarOpen
-            )
+                isActive: showingRangePicker && focusedEndpoint == .pickup
+            ) {
+                openRangePicker(.pickup)
+            }
 
             DateRangeDurationBadge(days: rentalDays)
 
-            CalendarDateButton(
+            CalendarDateCard(
                 title: "还车",
-                date: $returnDate,
-                minimumDate: pickupDate,
+                date: returnDate,
                 accent: WorkbenchStyle.teal,
-                onOpen: onCalendarOpen
-            )
+                isActive: showingRangePicker && focusedEndpoint == .return
+            ) {
+                openRangePicker(.return)
+            }
         }
         .frame(maxWidth: .infinity)
+        .popover(isPresented: $showingRangePicker, arrowEdge: .bottom) {
+            DateRangePickerPopover(
+                pickupDate: $pickupDate,
+                returnDate: $returnDate,
+                focusedEndpoint: $focusedEndpoint
+            ) {
+                showingRangePicker = false
+            }
+        }
+        .onChange(of: pickupDate) { _, _ in
+            normalizeRange()
+        }
+        .onChange(of: returnDate) { _, _ in
+            normalizeRange()
+        }
+    }
+
+    private func openRangePicker(_ endpoint: DateRangeEndpoint) {
+        onCalendarOpen()
+        focusedEndpoint = endpoint
+        showingRangePicker = true
+    }
+
+    private func normalizeRange() {
+        let normalized = AppDateRules.normalizedRange(pickup: pickupDate, returnDate: returnDate)
+        if pickupDate != normalized.pickup {
+            pickupDate = normalized.pickup
+        }
+        if returnDate != normalized.returnDate {
+            returnDate = normalized.returnDate
+        }
     }
 }
 
-private struct CalendarDateButton: View {
+private enum DateRangeEndpoint: String, CaseIterable {
+    case pickup = "取车"
+    case `return` = "还车"
+}
+
+private struct CalendarDateCard: View {
     let title: String
-    @Binding var date: Date
-    let minimumDate: Date
+    let date: Date
     let accent: Color
-    let onOpen: () -> Void
-    @State private var showingCalendar = false
+    let isActive: Bool
+    let action: () -> Void
 
     var body: some View {
-        Button {
-            onOpen()
-            showingCalendar = true
-        } label: {
+        Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 5) {
                     Image(systemName: "calendar")
@@ -335,7 +429,7 @@ private struct CalendarDateButton: View {
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.down")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(WorkbenchStyle.muted)
+                        .foregroundStyle(isActive ? accent : WorkbenchStyle.muted)
                 }
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -356,56 +450,182 @@ private struct CalendarDateButton: View {
             .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(accent.opacity(0.08))
+                    .fill(accent.opacity(isActive ? 0.14 : 0.08))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(accent.opacity(0.28), lineWidth: 1)
+                            .stroke(accent.opacity(isActive ? 0.55 : 0.28), lineWidth: isActive ? 1.5 : 1)
                     )
             )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title)日期 \(AppDateRules.formatDisplayDate(date)) \(AppDateRules.formatWeekday(date))")
-        .popover(isPresented: $showingCalendar) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("\(title)日期")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(WorkbenchStyle.ink)
+    }
+}
 
-                DatePicker(
-                    "",
-                    selection: $date,
-                    in: minimumDate...,
-                    displayedComponents: [.date]
+private struct DateRangePickerPopover: View {
+    @Binding var pickupDate: Date
+    @Binding var returnDate: Date
+    @Binding var focusedEndpoint: DateRangeEndpoint
+    let onDone: () -> Void
+
+    private var rentalDays: Int {
+        AppDateRules.rentalDaySpan(pickup: pickupDate, returnDate: returnDate)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("选择租期")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                    Text("取车和还车日期联动，不能选择过去日期。")
+                        .font(.caption)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                }
+
+                Spacer()
+
+                Button("完成") {
+                    onDone()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(WorkbenchStyle.accent)
+            }
+            .padding(16)
+            .background(WorkbenchStyle.surface)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                rangeSummaryButton(endpoint: .pickup, title: "取车", date: pickupDate, accent: WorkbenchStyle.accent)
+                DateRangeDurationBadge(days: rentalDays)
+                rangeSummaryButton(endpoint: .return, title: "还车", date: returnDate, accent: WorkbenchStyle.teal)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+
+            HStack(alignment: .top, spacing: 14) {
+                LinkedCalendarColumn(
+                    title: "取车日期",
+                    date: Binding(
+                        get: { pickupDate },
+                        set: { newValue in
+                            let normalized = AppDateRules.calendar.startOfDay(for: newValue)
+                            pickupDate = normalized
+                            if returnDate < normalized {
+                                returnDate = normalized
+                            }
+                            focusedEndpoint = .return
+                        }
+                    ),
+                    minimumDate: AppDateRules.today,
+                    accent: WorkbenchStyle.accent,
+                    isActive: focusedEndpoint == .pickup
                 )
-                .labelsHidden()
-                .datePickerStyle(.graphical)
-                .environment(\.calendar, AppDateRules.calendar)
-                .environment(\.locale, Locale(identifier: "zh_CN"))
-                .frame(width: 300)
 
-                Divider()
+                LinkedCalendarColumn(
+                    title: "还车日期",
+                    date: Binding(
+                        get: { returnDate },
+                        set: { newValue in
+                            returnDate = max(
+                                AppDateRules.calendar.startOfDay(for: newValue),
+                                AppDateRules.calendar.startOfDay(for: pickupDate)
+                            )
+                            focusedEndpoint = .return
+                        }
+                    ),
+                    minimumDate: pickupDate,
+                    accent: WorkbenchStyle.teal,
+                    isActive: focusedEndpoint == .return
+                )
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+        .frame(width: 690)
+        .environment(\.calendar, AppDateRules.calendar)
+        .environment(\.locale, Locale(identifier: "zh_CN"))
+    }
 
-                HStack {
-                    Text("\(AppDateRules.formatDisplayDate(date)) \(AppDateRules.formatWeekday(date))")
+    private func rangeSummaryButton(endpoint: DateRangeEndpoint, title: String, date: Date, accent: Color) -> some View {
+        Button {
+            focusedEndpoint = endpoint
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(WorkbenchStyle.muted)
-                    Spacer()
-                    Button("完成") {
-                        showingCalendar = false
-                    }
-                    .keyboardShortcut(.defaultAction)
+                    Text("\(AppDateRules.formatDisplayDate(date)) \(AppDateRules.formatWeekday(date))")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                        .monospacedDigit()
                 }
+                Spacer()
             }
-            .padding(14)
-            .frame(width: 324)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(accent.opacity(focusedEndpoint == endpoint ? 0.14 : 0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(accent.opacity(focusedEndpoint == endpoint ? 0.48 : 0.18), lineWidth: focusedEndpoint == endpoint ? 1.5 : 1)
+                    )
+            )
         }
-        .onChange(of: date) { _, newValue in
-            let normalized = AppDateRules.calendar.startOfDay(for: newValue)
-            if date != normalized {
-                date = normalized
+        .buttonStyle(.plain)
+    }
+}
+
+private struct LinkedCalendarColumn: View {
+    let title: String
+    @Binding var date: Date
+    let minimumDate: Date
+    let accent: Color
+    let isActive: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(accent)
+                    .frame(width: 7, height: 7)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.ink)
+                Spacer()
             }
+
+            DatePicker(
+                "",
+                selection: $date,
+                in: minimumDate...,
+                displayedComponents: [.date]
+            )
+            .labelsHidden()
+            .datePickerStyle(.graphical)
+            .frame(width: 314)
+            .frame(minHeight: 318)
         }
+        .padding(12)
+        .frame(width: 326, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isActive ? accent.opacity(0.08) : Color.black.opacity(0.025))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isActive ? accent.opacity(0.35) : WorkbenchStyle.line, lineWidth: 1)
+        )
     }
 }
 

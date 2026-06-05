@@ -42,9 +42,12 @@ struct EhiLoginSheet: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button("登录完成，重新比较") {
-                    EhiLoginSession.notifyDidChange()
-                    dismiss()
-                    onCompleted()
+                    Task { @MainActor in
+                        await EhiCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)
+                        EhiLoginSession.notifyDidChange()
+                        dismiss()
+                        onCompleted()
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(WorkbenchStyle.accent)
@@ -79,7 +82,12 @@ private struct EhiLoginWebView: NSViewRepresentable {
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         webView.navigationDelegate = context.coordinator
         context.coordinator.lastReloadToken = reloadToken
-        context.coordinator.loadLoginPage(in: webView, resetChallengeData: false, resetAutoRefreshGuard: false)
+        context.coordinator.loadLoginPage(
+            in: webView,
+            resetChallengeData: false,
+            resetAutoRefreshGuard: false,
+            restoreSavedSession: true
+        )
         return webView
     }
 
@@ -88,7 +96,12 @@ private struct EhiLoginWebView: NSViewRepresentable {
         context.coordinator.currentURL = $currentURL
         if context.coordinator.lastReloadToken != reloadToken {
             context.coordinator.lastReloadToken = reloadToken
-            context.coordinator.loadLoginPage(in: nsView, resetChallengeData: true, resetAutoRefreshGuard: true)
+            context.coordinator.loadLoginPage(
+                in: nsView,
+                resetChallengeData: true,
+                resetAutoRefreshGuard: true,
+                restoreSavedSession: false
+            )
         }
     }
 
@@ -115,7 +128,8 @@ private struct EhiLoginWebView: NSViewRepresentable {
         func loadLoginPage(
             in webView: WKWebView,
             resetChallengeData: Bool,
-            resetAutoRefreshGuard: Bool
+            resetAutoRefreshGuard: Bool,
+            restoreSavedSession: Bool
         ) {
             if resetAutoRefreshGuard {
                 hasAutoRefreshedCaptchaError = false
@@ -123,10 +137,15 @@ private struct EhiLoginWebView: NSViewRepresentable {
 
             let load = { [weak self, weak webView] in
                 guard let self, let webView else { return }
-                self.pageTitle.wrappedValue = "一嗨登录"
-                self.currentURL.wrappedValue = EhiLoginSession.loginURL.absoluteString
-                webView.stopLoading()
-                webView.load(EhiLoginSession.makeLoginRequest())
+                Task { @MainActor in
+                    self.pageTitle.wrappedValue = "一嗨登录"
+                    self.currentURL.wrappedValue = EhiLoginSession.loginURL.absoluteString
+                    webView.stopLoading()
+                    if restoreSavedSession {
+                        await EhiCookieVault.restore(into: webView.configuration.websiteDataStore.httpCookieStore)
+                    }
+                    webView.load(EhiLoginSession.makeLoginRequest())
+                }
             }
 
             if resetChallengeData {
@@ -146,7 +165,12 @@ private struct EhiLoginWebView: NSViewRepresentable {
                 guard let self, let webView, let text = result as? String else { return }
                 guard EhiLoginSession.containsCaptchaValidationError(text), !self.hasAutoRefreshedCaptchaError else { return }
                 self.hasAutoRefreshedCaptchaError = true
-                self.loadLoginPage(in: webView, resetChallengeData: true, resetAutoRefreshGuard: false)
+                self.loadLoginPage(
+                    in: webView,
+                    resetChallengeData: true,
+                    resetAutoRefreshGuard: false,
+                    restoreSavedSession: false
+                )
             }
         }
     }
