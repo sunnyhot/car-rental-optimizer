@@ -80,6 +80,11 @@ enum EhiCookieVault {
         cookies.compactMap { $0.httpCookie(now: now) }
     }
 
+    static func discardSavedSession(fileURL: URL = defaultCookieFileURL) {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
     @MainActor
     static func restore(into store: WKHTTPCookieStore, fileURL: URL = defaultCookieFileURL) async {
         guard let data = try? Data(contentsOf: fileURL) else { return }

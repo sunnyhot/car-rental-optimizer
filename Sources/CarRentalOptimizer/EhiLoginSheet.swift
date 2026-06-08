@@ -149,6 +149,7 @@ private struct EhiLoginWebView: NSViewRepresentable {
             }
 
             if resetChallengeData {
+                EhiCookieVault.discardSavedSession()
                 EhiLoginSession.resetLoginChallengeData(completion: load)
             } else {
                 load()

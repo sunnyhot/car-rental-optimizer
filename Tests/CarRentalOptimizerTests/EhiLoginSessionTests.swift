@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WebKit
 @testable import CarRentalOptimizer
 
 @Suite("Ehi login session")
@@ -102,5 +103,58 @@ struct EhiLoginSessionTests {
 
         #expect(persisted.map(\.name) == ["NEW_TOKEN"])
         #expect(restored.map(\.name) == ["NEW_TOKEN"])
+    }
+
+    @Test("Captcha recovery removes persisted eHi cookies")
+    func captchaRecoveryRemovesPersistedEhiCookies() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ehi-session-\(UUID().uuidString).json")
+        try "stale-session".write(to: fileURL, atomically: true, encoding: .utf8)
+
+        EhiCookieVault.discardSavedSession(fileURL: fileURL)
+
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    @Test("Captcha recovery removes eHi cookies from WebKit store")
+    @MainActor
+    func captchaRecoveryRemovesEhiCookiesFromWebKitStore() async throws {
+        let dataStore = WKWebsiteDataStore.nonPersistent()
+        let ehiCookie = try #require(HTTPCookie(properties: [
+            .domain: ".1hai.cn",
+            .path: "/",
+            .name: "CAPTCHA_CHALLENGE",
+            .value: "stale",
+            .secure: "TRUE"
+        ]))
+
+        await setCookie(ehiCookie, in: dataStore.httpCookieStore)
+
+        await withCheckedContinuation { continuation in
+            EhiLoginSession.resetLoginChallengeData(dataStore: dataStore) {
+                continuation.resume()
+            }
+        }
+
+        let cookies = await allCookies(in: dataStore.httpCookieStore)
+        #expect(cookies.filter(EhiCookieVault.isEhiCookie).isEmpty)
+    }
+}
+
+@MainActor
+private func allCookies(in store: WKHTTPCookieStore) async -> [HTTPCookie] {
+    await withCheckedContinuation { continuation in
+        store.getAllCookies { cookies in
+            continuation.resume(returning: cookies)
+        }
+    }
+}
+
+@MainActor
+private func setCookie(_ cookie: HTTPCookie, in store: WKHTTPCookieStore) async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        store.setCookie(cookie) {
+            continuation.resume()
+        }
     }
 }

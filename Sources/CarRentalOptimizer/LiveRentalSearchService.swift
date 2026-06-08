@@ -424,7 +424,6 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
             self.continuation = continuation
             webView.load(EhiLoginSession.makeLoginRequest())
         }
-        await EhiCookieVault.save(from: dataStore.httpCookieStore)
         return webView
     }
 

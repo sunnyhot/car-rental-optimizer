@@ -35,14 +35,18 @@ enum EhiLoginSession {
         completion: @escaping () -> Void
     ) {
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        let finishAfterCookieCleanup = {
+            deleteEhiCookies(from: dataStore.httpCookieStore, completion: completion)
+        }
+
         dataStore.fetchDataRecords(ofTypes: dataTypes) { records in
             let ehiRecords = records.filter { isEhiWebsiteDataRecordName($0.displayName) }
             guard !ehiRecords.isEmpty else {
-                DispatchQueue.main.async(execute: completion)
+                finishAfterCookieCleanup()
                 return
             }
             dataStore.removeData(ofTypes: dataTypes, for: ehiRecords) {
-                DispatchQueue.main.async(execute: completion)
+                finishAfterCookieCleanup()
             }
         }
     }
@@ -58,5 +62,24 @@ enum EhiLoginSession {
         queryItems.append(URLQueryItem(name: "_loginRefresh", value: "\(Int(now.timeIntervalSince1970 * 1000))"))
         components?.queryItems = queryItems
         return components?.url ?? loginURL
+    }
+
+    private static func deleteEhiCookies(from store: WKHTTPCookieStore, completion: @escaping () -> Void) {
+        store.getAllCookies { cookies in
+            let ehiCookies = cookies.filter(EhiCookieVault.isEhiCookie)
+            guard !ehiCookies.isEmpty else {
+                DispatchQueue.main.async(execute: completion)
+                return
+            }
+
+            let group = DispatchGroup()
+            for cookie in ehiCookies {
+                group.enter()
+                store.delete(cookie) {
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main, execute: completion)
+        }
     }
 }
