@@ -79,14 +79,14 @@ struct LiveRentalSearchServiceTests {
         #expect(decodedPrice?.toDouble() == 123.5)
     }
 
-    @Test("eHi blank vehicle query probes nearby stores until one has priced listings")
-    func ehiBlankVehicleQueryProbesNearbyStoresUntilPriced() {
+    @Test("eHi blank vehicle query keeps every model from the nearest priced store")
+    func ehiBlankVehicleQueryKeepsEveryModelFromNearestPricedStore() {
         let script = makeEhiSearchScript(json: "{}")
 
         #expect(script.contains("nearestStoreProbeLimit = 12"))
         #expect(script.contains("storeCandidates.slice(0, nearestStoreProbeLimit)"))
-        #expect(script.contains("listingsBeforeStore"))
-        #expect(script.contains("!hasVehicleQuery && Object.keys(listingsByKey).length > listingsBeforeStore"))
+        #expect(script.contains("selectedBlankStoreId"))
+        #expect(script.contains("!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId"))
         #expect(!script.contains("storeCandidates.slice(0, 1)"))
     }
 
@@ -107,8 +107,8 @@ struct LiveRentalSearchServiceTests {
         #expect(script.contains("aliasMatchesCity"))
     }
 
-    @Test("Blank vehicle query samples nearby stores until enough distinct vehicles are found")
-    func blankVehicleQuerySamplesNearbyStoresUntilEnoughDistinctVehiclesAreFound() {
+    @Test("Blank vehicle query keeps all vehicles from nearest priced store only")
+    func blankVehicleQueryKeepsAllVehiclesFromNearestPricedStoreOnly() {
         let sparseNearest = StoreListingsBatch(
             distanceKm: 0.3,
             listings: [
@@ -127,8 +127,8 @@ struct LiveRentalSearchServiceTests {
 
         let selected = blankVehicleCandidateListings(from: [richerNearby, sparseNearest], minimumVehicleCount: 4)
 
-        #expect(Set(selected.map(\.vehicleName)) == ["大众朗逸", "雪佛兰科鲁泽", "丰田凯美瑞", "奥迪A6L"])
-        #expect(selected.first { $0.vehicleName == "大众朗逸" }?.id == "nearby-lavida")
+        #expect(Set(selected.map(\.vehicleName)) == ["大众朗逸", "雪佛兰科鲁泽"])
+        #expect(selected.first { $0.vehicleName == "大众朗逸" }?.id == "nearest-lavida")
     }
 }
 

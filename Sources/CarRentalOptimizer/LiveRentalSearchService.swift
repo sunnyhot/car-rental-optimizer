@@ -71,22 +71,20 @@ func blankVehicleCandidateListings(
     minimumVehicleCount: Int = 12,
     maxStoreCount: Int = 6
 ) -> [RentalListing] {
+    _ = minimumVehicleCount
+    _ = maxStoreCount
+    guard let nearestPricedStore = batches.sorted(by: { $0.distanceKm < $1.distanceKm }).first(where: { !$0.listings.isEmpty }) else {
+        return []
+    }
+
     var listingsByVehicle: [String: RentalListing] = [:]
-    var sampledStores = 0
 
-    for batch in batches.sorted(by: { $0.distanceKm < $1.distanceKm }) where !batch.listings.isEmpty {
-        sampledStores += 1
-        for listing in batch.listings {
-            let key = normalizedVehicleKey(listing.vehicleName)
-            if let existing = listingsByVehicle[key], !isBetterBlankVehicleListing(listing, than: existing) {
-                continue
-            }
-            listingsByVehicle[key] = listing
+    for listing in nearestPricedStore.listings {
+        let key = normalizedVehicleKey(listing.vehicleName)
+        if let existing = listingsByVehicle[key], !isBetterBlankVehicleListing(listing, than: existing) {
+            continue
         }
-
-        if listingsByVehicle.count >= minimumVehicleCount || sampledStores >= maxStoreCount {
-            break
-        }
+        listingsByVehicle[key] = listing
     }
 
     return listingsByVehicle.values.sorted {
@@ -657,8 +655,10 @@ func makeEhiSearchScript(json: String) -> String {
         const queryErrors = [];
         let stockRequests = 0;
         let carsSeen = 0;
+        let selectedBlankStoreId = null;
         for (const store of candidates) {
-          const listingsBeforeStore = Object.keys(listingsByKey).length;
+          if (!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId) break;
+          const storeListings = [];
           const payload = {
             stockType: 1,
             whereFilter: null,
@@ -727,9 +727,15 @@ func makeEhiSearchScript(json: String) -> String {
                 sourceUrl,
                 dataCompleteness: 0.88
               };
+              storeListings.push({ key, listing });
+            }
+            for (const { key, listing } of storeListings) {
               if (!listingsByKey[key] || listingsByKey[key].basePrice > listing.basePrice) listingsByKey[key] = listing;
             }
-            if (!hasVehicleQuery && Object.keys(listingsByKey).length > listingsBeforeStore) break;
+            if (!hasVehicleQuery && storeListings.length) {
+              selectedBlankStoreId = store.id;
+              break;
+            }
           } catch (error) {
             const message = String(error && (error.message || error.stack) || error);
             if (message.includes('401')) {

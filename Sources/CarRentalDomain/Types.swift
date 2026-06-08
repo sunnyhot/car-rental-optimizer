@@ -205,6 +205,7 @@ public struct Recommendation: Codable, Equatable, Identifiable {
     public let bestTotal: Double
     public let bestRouteMode: RouteMode
     public let warnings: [ResultWarning]
+    public let comparisonQuotes: [Recommendation]
 
     public init(
         listing: RentalListing,
@@ -216,7 +217,8 @@ public struct Recommendation: Codable, Equatable, Identifiable {
         transitTotal: Double,
         bestTotal: Double,
         bestRouteMode: RouteMode,
-        warnings: [ResultWarning]
+        warnings: [ResultWarning],
+        comparisonQuotes: [Recommendation] = []
     ) {
         self.listing = listing
         self.match = match
@@ -228,5 +230,22 @@ public struct Recommendation: Codable, Equatable, Identifiable {
         self.bestTotal = bestTotal
         self.bestRouteMode = bestRouteMode
         self.warnings = warnings
+        self.comparisonQuotes = comparisonQuotes
+    }
+
+    public func withComparisonQuotes(_ comparisonQuotes: [Recommendation]) -> Recommendation {
+        Recommendation(
+            listing: listing,
+            match: match,
+            taxiRoute: taxiRoute,
+            transitRoute: transitRoute,
+            rentalTotal: rentalTotal,
+            taxiTotal: taxiTotal,
+            transitTotal: transitTotal,
+            bestTotal: bestTotal,
+            bestRouteMode: bestRouteMode,
+            warnings: warnings,
+            comparisonQuotes: comparisonQuotes
+        )
     }
 }

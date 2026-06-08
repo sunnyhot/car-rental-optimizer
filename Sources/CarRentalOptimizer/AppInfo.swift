@@ -11,6 +11,6 @@
 enum AppInfo {
     static let appName = "租车比价助手"
     static let bundleIdentifier = "com.carrental.optimizer"
-    static let version = "0.6.18"
-    static let build = "32"
+    static let version = "0.6.19"
+    static let build = "33"
 }

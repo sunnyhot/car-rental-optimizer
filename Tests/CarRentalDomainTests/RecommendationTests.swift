@@ -147,4 +147,50 @@ final class RecommendationTests: XCTestCase {
         let ranked = rankRecommendations([similar, exact])
         XCTAssertEqual(ranked[0].match.kind, .exact)
     }
+
+    func testDataCompletenessTieBreakerPrefersMoreCompleteListing() {
+        let lowCompletenessListing = RentalListing(
+            id: "listing-low-completeness",
+            platform: .ehi,
+            store: baseListing.store,
+            vehicleName: "奇瑞 瑞虎8",
+            vehicleClass: "中型SUV",
+            basePrice: 320,
+            platformFees: 35,
+            insuranceFees: 50,
+            oneWayFee: 0,
+            sourceUrl: "https://www.1hai.cn/",
+            dataCompleteness: 0.62
+        )
+        let highCompletenessListing = RentalListing(
+            id: "listing-high-completeness",
+            platform: .ehi,
+            store: baseListing.store,
+            vehicleName: "奇瑞 瑞虎8",
+            vehicleClass: "中型SUV",
+            basePrice: 320,
+            platformFees: 35,
+            insuranceFees: 50,
+            oneWayFee: 0,
+            sourceUrl: "https://www.1hai.cn/",
+            dataCompleteness: 0.97
+        )
+
+        let low = buildRecommendation(
+            listing: lowCompletenessListing,
+            match: exactMatch,
+            taxiRoute: taxiRoute,
+            transitRoute: transitRoute
+        )
+        let high = buildRecommendation(
+            listing: highCompletenessListing,
+            match: exactMatch,
+            taxiRoute: taxiRoute,
+            transitRoute: transitRoute
+        )
+
+        let ranked = rankRecommendations([low, high])
+
+        XCTAssertEqual(ranked[0].listing.id, "listing-high-completeness")
+    }
 }

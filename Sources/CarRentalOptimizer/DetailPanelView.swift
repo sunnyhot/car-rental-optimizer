@@ -46,6 +46,10 @@ private struct RecommendationDetailView: View {
                     }
                 }
 
+                if recommendation.comparisonQuotes.count > 1 {
+                    PlatformQuoteComparisonView(recommendation: recommendation)
+                }
+
                 SurfaceBox {
                     VStack(alignment: .leading, spacing: 9) {
                         DetailTitleRow(icon: "list.bullet.clipboard", title: "费用拆分")
@@ -102,6 +106,78 @@ private struct RecommendationDetailView: View {
                 }
             }
             .padding(16)
+        }
+    }
+}
+
+private struct PlatformQuoteComparisonView: View {
+    let recommendation: Recommendation
+
+    var body: some View {
+        SurfaceBox {
+            VStack(alignment: .leading, spacing: 9) {
+                DetailTitleRow(icon: "arrow.triangle.2.circlepath", title: "平台价格对比")
+
+                VStack(spacing: 0) {
+                    ForEach(Array(recommendation.comparisonQuotes.enumerated()), id: \.element.id) { index, quote in
+                        PlatformQuoteRowView(
+                            quote: quote,
+                            isWinner: quote.id == recommendation.id
+                        )
+
+                        if index < recommendation.comparisonQuotes.count - 1 {
+                            Divider()
+                                .padding(.vertical, 7)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PlatformQuoteRowView: View {
+    let quote: Recommendation
+    let isWinner: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            StatusPill(
+                text: quote.listing.platform.label,
+                color: quote.listing.platform == .ehi ? WorkbenchStyle.teal : WorkbenchStyle.accent,
+                systemImage: "building.2.fill"
+            )
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(quote.listing.store.name)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                        .lineLimit(1)
+                    if isWinner {
+                        Text("当前取优")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(WorkbenchStyle.green)
+                    }
+                }
+                Text(quote.listing.vehicleName)
+                    .font(.caption2)
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("租车 \(formatMoney(quote.rentalTotal))")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.ink)
+                    .monospacedDigit()
+                Text("含到店 \(formatMoney(quote.bestTotal)) · \(quote.bestRouteMode.label)")
+                    .font(.caption2)
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .monospacedDigit()
+            }
         }
     }
 }

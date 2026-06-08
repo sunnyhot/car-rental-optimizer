@@ -51,7 +51,7 @@ public func rankRecommendations(_ recommendations: [Recommendation]) -> [Recomme
         let durationDelta = bestDuration(left) - bestDuration(right)
         if durationDelta != 0 { return durationDelta < 0 }
 
-        return right.listing.dataCompleteness > left.listing.dataCompleteness
+        return left.listing.dataCompleteness > right.listing.dataCompleteness
     }
 }
 

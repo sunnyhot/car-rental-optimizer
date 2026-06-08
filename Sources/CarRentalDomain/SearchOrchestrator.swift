@@ -73,10 +73,13 @@ public func rankRentalListings(
     }
 
     let ranked = rankRecommendations(filtered)
-    guard !hasVehicleQuery || isSpecificVehicleQuery else {
+    if !hasVehicleQuery {
+        return mergeBlankVehicleRecommendations(ranked)
+    }
+    guard isSpecificVehicleQuery else {
         return ranked
     }
-    return dedupeVehicleRecommendations(ranked, specificVehicleKey: isSpecificVehicleQuery ? vehicleQuery : nil)
+    return dedupeVehicleRecommendations(ranked, specificVehicleKey: vehicleQuery)
 }
 
 private func dedupeVehicleRecommendations(
@@ -90,6 +93,37 @@ private func dedupeVehicleRecommendations(
     }
 }
 
+private func mergeBlankVehicleRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
+    var groups: [String: [Recommendation]] = [:]
+    var orderedKeys: [String] = []
+
+    for recommendation in recommendations {
+        let key = normalizedComparableVehicleKey(recommendation.listing.vehicleName)
+        if groups[key] == nil {
+            orderedKeys.append(key)
+        }
+        groups[key, default: []].append(recommendation.withComparisonQuotes([]))
+    }
+
+    return orderedKeys.compactMap { key in
+        guard let group = groups[key] else { return nil }
+        let quotes = bestPlatformQuotes(from: group)
+        guard let winner = quotes.first else { return nil }
+        return winner.withComparisonQuotes(quotes)
+    }
+}
+
+private func bestPlatformQuotes(from recommendations: [Recommendation]) -> [Recommendation] {
+    let ranked = rankRecommendations(recommendations)
+    var bestByPlatform: [PlatformId: Recommendation] = [:]
+
+    for recommendation in ranked where bestByPlatform[recommendation.listing.platform] == nil {
+        bestByPlatform[recommendation.listing.platform] = recommendation.withComparisonQuotes([])
+    }
+
+    return rankRecommendations(Array(bestByPlatform.values))
+}
+
 private func normalizedVehicleKey(_ value: String) -> String {
     value
         .lowercased()
@@ -97,4 +131,18 @@ private func normalizedVehicleKey(_ value: String) -> String {
         .replacingOccurrences(of: "　", with: "")
         .replacingOccurrences(of: "（", with: "(")
         .replacingOccurrences(of: "）", with: ")")
+}
+
+private func normalizedComparableVehicleKey(_ value: String) -> String {
+    var result = normalizedVehicleKey(value)
+        .replacingOccurrences(of: "·", with: "")
+        .replacingOccurrences(of: "-", with: "")
+        .replacingOccurrences(of: "_", with: "")
+        .replacingOccurrences(of: "/", with: "")
+
+    for token in ["自动挡", "手动挡", "自动", "手动", "at", "mt"] {
+        result = result.replacingOccurrences(of: token, with: "")
+    }
+
+    return result
 }

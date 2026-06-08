@@ -48,7 +48,7 @@ struct ResultPanelView: View {
         if viewModel.results.isEmpty {
             return "等待真实报价"
         }
-        return "\(viewModel.results.count) 个真实候选，按总成本升序"
+        return "\(viewModel.results.count) 个真实候选，同车型取优后按总成本升序"
     }
 }
 
@@ -163,6 +163,13 @@ private struct ResultRowView: View {
                                 color: recommendation.listing.platform == .ehi ? WorkbenchStyle.teal : WorkbenchStyle.accent,
                                 systemImage: "building.2.fill"
                             )
+                            if let comparisonLabel {
+                                StatusPill(
+                                    text: comparisonLabel,
+                                    color: WorkbenchStyle.green,
+                                    systemImage: "arrow.triangle.2.circlepath"
+                                )
+                            }
                         }
 
                         Text("\(recommendation.listing.vehicleName) · \(recommendation.match.label)")
@@ -201,9 +208,30 @@ private struct ResultRowView: View {
                     InlineMetric(title: "公交到店", value: formatMoney(recommendation.transitRoute.cost))
                     InlineMetric(title: "完整度", value: "\(Int((recommendation.listing.dataCompleteness * 100).rounded()))%")
                 }
+
+                Text(rankingReason)
+                    .font(.caption2)
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .lineLimit(1)
             }
             .padding(14)
         }
+    }
+
+    private var rankingReason: String {
+        "排序依据：总成本 \(formatMoney(recommendation.bestTotal)) = 租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost)) · \(recommendation.match.label)"
+    }
+
+    private var bestRouteCost: Double {
+        recommendation.bestRouteMode == .taxi ? recommendation.taxiRoute.cost : recommendation.transitRoute.cost
+    }
+
+    private var comparisonLabel: String? {
+        let platforms = PlatformId.allCases.filter { platform in
+            recommendation.comparisonQuotes.contains { $0.listing.platform == platform }
+        }
+        guard platforms.count > 1 else { return nil }
+        return platforms.map(\.label).joined(separator: "/") + "取优"
     }
 
     private var rankBadge: some View {

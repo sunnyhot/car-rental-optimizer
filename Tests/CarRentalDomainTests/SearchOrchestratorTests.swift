@@ -388,6 +388,78 @@ final class SearchOrchestratorTests: XCTestCase {
         XCTAssertEqual(sedan.match.kind, .notSpecified)
     }
 
+    func testBlankVehicleQueryKeepsBestPlatformForSameVehicleWithQuoteComparison() async {
+        let ehiLavida = RentalListing(
+            id: "ehi-lavida",
+            platform: .ehi,
+            store: makeStore(
+                id: "ehi-nearest",
+                name: "一嗨通州店",
+                city: "北京",
+                address: "北京市通州区",
+                lat: 39.916,
+                lng: 116.645,
+                dist: 1.0,
+                hours: "08:00-21:00"
+            ),
+            vehicleName: "大众 朗逸 自动",
+            vehicleClass: "紧凑型轿车",
+            basePrice: 230,
+            platformFees: 0,
+            insuranceFees: 0,
+            oneWayFee: 0,
+            sourceUrl: "https://booking.1hai.cn/",
+            dataCompleteness: 0.88
+        )
+        let carIncLavida = RentalListing(
+            id: "car-lavida",
+            platform: .carInc,
+            store: makeStore(
+                id: "car-nearest",
+                name: "神州通州店",
+                city: "北京",
+                address: "北京市通州区",
+                lat: 39.917,
+                lng: 116.646,
+                dist: 1.2,
+                hours: "08:00-21:00"
+            ),
+            vehicleName: "大众朗逸",
+            vehicleClass: "紧凑型轿车",
+            basePrice: 180,
+            platformFees: 0,
+            insuranceFees: 0,
+            oneWayFee: 0,
+            sourceUrl: "https://m.zuche.com/",
+            dataCompleteness: 0.88
+        )
+        let camry = RentalListing(
+            id: "car-camry",
+            platform: .carInc,
+            store: carIncLavida.store,
+            vehicleName: "丰田凯美瑞",
+            vehicleClass: "中型轿车",
+            basePrice: 260,
+            platformFees: 0,
+            insuranceFees: 0,
+            oneWayFee: 0,
+            sourceUrl: "https://m.zuche.com/",
+            dataCompleteness: 0.88
+        )
+
+        let results = await rankRentalListings(
+            request: makeBaseRequest(vehicleQuery: ""),
+            listings: [ehiLavida, carIncLavida, camry],
+            mapService: mapService
+        )
+        let lavidaResults = results.filter { $0.listing.vehicleName.contains("朗逸") }
+
+        XCTAssertEqual(lavidaResults.count, 1)
+        XCTAssertEqual(lavidaResults[0].listing.platform, .carInc)
+        XCTAssertEqual(Set(lavidaResults[0].comparisonQuotes.map(\.listing.platform)), [.ehi, .carInc])
+        XCTAssertEqual(lavidaResults[0].comparisonQuotes.count, 2)
+    }
+
     func testOriginCoordinatesFilterStores() async {
         let results = await searchRentalOptions(
             request: makeBaseRequest(
