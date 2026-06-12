@@ -749,7 +749,7 @@ struct MonitorStoreTests {
 Run:
 
 ```bash
-swift test --filter JSONMonitorStore
+swift test --filter MonitorStoreTests
 ```
 
 Expected: build fails with errors such as `cannot find 'JSONMonitorStore' in scope`.
@@ -919,7 +919,7 @@ actor JSONMonitorStore: MonitorStoring {
 Run:
 
 ```bash
-swift test --filter JSONMonitorStore
+swift test --filter MonitorStoreTests
 ```
 
 Expected: `JSONMonitorStore` tests pass.
