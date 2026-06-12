@@ -42,7 +42,7 @@
 - Create: `Sources/CarRentalDomain/PriceMonitoring.swift`
 - Test: `Tests/CarRentalDomainTests/PriceMonitoringTests.swift`
 
-- [ ] **Step 1: Write failing domain tests**
+- [x] **Step 1: Write failing domain tests**
 
 Add `Tests/CarRentalDomainTests/PriceMonitoringTests.swift`:
 
@@ -130,7 +130,7 @@ final class PriceMonitoringTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -140,7 +140,7 @@ swift test --filter PriceMonitoringTests
 
 Expected: build fails with errors such as `cannot find 'MonitoringFrequency' in scope`.
 
-- [ ] **Step 3: Add domain model implementation**
+- [x] **Step 3: Add domain model implementation**
 
 Create `Sources/CarRentalDomain/PriceMonitoring.swift`:
 
@@ -428,7 +428,7 @@ public struct PriceTrendSummary: Equatable {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify Task 1 passes**
+- [x] **Step 4: Run tests to verify Task 1 passes**
 
 Run:
 
@@ -438,7 +438,7 @@ swift test --filter PriceMonitoringTests
 
 Expected: `PriceMonitoringTests` passes.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add Sources/CarRentalDomain/PriceMonitoring.swift Tests/CarRentalDomainTests/PriceMonitoringTests.swift
@@ -454,7 +454,7 @@ git commit -m "Add price monitor domain rules"
 - Modify: `Sources/CarRentalDomain/PriceMonitoring.swift`
 - Test: `Tests/CarRentalDomainTests/PriceMonitorMatchingTests.swift`
 
-- [ ] **Step 1: Write failing matching tests**
+- [x] **Step 1: Write failing matching tests**
 
 Add `Tests/CarRentalDomainTests/PriceMonitorMatchingTests.swift`:
 
@@ -541,7 +541,7 @@ final class PriceMonitorMatchingTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -551,7 +551,7 @@ swift test --filter PriceMonitorMatchingTests
 
 Expected: build fails with errors such as `cannot find 'ListingSignature' in scope`.
 
-- [ ] **Step 3: Add matching implementation**
+- [x] **Step 3: Add matching implementation**
 
 Create `Sources/CarRentalDomain/PriceMonitorMatching.swift`:
 
@@ -627,7 +627,7 @@ public func normalizeMonitorToken(_ value: String) -> String {
 }
 ```
 
-- [ ] **Step 4: Run matching tests**
+- [x] **Step 4: Run matching tests**
 
 Run:
 
@@ -637,7 +637,7 @@ swift test --filter PriceMonitorMatchingTests
 
 Expected: `PriceMonitorMatchingTests` passes.
 
-- [ ] **Step 5: Run all domain tests**
+- [x] **Step 5: Run all domain tests**
 
 Run:
 
@@ -647,7 +647,7 @@ swift test --filter CarRentalDomainTests
 
 Expected: all domain tests pass.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add Sources/CarRentalDomain/PriceMonitorMatching.swift Sources/CarRentalDomain/PriceMonitoring.swift Tests/CarRentalDomainTests/PriceMonitorMatchingTests.swift
@@ -663,7 +663,7 @@ git commit -m "Add monitor recommendation matching"
 - Create: `Sources/CarRentalOptimizer/JSONMonitorStore.swift`
 - Test: `Tests/CarRentalOptimizerTests/MonitorStoreTests.swift`
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
 Add `Tests/CarRentalOptimizerTests/MonitorStoreTests.swift`:
 
@@ -744,7 +744,7 @@ struct MonitorStoreTests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -754,7 +754,7 @@ swift test --filter MonitorStoreTests
 
 Expected: build fails with errors such as `cannot find 'JSONMonitorStore' in scope`.
 
-- [ ] **Step 3: Add store protocol and errors**
+- [x] **Step 3: Add store protocol and errors**
 
 Create `Sources/CarRentalOptimizer/MonitorStore.swift`:
 
@@ -807,7 +807,7 @@ struct VersionedMonitorPayload<Value: Codable>: Codable {
 }
 ```
 
-- [ ] **Step 4: Add JSON implementation**
+- [x] **Step 4: Add JSON implementation**
 
 Create `Sources/CarRentalOptimizer/JSONMonitorStore.swift`:
 
@@ -914,7 +914,7 @@ actor JSONMonitorStore: MonitorStoring {
 }
 ```
 
-- [ ] **Step 5: Run store tests**
+- [x] **Step 5: Run store tests**
 
 Run:
 
@@ -924,7 +924,7 @@ swift test --filter MonitorStoreTests
 
 Expected: `JSONMonitorStore` tests pass.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```bash
 git add Sources/CarRentalOptimizer/MonitorStore.swift Sources/CarRentalOptimizer/JSONMonitorStore.swift Tests/CarRentalOptimizerTests/MonitorStoreTests.swift
@@ -940,7 +940,7 @@ git commit -m "Add local monitor JSON store"
 - Create: `Sources/CarRentalOptimizer/MonitorNotificationService.swift`
 - Test: `Tests/CarRentalOptimizerTests/MonitorSchedulerTests.swift`
 
-- [ ] **Step 1: Write failing scheduler tests**
+- [x] **Step 1: Write failing scheduler tests**
 
 Add `Tests/CarRentalOptimizerTests/MonitorSchedulerTests.swift`:
 
@@ -1116,7 +1116,7 @@ private struct IncrementingIDGenerator: MonitorIDGenerating {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1126,7 +1126,7 @@ swift test --filter MonitorScheduler
 
 Expected: build fails with missing `MonitorScheduler`, `MonitorNotificationSending`, and `MonitorIDGenerating`.
 
-- [ ] **Step 3: Add notification abstraction**
+- [x] **Step 3: Add notification abstraction**
 
 Create `Sources/CarRentalOptimizer/MonitorNotificationService.swift`:
 
@@ -1165,7 +1165,7 @@ final class UserNotificationMonitorService: MonitorNotificationSending {
 }
 ```
 
-- [ ] **Step 4: Add scheduler implementation**
+- [x] **Step 4: Add scheduler implementation**
 
 Create `Sources/CarRentalOptimizer/MonitorScheduler.swift`:
 
@@ -1361,7 +1361,7 @@ final class MonitorScheduler {
 }
 ```
 
-- [ ] **Step 5: Run scheduler tests**
+- [x] **Step 5: Run scheduler tests**
 
 Run:
 
@@ -1371,7 +1371,7 @@ swift test --filter MonitorScheduler
 
 Expected: `MonitorScheduler` tests pass.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add Sources/CarRentalOptimizer/MonitorScheduler.swift Sources/CarRentalOptimizer/MonitorNotificationService.swift Tests/CarRentalOptimizerTests/MonitorSchedulerTests.swift
@@ -1387,7 +1387,7 @@ git commit -m "Add monitor scheduler"
 - Test: `Tests/CarRentalOptimizerTests/MonitorCenterViewModelTests.swift`
 - Modify: `Sources/CarRentalOptimizer/ContentView.swift`
 
-- [ ] **Step 1: Write failing view model tests**
+- [x] **Step 1: Write failing view model tests**
 
 Add `Tests/CarRentalOptimizerTests/MonitorCenterViewModelTests.swift`:
 
@@ -1474,7 +1474,7 @@ private struct FixedIDGenerator: MonitorIDGenerating {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1484,7 +1484,7 @@ swift test --filter MonitorCenterViewModel
 
 Expected: build fails with `cannot find 'MonitorCenterViewModel' in scope`.
 
-- [ ] **Step 3: Add monitor center view model**
+- [x] **Step 3: Add monitor center view model**
 
 Create `Sources/CarRentalOptimizer/MonitorCenterViewModel.swift`:
 
@@ -1638,7 +1638,7 @@ final class MonitorCenterViewModel: ObservableObject {
 }
 ```
 
-- [ ] **Step 4: Wire view model into ContentView**
+- [x] **Step 4: Wire view model into ContentView**
 
 Modify `Sources/CarRentalOptimizer/ContentView.swift`:
 
@@ -1686,7 +1686,7 @@ struct ContentView: View {
 }
 ```
 
-- [ ] **Step 5: Run view model tests**
+- [x] **Step 5: Run view model tests**
 
 Run:
 
@@ -1696,7 +1696,7 @@ swift test --filter MonitorCenterViewModel
 
 Expected: `MonitorCenterViewModel` tests pass.
 
-- [ ] **Step 6: Run app tests touched so far**
+- [x] **Step 6: Run app tests touched so far**
 
 Run:
 
@@ -1706,7 +1706,7 @@ swift test --filter CarRentalOptimizerTests
 
 Expected: app tests pass.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```bash
 git add Sources/CarRentalOptimizer/MonitorCenterViewModel.swift Sources/CarRentalOptimizer/ContentView.swift Tests/CarRentalOptimizerTests/MonitorCenterViewModelTests.swift
@@ -1723,7 +1723,7 @@ git commit -m "Add monitor center view model"
 - Modify: `Sources/CarRentalOptimizer/DetailPanelView.swift`
 - Modify: `Sources/CarRentalOptimizer/AppPresentation.swift`
 
-- [ ] **Step 1: Add display helpers**
+- [x] **Step 1: Add display helpers**
 
 Modify `Sources/CarRentalOptimizer/AppPresentation.swift` by adding:
 
@@ -1769,7 +1769,7 @@ func formatSignedMoney(_ value: Double?) -> String {
 }
 ```
 
-- [ ] **Step 2: Create shared monitor sheet**
+- [x] **Step 2: Create shared monitor sheet**
 
 Create `Sources/CarRentalOptimizer/CreateMonitorSheet.swift`:
 
@@ -1897,7 +1897,7 @@ private struct MonitorSheetFactLine: View {
 }
 ```
 
-- [ ] **Step 3: Add result row monitor action**
+- [x] **Step 3: Add result row monitor action**
 
 Modify `ResultPanelView` so `ResultRowView` receives an `onMonitor` closure:
 
@@ -1956,7 +1956,7 @@ Attach the sheet:
 }
 ```
 
-- [ ] **Step 4: Add detail panel monitor action**
+- [x] **Step 4: Add detail panel monitor action**
 
 Modify `DetailPanelView`:
 
@@ -1986,7 +1986,7 @@ Button {
 
 Attach the same `CreateMonitorSheet` call used by `ResultPanelView`.
 
-- [ ] **Step 5: Build after UI action changes**
+- [x] **Step 5: Build after UI action changes**
 
 Run:
 
@@ -1996,7 +1996,7 @@ swift build
 
 Expected: build succeeds.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```bash
 git add Sources/CarRentalOptimizer/CreateMonitorSheet.swift Sources/CarRentalOptimizer/ResultPanelView.swift Sources/CarRentalOptimizer/DetailPanelView.swift Sources/CarRentalOptimizer/AppPresentation.swift
@@ -2012,7 +2012,7 @@ git commit -m "Add monitor creation actions"
 - Modify: `Sources/CarRentalOptimizer/MainView.swift`
 - Modify: `Sources/CarRentalOptimizer/App.swift`
 
-- [ ] **Step 1: Add monitor center view**
+- [x] **Step 1: Add monitor center view**
 
 Create `Sources/CarRentalOptimizer/MonitorCenterView.swift`:
 
@@ -2111,7 +2111,7 @@ struct MonitorCenterView: View {
 }
 ```
 
-- [ ] **Step 2: Add monitor center subviews**
+- [x] **Step 2: Add monitor center subviews**
 
 Append these subviews to `MonitorCenterView.swift`:
 
@@ -2244,7 +2244,7 @@ private struct MonitorSectionTitleRow: View {
 }
 ```
 
-- [ ] **Step 3: Add header entry and sheet**
+- [x] **Step 3: Add header entry and sheet**
 
 Modify the top of `MainView.swift`:
 
@@ -2328,7 +2328,7 @@ Button {
 .controlSize(.small)
 ```
 
-- [ ] **Step 4: Add app menu command**
+- [x] **Step 4: Add app menu command**
 
 Modify `App.swift` commands:
 
@@ -2357,7 +2357,7 @@ Handle it in `MainView`:
 }
 ```
 
-- [ ] **Step 5: Build UI**
+- [x] **Step 5: Build UI**
 
 Run:
 
@@ -2367,7 +2367,7 @@ swift build
 
 Expected: build succeeds.
 
-- [ ] **Step 6: Commit Task 7**
+- [x] **Step 6: Commit Task 7**
 
 ```bash
 git add Sources/CarRentalOptimizer/MonitorCenterView.swift Sources/CarRentalOptimizer/MainView.swift Sources/CarRentalOptimizer/App.swift Sources/CarRentalOptimizer/AppPresentation.swift
@@ -2384,7 +2384,7 @@ git commit -m "Add monitor center UI"
 - Modify: `Sources/CarRentalOptimizer/App.swift`
 - Test: `Tests/CarRentalOptimizerTests/MonitorCenterViewModelTests.swift`
 
-- [ ] **Step 1: Add failing loop preference test**
+- [x] **Step 1: Add failing loop preference test**
 
 Append to `MonitorCenterViewModelTests`:
 
@@ -2408,7 +2408,7 @@ func backgroundMonitoringPreferenceTogglesWithoutChangingMonitors() async throws
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run:
 
@@ -2418,7 +2418,7 @@ swift test --filter "Background monitoring preference"
 
 Expected: build fails with `value of type 'MonitorCenterViewModel' has no member 'setBackgroundMonitoringEnabled'`.
 
-- [ ] **Step 3: Add scheduler loop and preference**
+- [x] **Step 3: Add scheduler loop and preference**
 
 Modify `MonitorCenterViewModel.swift`:
 
@@ -2451,7 +2451,7 @@ func stopSchedulerLoopForExplicitQuit() {
 }
 ```
 
-- [ ] **Step 4: Add UI toggle**
+- [x] **Step 4: Add UI toggle**
 
 Modify `MonitorCenterView.swift` by inserting the toggle immediately under `MonitorSummaryBox` in `monitorDetail`:
 
@@ -2467,7 +2467,7 @@ MonitorTrendChart(snapshots: monitorViewModel.selectedSnapshots)
     .frame(height: 220)
 ```
 
-- [ ] **Step 5: Stop loop on explicit app quit**
+- [x] **Step 5: Stop loop on explicit app quit**
 
 Modify `App.swift` by adding an app delegate:
 
@@ -2497,7 +2497,7 @@ AppLifecycleDelegate.monitorViewModel = monitorViewModel
 _monitorViewModel = StateObject(wrappedValue: monitorViewModel)
 ```
 
-- [ ] **Step 6: Run tests and build**
+- [x] **Step 6: Run tests and build**
 
 Run:
 
@@ -2508,7 +2508,7 @@ swift build
 
 Expected: tests pass and build succeeds.
 
-- [ ] **Step 7: Commit Task 8**
+- [x] **Step 7: Commit Task 8**
 
 ```bash
 git add Sources/CarRentalOptimizer/MonitorCenterViewModel.swift Sources/CarRentalOptimizer/MonitorCenterView.swift Sources/CarRentalOptimizer/App.swift Sources/CarRentalOptimizer/ContentView.swift Tests/CarRentalOptimizerTests/MonitorCenterViewModelTests.swift
@@ -2523,7 +2523,7 @@ git commit -m "Add background monitoring toggle"
 - Modify: `README.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: Update README current capabilities**
+- [x] **Step 1: Update README current capabilities**
 
 Modify `README.md` under `当前能力` by adding:
 
@@ -2533,7 +2533,7 @@ Modify `README.md` under `当前能力` by adding:
 - 平台租车价下降时会记录应用内事件，并可按用户设置发送 macOS 系统通知。
 ```
 
-- [ ] **Step 2: Update changelog**
+- [x] **Step 2: Update changelog**
 
 Add a new top entry to `CHANGELOG.md`:
 
@@ -2546,7 +2546,7 @@ Add a new top entry to `CHANGELOG.md`:
 - 平台租车价下降时会记录事件，并可按设置发送 macOS 系统通知。
 ```
 
-- [ ] **Step 3: Run full test suite**
+- [x] **Step 3: Run full test suite**
 
 Run:
 
@@ -2556,7 +2556,7 @@ swift test
 
 Expected: all tests pass.
 
-- [ ] **Step 4: Build app**
+- [x] **Step 4: Build app**
 
 Run:
 
@@ -2566,7 +2566,7 @@ swift build
 
 Expected: build succeeds.
 
-- [ ] **Step 5: Run release smoke script**
+- [x] **Step 5: Run release smoke script**
 
 Run:
 
@@ -2576,7 +2576,7 @@ scripts/verify-launch.sh
 
 Expected: script completes without reporting launch failure.
 
-- [ ] **Step 6: Inspect final diff**
+- [x] **Step 6: Inspect final diff**
 
 Run:
 
@@ -2588,7 +2588,7 @@ git diff --check
 
 Expected: only intended monitoring files, docs, tests, and UI changes are listed; `git diff --check` prints no whitespace errors.
 
-- [ ] **Step 7: Commit Task 9**
+- [x] **Step 7: Commit Task 9**
 
 ```bash
 git add README.md CHANGELOG.md
