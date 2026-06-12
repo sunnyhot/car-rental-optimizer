@@ -21,7 +21,9 @@ struct ContentView: View {
             mapService: AppleMapService(),
             notificationService: UserNotificationMonitorService()
         )
-        _monitorViewModel = StateObject(wrappedValue: MonitorCenterViewModel(store: store, scheduler: scheduler))
+        let monitorViewModel = MonitorCenterViewModel(store: store, scheduler: scheduler)
+        AppLifecycleDelegate.monitorViewModel = monitorViewModel
+        _monitorViewModel = StateObject(wrappedValue: monitorViewModel)
     }
 
     var body: some View {

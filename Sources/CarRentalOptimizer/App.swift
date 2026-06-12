@@ -1,8 +1,18 @@
 import SwiftUI
 
 @MainActor
+final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
+    static weak var monitorViewModel: MonitorCenterViewModel?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Self.monitorViewModel?.stopSchedulerLoopForExplicitQuit()
+    }
+}
+
+@MainActor
 @main
 struct CarRentalOptimizerApp: App {
+    @NSApplicationDelegateAdaptor(AppLifecycleDelegate.self) private var appDelegate
     @StateObject private var updateChecker = UpdateChecker()
 
     var body: some Scene {

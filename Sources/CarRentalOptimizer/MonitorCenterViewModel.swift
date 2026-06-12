@@ -15,6 +15,7 @@ final class MonitorCenterViewModel: ObservableObject {
     private let scheduler: MonitorScheduler?
     private let now: () -> Date
     private let idGenerator: MonitorIDGenerating
+    private var schedulerTask: Task<Void, Never>?
 
     init(
         store: MonitorStoring,
@@ -144,5 +145,36 @@ final class MonitorCenterViewModel: ObservableObject {
         } catch {
             storageErrorMessage = error.localizedDescription
         }
+    }
+
+    func setBackgroundMonitoringEnabled(_ enabled: Bool) {
+        guard backgroundMonitoringEnabled != enabled else { return }
+        backgroundMonitoringEnabled = enabled
+
+        if enabled {
+            startSchedulerLoop()
+        } else {
+            stopSchedulerLoop()
+        }
+    }
+
+    func stopSchedulerLoopForExplicitQuit() {
+        backgroundMonitoringEnabled = false
+        stopSchedulerLoop()
+    }
+
+    private func startSchedulerLoop() {
+        guard schedulerTask == nil else { return }
+        schedulerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.runDueChecks()
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+        }
+    }
+
+    private func stopSchedulerLoop() {
+        schedulerTask?.cancel()
+        schedulerTask = nil
     }
 }

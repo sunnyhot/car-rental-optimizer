@@ -73,6 +73,15 @@ struct MonitorCenterView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         MonitorSummaryBox(monitor: monitor, trend: monitorViewModel.selectedTrend)
+                        Toggle(
+                            "关闭窗口后继续巡查",
+                            isOn: Binding(
+                                get: { monitorViewModel.backgroundMonitoringEnabled },
+                                set: { monitorViewModel.setBackgroundMonitoringEnabled($0) }
+                            )
+                        )
+                        .toggleStyle(.checkbox)
+                        .help("应用保持运行时，按设定频率自动巡查价格。退出应用后停止。")
                         MonitorTrendChart(snapshots: monitorViewModel.selectedSnapshots)
                             .frame(height: 220)
                         MonitorEventList(events: monitorViewModel.selectedEvents)

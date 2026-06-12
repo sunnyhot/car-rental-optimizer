@@ -35,6 +35,25 @@ struct MonitorCenterViewModelTests {
         #expect(viewModel.monitors.first?.status == .active)
     }
 
+    @Test("Background monitoring preference toggles without changing monitors")
+    func backgroundMonitoringPreferenceTogglesWithoutChangingMonitors() async throws {
+        let store = InMemoryMonitorStore()
+        let monitor = makeMonitor(id: "monitor-1")
+        try await store.saveMonitor(monitor)
+        let viewModel = MonitorCenterViewModel(store: store, scheduler: nil, now: { Date(timeIntervalSince1970: 100) }, idGenerator: FixedIDGenerator())
+        try await viewModel.reload()
+
+        viewModel.setBackgroundMonitoringEnabled(true)
+
+        #expect(viewModel.backgroundMonitoringEnabled)
+        #expect(viewModel.monitors.map(\.id) == ["monitor-1"])
+
+        viewModel.setBackgroundMonitoringEnabled(false)
+
+        #expect(!viewModel.backgroundMonitoringEnabled)
+        #expect(viewModel.monitors.map(\.id) == ["monitor-1"])
+    }
+
     private func makeMonitor(id: String) -> PriceMonitor {
         PriceMonitor(
             id: id,
