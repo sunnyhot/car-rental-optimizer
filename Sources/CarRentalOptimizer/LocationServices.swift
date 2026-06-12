@@ -1,5 +1,5 @@
 import CarRentalDomain
-import CoreLocation
+@preconcurrency import CoreLocation
 import Foundation
 import MapKit
 
@@ -47,7 +47,7 @@ enum CurrentLocationError: LocalizedError {
 }
 
 @MainActor
-final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, @preconcurrency CLLocationManagerDelegate {
+final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, CLLocationManagerDelegate {
     private var manager: CLLocationManager?
     private var continuation: CheckedContinuation<CLLocation, Error>?
     private var timeoutTask: Task<Void, Never>?
