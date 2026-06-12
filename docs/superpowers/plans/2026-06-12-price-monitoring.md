@@ -1908,7 +1908,7 @@ ResultRowView(
     isSelected: viewModel.selectedId == result.id,
     onMonitor: {
         viewModel.selectResult(result.id)
-        viewModel.pendingMonitorRecommendation = result
+        pendingMonitorRecommendation = result
     }
 )
 ```
