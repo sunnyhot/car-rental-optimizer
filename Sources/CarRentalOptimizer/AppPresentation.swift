@@ -114,6 +114,40 @@ extension RouteMode {
     }
 }
 
+extension MonitoringFrequency {
+    var label: String {
+        switch self {
+        case .smart:
+            return "智能频率"
+        case .fixed30Minutes:
+            return "每 30 分钟"
+        case .fixed1Hour:
+            return "每 1 小时"
+        case .fixed3Hours:
+            return "每 3 小时"
+        case .fixed1Day:
+            return "每天"
+        }
+    }
+}
+
+extension PriceMonitorStatus {
+    var label: String {
+        switch self {
+        case .active:
+            return "监控中"
+        case .paused:
+            return "已暂停"
+        case .checking:
+            return "巡查中"
+        case .needsAttention:
+            return "需处理"
+        case .expired:
+            return "已过期"
+        }
+    }
+}
+
 func renderWarnings(_ warnings: [ResultWarning]) -> String {
     if warnings.contains(.crossCityPickup) {
         return "这是跨城取车方案，租车价格低，但需要额外关注高铁班次、门店营业时间和行李不便。"
@@ -132,4 +166,10 @@ func renderWarnings(_ warnings: [ResultWarning]) -> String {
 
 func formatMoney(_ value: Double) -> String {
     "¥\(Int(value.rounded()))"
+}
+
+func formatSignedMoney(_ value: Double?) -> String {
+    guard let value else { return "--" }
+    let prefix = value > 0 ? "+" : ""
+    return "\(prefix)\(formatMoney(value))"
 }

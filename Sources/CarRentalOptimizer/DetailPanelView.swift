@@ -3,12 +3,16 @@ import SwiftUI
 
 struct DetailPanelView: View {
     @EnvironmentObject var viewModel: SearchViewModel
+    @EnvironmentObject var monitorViewModel: MonitorCenterViewModel
+    @State private var pendingMonitorRecommendation: Recommendation?
 
     var body: some View {
         WorkbenchPanel(title: "推荐明细", subtitle: "成本拆解和路线") {
             Group {
                 if let recommendation = viewModel.selected {
-                    RecommendationDetailView(recommendation: recommendation)
+                    RecommendationDetailView(recommendation: recommendation) {
+                        pendingMonitorRecommendation = recommendation
+                    }
                 } else {
                     EmptyStateBlock(
                         icon: "receipt",
@@ -18,11 +22,28 @@ struct DetailPanelView: View {
                 }
             }
         }
+        .sheet(item: $pendingMonitorRecommendation) { recommendation in
+            CreateMonitorSheet(
+                recommendation: recommendation,
+                request: viewModel.request,
+                onSaveFromRecommendation: { frequency, rule, notifications in
+                    try await monitorViewModel.createMonitor(
+                        from: recommendation,
+                        request: viewModel.request,
+                        frequency: frequency,
+                        alertRule: rule,
+                        systemNotificationsEnabled: notifications
+                    )
+                },
+                onSaveManual: { _, _, _, _, _, _ in }
+            )
+        }
     }
 }
 
 private struct RecommendationDetailView: View {
     let recommendation: Recommendation
+    let onMonitor: () -> Void
 
     var body: some View {
         ScrollView {
@@ -98,6 +119,21 @@ private struct RecommendationDetailView: View {
                 if !recommendation.warnings.isEmpty {
                     WarningBox(warnings: recommendation.warnings)
                 }
+
+                Button {
+                    onMonitor()
+                } label: {
+                    HStack(spacing: 6) {
+                        Spacer()
+                        Text("监控这个方案")
+                        Image(systemName: "bell.badge")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(WorkbenchStyle.accent)
 
                 if let url = URL(string: recommendation.listing.sourceUrl) {
                     Link(destination: url) {

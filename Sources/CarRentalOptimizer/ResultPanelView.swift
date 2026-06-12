@@ -3,6 +3,8 @@ import SwiftUI
 
 struct ResultPanelView: View {
     @EnvironmentObject var viewModel: SearchViewModel
+    @EnvironmentObject var monitorViewModel: MonitorCenterViewModel
+    @State private var pendingMonitorRecommendation: Recommendation?
 
     var body: some View {
         WorkbenchPanel(
@@ -28,7 +30,10 @@ struct ResultPanelView: View {
                                     rank: index + 1,
                                     recommendation: result,
                                     isSelected: viewModel.selectedId == result.id
-                                )
+                                ) {
+                                    viewModel.selectResult(result.id)
+                                    pendingMonitorRecommendation = result
+                                }
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     viewModel.selectResult(result.id)
@@ -39,6 +44,22 @@ struct ResultPanelView: View {
                     }
                 }
             }
+        }
+        .sheet(item: $pendingMonitorRecommendation) { recommendation in
+            CreateMonitorSheet(
+                recommendation: recommendation,
+                request: viewModel.request,
+                onSaveFromRecommendation: { frequency, rule, notifications in
+                    try await monitorViewModel.createMonitor(
+                        from: recommendation,
+                        request: viewModel.request,
+                        frequency: frequency,
+                        alertRule: rule,
+                        systemNotificationsEnabled: notifications
+                    )
+                },
+                onSaveManual: { _, _, _, _, _, _ in }
+            )
         }
     }
 
@@ -191,6 +212,7 @@ private struct ResultRowView: View {
     let rank: Int
     let recommendation: Recommendation
     let isSelected: Bool
+    let onMonitor: () -> Void
 
     var body: some View {
         SurfaceBox(
@@ -257,6 +279,14 @@ private struct ResultRowView: View {
                     InlineMetric(title: "打车到店", value: formatMoney(recommendation.taxiRoute.cost))
                     InlineMetric(title: "公交到店", value: formatMoney(recommendation.transitRoute.cost))
                     InlineMetric(title: "完整度", value: "\(Int((recommendation.listing.dataCompleteness * 100).rounded()))%")
+                    Button {
+                        onMonitor()
+                    } label: {
+                        Label("监控", systemImage: "bell.badge")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityLabel("监控此租车方案")
                 }
 
                 Text(rankingReason)
