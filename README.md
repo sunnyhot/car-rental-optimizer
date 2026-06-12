@@ -56,10 +56,14 @@ swift test
 - 中间展示静默 API 查询出的候选方案，不要求用户打开平台页面或粘贴搜索结果。
 - 候选区只展示官方接口返回的真实方案；平台未开放、无车、需登录、需验证码或接口失败会显示为平台状态。
 - 右侧展示推荐总价、租车费用拆分、打车/公共交通到店估算和跨城提醒。
+- 候选方案和详情页可一键创建价格监控，记录租车时间、车型、平台和门店匹配信息。
+- 「监控中心」会按设定频率巡查官方报价，和上一次成功查询相比触发降价事件，并展示历史价格趋势。
+- 监控支持手动指定车型、暂停/恢复、立即巡查，以及应用保持运行时的后台巡查开关。
 - 菜单「检查更新…」会读取 GitHub Release；发现新版本后可自动下载、替换安装并重启。
 - 一嗨库存报价如果返回登录态 401，左侧平台状态会提供一嗨登录入口；登录后会保存 1hai 相关 session cookie 到本机 Application Support，并在覆盖安装或重启后自动恢复。
 
 原生版本不再使用内置车源数据生成生产推荐，也不需要用户复制搜索结果。没有官方接口结果时，应用不会给出推测价格或候选车源。神州城市、门店和车型价格使用 H5 网关匿名直调；一嗨城市和门店可匿名读取，库存报价会先匿名请求，只有平台明确返回 401 时才提示登录。路线成本使用 MapKit 路线距离估算，用于辅助比较到店成本。
+价格监控同样只基于官方接口结果记录历史快照；历史报价会标记为可能失效，最终下单前仍应打开平台复核实时价格。
 
 ### 项目结构
 
@@ -70,13 +74,14 @@ Sources/CarRentalOptimizer/
 ├── AppInfo.swift                          # 应用名、版本号等常量
 ├── ContentView.swift                      # 原生工作区入口
 ├── SearchViewModel.swift                  # 地理编码、平台状态与比价流程
+├── Monitor*.swift                         # 价格监控存储、调度、通知、中心页与创建表单
 ├── LiveRentalSearchService.swift          # 神州 H5 API 和一嗨 WebKit 加密 API 桥接
 ├── AddressGeocoder.swift / AppleMapService.swift
 ├── PlatformBrowser*.swift                 # 历史页面证据读取组件，保留给测试/兼容
 ├── *PanelView.swift                       # 搜索、结果、明细视图
 └── EstimatedMapService.swift              # MapKit 不可用时的路线成本兜底
 Sources/CarRentalDomain/
-└── *.swift                                # 平台证据解析、车型匹配、距离、排序、搜索编排等领域逻辑
+└── *.swift                                # 平台证据解析、车型匹配、价格监控、距离、排序、搜索编排等领域逻辑
 Tests/CarRentalOptimizerTests/
 └── *.swift                                # 原生应用与 ViewModel 测试
 ```
