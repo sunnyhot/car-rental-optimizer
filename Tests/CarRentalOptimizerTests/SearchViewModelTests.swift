@@ -81,6 +81,67 @@ struct SearchViewModelTests {
         #expect(viewModel.request.pickupAt == "2026-09-01")
         #expect(viewModel.request.returnAt == "2026-10-11")
     }
+
+    @Test("Search progress completes when listings are ranked")
+    func searchProgressCompletesWhenListingsAreRanked() async {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "一嗨已返回报价。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: [makeTestListing()]
+                ),
+            ]),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+
+        await viewModel.runSearch()
+
+        #expect(viewModel.searchProgressPhase == .completed)
+        #expect(viewModel.results.count == 1)
+    }
+
+    @Test("Search progress fails when address cannot be resolved")
+    func searchProgressFailsWhenAddressCannotBeResolved() async {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: FailingAddressGeocoder(),
+            mapService: EstimatedMapService()
+        )
+        viewModel.request.originLabel = "无法识别的位置"
+
+        await viewModel.runSearch()
+
+        #expect(viewModel.searchProgressPhase == .failed)
+        #expect(viewModel.results.isEmpty)
+    }
+
+    @Test("Displayed results can be sorted by subtotal distance and completeness")
+    func displayedResultsCanBeSortedBySubtotalDistanceAndCompleteness() {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.results = [
+            makeTestRecommendation(id: "near-complete", rentalTotal: 520, bestTotal: 550, distanceKm: 1.2, dataCompleteness: 0.98),
+            makeTestRecommendation(id: "cheap-far", rentalTotal: 280, bestTotal: 640, distanceKm: 21.0, dataCompleteness: 0.72),
+            makeTestRecommendation(id: "balanced", rentalTotal: 420, bestTotal: 500, distanceKm: 6.4, dataCompleteness: 0.84),
+        ]
+
+        viewModel.recommendationSortMode = .bestTotal
+        #expect(viewModel.displayedResults.map(\.id) == ["near-complete", "cheap-far", "balanced"])
+
+        viewModel.recommendationSortMode = .rentalSubtotal
+        #expect(viewModel.displayedResults.map(\.id) == ["cheap-far", "balanced", "near-complete"])
+
+        viewModel.recommendationSortMode = .distance
+        #expect(viewModel.displayedResults.map(\.id) == ["near-complete", "balanced", "cheap-far"])
+
+        viewModel.recommendationSortMode = .dataCompleteness
+        #expect(viewModel.displayedResults.map(\.id) == ["near-complete", "balanced", "cheap-far"])
+    }
 }
 
 @MainActor
@@ -109,4 +170,94 @@ private struct StubRentalSearchProvider: RentalSearchProviding {
     func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
         results
     }
+}
+
+private struct FailingAddressGeocoder: AddressGeocoding {
+    func geocode(_ address: String) async throws -> GeoPoint {
+        throw AddressGeocodingError.notFound
+    }
+}
+
+private func makeTestListing() -> RentalListing {
+    RentalListing(
+        id: "ehi-test",
+        platform: .ehi,
+        store: Store(
+            id: "ehi-store",
+            platform: .ehi,
+            name: "一嗨测试门店",
+            city: "北京",
+            address: "北京市通州区",
+            location: GeoPoint(lat: 39.91, lng: 116.65),
+            distanceKm: 3.2,
+            hours: "08:00-22:00"
+        ),
+        vehicleName: "奇瑞 瑞虎8",
+        vehicleClass: "中型SUV",
+        basePrice: 320,
+        platformFees: 0,
+        insuranceFees: 0,
+        oneWayFee: 0,
+        sourceUrl: "https://booking.1hai.cn/",
+        dataCompleteness: 0.88,
+        warnings: [.partialPrice]
+    )
+}
+
+private func makeTestRecommendation(
+    id: String,
+    rentalTotal: Double,
+    bestTotal: Double,
+    distanceKm: Double,
+    dataCompleteness: Double
+) -> Recommendation {
+    let listing = RentalListing(
+        id: id,
+        platform: .ehi,
+        store: Store(
+            id: "\(id)-store",
+            platform: .ehi,
+            name: "\(id)门店",
+            city: "北京",
+            address: "北京市通州区",
+            location: GeoPoint(lat: 39.91, lng: 116.65),
+            distanceKm: distanceKm,
+            hours: "08:00-22:00"
+        ),
+        vehicleName: "奇瑞 瑞虎8",
+        vehicleClass: "中型SUV",
+        basePrice: rentalTotal,
+        platformFees: 0,
+        insuranceFees: 0,
+        oneWayFee: 0,
+        sourceUrl: "https://booking.1hai.cn/",
+        dataCompleteness: dataCompleteness,
+        warnings: []
+    )
+    let taxiRoute = RouteEstimate(
+        mode: .taxi,
+        cost: bestTotal - rentalTotal,
+        durationMinutes: 18,
+        distanceKm: distanceKm,
+        summary: "测试路线"
+    )
+    let transitRoute = RouteEstimate(
+        mode: .transit,
+        cost: bestTotal - rentalTotal + 20,
+        durationMinutes: 36,
+        distanceKm: distanceKm,
+        summary: "测试公交"
+    )
+    return Recommendation(
+        listing: listing,
+        match: VehicleMatch(kind: .exact, score: 1, label: "精确匹配"),
+        taxiRoute: taxiRoute,
+        transitRoute: transitRoute,
+        rentalTotal: rentalTotal,
+        taxiTotal: bestTotal,
+        transitTotal: bestTotal + 20,
+        bestTotal: bestTotal,
+        bestRouteMode: .taxi,
+        warnings: []
+    )
 }

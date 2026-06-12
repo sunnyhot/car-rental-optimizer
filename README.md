@@ -2,7 +2,7 @@
 
 macOS 原生桌面应用，静默调用一嗨和神州官方接口，比较真实租车总成本（租车费 + 到店路线估算）。
 
-## 原生构建（Swift/SwiftUI）
+## 构建（Swift/SwiftUI）
 
 ### 前置条件
 
@@ -29,13 +29,13 @@ GitHub Release 里的当前 ZIP 是本机测试包。macOS 会对浏览器下载
 本机测试安装请用：
 
 ```bash
-scripts/install-local-app.sh build/CarRentalOptimizer-v0.6.19.zip
+scripts/install-local-app.sh build/CarRentalOptimizer-v0.7.0.zip
 ```
 
 或下载 release 后：
 
 ```bash
-scripts/install-local-app.sh ~/Downloads/CarRentalOptimizer-v0.6.19.zip
+scripts/install-local-app.sh ~/Downloads/CarRentalOptimizer-v0.7.0.zip
 ```
 
 脚本会复制到 `/Applications/租车比价助手.app`、清除 quarantine、把真实可执行文件安装到
@@ -82,33 +82,3 @@ Tests/CarRentalOptimizerTests/
 ```
 
 原生领域逻辑和 ViewModel 均有测试覆盖，`swift test` 可验证当前可运行状态。
-
----
-
-## Electron 版本（保留，计划废弃）
-
-### 保留原因
-
-Electron 版本曾是唯一的桌面运行入口，包含完整业务逻辑（平台自动化、页面解析、比价排序）。
-原生版本已具备静默官方 API 查询、平台状态识别和真实候选排序。Electron 版本仅作为历史实验入口保留，后续可删除。
-
-### Electron 构建
-
-```bash
-npm install
-npm run dev          # 开发模式
-npm run build        # 生产构建
-npm test             # 运行测试
-```
-
-### 废弃计划
-
-| 阶段 | 内容 | 状态 |
-|------|------|------|
-| 1 | 原生 SwiftUI 骨架搭建 | ✅ 已完成 |
-| 2 | 迁移领域逻辑（车型匹配、费用排序）到 Swift | ✅ 已完成 |
-| 3 | 迁移平台自动化（登录态管理、页面读取）到 Swift | ✅ 已完成 |
-| 4 | 迁移完整 UI 到 SwiftUI | ✅ 静默 API 查询工作流已完成 |
-| 5 | 移除 Electron 依赖（删除 `electron/`、`src/`、`package.json`） | 待全部迁移后执行 |
-
-在阶段 5 完成前，`package.json` 和 `electron/` 目录将继续保留在仓库中。

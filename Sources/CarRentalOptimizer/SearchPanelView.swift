@@ -722,6 +722,8 @@ private struct PlatformToggleButton: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(platform.label)平台")
+        .accessibilityValue(isSelected ? "已选择" : "未选择")
     }
 }
 

@@ -64,6 +64,14 @@ private struct RecommendationDetailView: View {
                                 .padding(.vertical, 5)
 
                             CostLineView(label: "租车小计", value: recommendation.rentalTotal, bold: true)
+
+                            if recommendation.warnings.contains(.partialPrice) {
+                                Label("平台未完整返回服务费、保险或异店还车费，建议下单前复核。", systemImage: "exclamationmark.circle.fill")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(WorkbenchStyle.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.top, 6)
+                            }
                         }
                     }
                 }

@@ -2,10 +2,76 @@ import CarRentalDomain
 import Foundation
 import SwiftUI
 
+enum SearchProgressPhase: Equatable {
+    case idle
+    case resolvingLocation
+    case queryingPlatforms
+    case rankingRoutes
+    case completed
+    case failed
+
+    var title: String {
+        switch self {
+        case .idle:
+            return "待查询"
+        case .resolvingLocation:
+            return "解析位置"
+        case .queryingPlatforms:
+            return "读取平台"
+        case .rankingRoutes:
+            return "计算路线"
+        case .completed:
+            return "查询完成"
+        case .failed:
+            return "查询失败"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .idle:
+            return "填写条件后开始比较。"
+        case .resolvingLocation:
+            return "正在把当前位置转换为坐标。"
+        case .queryingPlatforms:
+            return "正在静默调用一嗨和神州官方接口。"
+        case .rankingRoutes:
+            return "正在合并租车价格和到店路线成本。"
+        case .completed:
+            return "已完成本次比较。"
+        case .failed:
+            return "本次比较未完成，可调整条件后重试。"
+        }
+    }
+}
+
+enum RecommendationSortMode: String, CaseIterable, Identifiable {
+    case bestTotal
+    case rentalSubtotal
+    case distance
+    case dataCompleteness
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .bestTotal:
+            return "总成本"
+        case .rentalSubtotal:
+            return "租车价"
+        case .distance:
+            return "距离"
+        case .dataCompleteness:
+            return "完整度"
+        }
+    }
+}
+
 @MainActor
 final class SearchViewModel: ObservableObject {
     @Published var request = AppDefaults.searchRequest
     @Published var results: [Recommendation] = []
+    @Published var recommendationSortMode: RecommendationSortMode = .bestTotal
     @Published var platformStatuses: [PlatformEvidenceStatus] = AppDefaults.searchRequest.platforms.map {
         PlatformEvidenceStatus(
             platform: $0,
@@ -22,6 +88,7 @@ final class SearchViewModel: ObservableObject {
     @Published var originSuggestions: [AddressSuggestion] = []
     @Published var originStatus = "正在获取当前位置。"
     @Published var status = "待查询：静默 API 准备就绪。"
+    @Published var searchProgressPhase: SearchProgressPhase = .idle
 
     private let searchProvider: RentalSearchProviding
     private let geocoder: AddressGeocoding
@@ -69,11 +136,40 @@ final class SearchViewModel: ObservableObject {
         results.first { $0.id == selectedId } ?? results.first
     }
 
+    var displayedResults: [Recommendation] {
+        switch recommendationSortMode {
+        case .bestTotal:
+            return results
+        case .rentalSubtotal:
+            return results.sorted {
+                if $0.rentalTotal != $1.rentalTotal {
+                    return $0.rentalTotal < $1.rentalTotal
+                }
+                return $0.bestTotal < $1.bestTotal
+            }
+        case .distance:
+            return results.sorted {
+                if $0.listing.store.distanceKm != $1.listing.store.distanceKm {
+                    return $0.listing.store.distanceKm < $1.listing.store.distanceKm
+                }
+                return $0.bestTotal < $1.bestTotal
+            }
+        case .dataCompleteness:
+            return results.sorted {
+                if $0.listing.dataCompleteness != $1.listing.dataCompleteness {
+                    return $0.listing.dataCompleteness > $1.listing.dataCompleteness
+                }
+                return $0.bestTotal < $1.bestTotal
+            }
+        }
+    }
+
     func runSearch() async {
         dismissOriginSuggestions()
         isSearching = true
         results = []
         selectedId = ""
+        searchProgressPhase = .resolvingLocation
         status = "正在解析当前位置，并静默调用平台 API..."
 
         defer {
@@ -91,21 +187,25 @@ final class SearchViewModel: ObservableObject {
             }
         } catch {
             status = "当前位置解析失败：\(error.localizedDescription)"
+            searchProgressPhase = .failed
             platformStatuses = request.platforms.map {
                 PlatformEvidenceStatus(platform: $0, kind: .parseFailed, message: "地址解析失败，暂未调用\($0.label)。", sourceUrl: officialPlatformURL(for: $0))
             }
             return
         }
 
+        searchProgressPhase = .queryingPlatforms
         let evidenceResults = await searchProvider.search(request: liveRequest)
         platformStatuses = evidenceResults.map(\.status)
 
         let listings = evidenceResults.flatMap(\.listings)
         guard !listings.isEmpty else {
             status = formatNoAPIListingsStatus(evidenceResults)
+            searchProgressPhase = .completed
             return
         }
 
+        searchProgressPhase = .rankingRoutes
         let recommendations = await rankRentalListings(
             request: liveRequest,
             listings: listings,
@@ -115,6 +215,11 @@ final class SearchViewModel: ObservableObject {
         results = recommendations
         selectedId = recommendations.first?.id ?? ""
         status = formatSearchCompletionStatus(request: liveRequest, resultCount: recommendations.count)
+        searchProgressPhase = .completed
+    }
+
+    func retrySearch() async {
+        await runSearch()
     }
 
     func selectResult(_ id: String) {

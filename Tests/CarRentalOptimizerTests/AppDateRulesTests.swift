@@ -24,12 +24,25 @@ struct AppDateRulesTests {
 
     @Test("Normalized range keeps return date linked to pickup date")
     func normalizedRangeKeepsReturnDateLinkedToPickupDate() {
+        let today = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 1))!
         let pickup = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 10))!
         let earlierReturn = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 8))!
 
-        let range = AppDateRules.normalizedRange(pickup: pickup, returnDate: earlierReturn)
+        let range = AppDateRules.normalizedRange(pickup: pickup, returnDate: earlierReturn, today: today)
 
         #expect(range.pickup == pickup)
         #expect(range.returnDate == pickup)
+    }
+
+    @Test("Normalized range moves past pickup to fixed today")
+    func normalizedRangeMovesPastPickupToFixedToday() {
+        let today = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 12))!
+        let pickup = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 10))!
+        let returnDate = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 11))!
+
+        let range = AppDateRules.normalizedRange(pickup: pickup, returnDate: returnDate, today: today)
+
+        #expect(range.pickup == today)
+        #expect(range.returnDate == today)
     }
 }

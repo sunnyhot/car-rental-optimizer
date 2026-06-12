@@ -1,4 +1,4 @@
-# Dependencies
+# Local dependency caches
 node_modules/
 
 # Build output
@@ -28,7 +28,7 @@ Thumbs.db
 .env
 .env.local
 
-# Node
+# Historical Node/Vite cache files
 npm-debug.log*
 playwright-report/
 test-results/

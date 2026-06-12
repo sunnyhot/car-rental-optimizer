@@ -34,8 +34,12 @@ enum AppDateRules {
         calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: date)) ?? date
     }
 
-    static func normalizedRange(pickup: Date, returnDate: Date) -> (pickup: Date, returnDate: Date) {
-        let normalizedPickup = maxDay(calendar.startOfDay(for: pickup), today)
+    static func normalizedRange(
+        pickup: Date,
+        returnDate: Date,
+        today: Date = AppDateRules.today
+    ) -> (pickup: Date, returnDate: Date) {
+        let normalizedPickup = maxDay(calendar.startOfDay(for: pickup), calendar.startOfDay(for: today))
         let normalizedReturn = maxDay(calendar.startOfDay(for: returnDate), normalizedPickup)
         return (normalizedPickup, normalizedReturn)
     }

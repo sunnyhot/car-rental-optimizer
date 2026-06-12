@@ -8,24 +8,22 @@ struct ResultPanelView: View {
         WorkbenchPanel(
             title: "候选方案",
             subtitle: panelSubtitle,
-            trailing: AnyView(
-                Text(viewModel.status)
-                    .font(.caption)
-                    .foregroundStyle(WorkbenchStyle.muted)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(2)
-                    .frame(maxWidth: 360, alignment: .trailing)
-            )
+            trailing: panelTrailing
         ) {
             Group {
                 if viewModel.isSearching {
-                    LoadingResultsView()
+                    LoadingResultsView(phase: viewModel.searchProgressPhase)
                 } else if viewModel.results.isEmpty {
-                    EmptyResultsView(statuses: viewModel.platformStatuses)
+                    EmptyResultsView(
+                        statuses: viewModel.platformStatuses,
+                        phase: viewModel.searchProgressPhase
+                    ) {
+                        Task { await viewModel.retrySearch() }
+                    }
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 10) {
-                            ForEach(Array(viewModel.results.enumerated()), id: \.element.id) { index, result in
+                            ForEach(Array(viewModel.displayedResults.enumerated()), id: \.element.id) { index, result in
                                 ResultRowView(
                                     rank: index + 1,
                                     recommendation: result,
@@ -44,6 +42,30 @@ struct ResultPanelView: View {
         }
     }
 
+    private var panelTrailing: AnyView {
+        AnyView(
+            HStack(alignment: .center, spacing: 12) {
+                if !viewModel.results.isEmpty {
+                    Picker("排序", selection: $viewModel.recommendationSortMode) {
+                        ForEach(RecommendationSortMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 260)
+                    .accessibilityLabel("候选方案排序")
+                }
+
+                Text(viewModel.status)
+                    .font(.caption)
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+                    .frame(maxWidth: 360, alignment: .trailing)
+            }
+        )
+    }
+
     private var panelSubtitle: String {
         if viewModel.results.isEmpty {
             return "等待真实报价"
@@ -53,6 +75,8 @@ struct ResultPanelView: View {
 }
 
 private struct LoadingResultsView: View {
+    let phase: SearchProgressPhase
+
     var body: some View {
         VStack(spacing: 16) {
             Spacer()
@@ -60,10 +84,10 @@ private struct LoadingResultsView: View {
                 VStack(spacing: 12) {
                     ProgressView()
                         .controlSize(.large)
-                    Text("正在比较")
+                    Text(phase.title)
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(WorkbenchStyle.ink)
-                    Text("平台车源、门店距离和到店路线正在合并计算。")
+                    Text(phase.message)
                         .font(.callout)
                         .foregroundStyle(WorkbenchStyle.muted)
                         .multilineTextAlignment(.center)
@@ -80,14 +104,16 @@ private struct LoadingResultsView: View {
 
 private struct EmptyResultsView: View {
     let statuses: [PlatformEvidenceStatus]
+    let phase: SearchProgressPhase
+    let onRetry: () -> Void
 
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
             EmptyStateBlock(
-                icon: "doc.text.magnifyingglass",
-                title: "等待结果",
-                message: "没有可排序的真实车源时，这里不会显示推测价格。"
+                icon: emptyStateIcon,
+                title: emptyStateTitle,
+                message: emptyStateMessage
             )
             .frame(maxHeight: 210)
 
@@ -104,10 +130,34 @@ private struct EmptyResultsView: View {
                 }
             }
             .frame(maxWidth: 460)
+
+            Button {
+                onRetry()
+            } label: {
+                Label("重试本次查询", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("重试本次租车查询")
             Spacer()
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyStateIcon: String {
+        phase == .failed ? "exclamationmark.triangle" : "doc.text.magnifyingglass"
+    }
+
+    private var emptyStateTitle: String {
+        phase == .failed ? "查询未完成" : "等待结果"
+    }
+
+    private var emptyStateMessage: String {
+        if phase == .failed {
+            return "本次比较没有完成，可重试或调整搜索条件。"
+        }
+        return "没有可排序的真实车源时，这里不会显示推测价格。"
     }
 }
 
@@ -213,9 +263,16 @@ private struct ResultRowView: View {
                     .font(.caption2)
                     .foregroundStyle(WorkbenchStyle.muted)
                     .lineLimit(1)
+
+                if recommendation.warnings.contains(.partialPrice) {
+                    Label("部分价格需打开平台复核", systemImage: "exclamationmark.circle.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.orange)
+                }
             }
             .padding(14)
         }
+        .accessibilityLabel(accessibilitySummary)
     }
 
     private var rankingReason: String {
@@ -232,6 +289,10 @@ private struct ResultRowView: View {
         }
         guard platforms.count > 1 else { return nil }
         return platforms.map(\.label).joined(separator: "/") + "取优"
+    }
+
+    private var accessibilitySummary: String {
+        "\(rank)号方案，\(recommendation.listing.platform.label)，\(recommendation.listing.vehicleName)，总成本\(formatMoney(recommendation.bestTotal))"
     }
 
     private var rankBadge: some View {
