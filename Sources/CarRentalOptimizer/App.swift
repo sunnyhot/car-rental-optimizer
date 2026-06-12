@@ -33,6 +33,13 @@ struct CarRentalOptimizerApp: App {
                 .keyboardShortcut("u", modifiers: [.command])
                 .disabled(updateChecker.isChecking || updateChecker.isInstalling)
             }
+
+            CommandMenu("监控") {
+                Button("打开监控中心") {
+                    NotificationCenter.default.post(name: .openMonitorCenter, object: nil)
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
         }
     }
 

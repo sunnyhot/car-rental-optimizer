@@ -1,4 +1,5 @@
 import CarRentalDomain
+import Foundation
 import Testing
 @testable import CarRentalOptimizer
 
@@ -27,5 +28,10 @@ struct MonitorPresentationTests {
         #expect(formatSignedMoney(12) == "+¥12")
         #expect(formatSignedMoney(-8) == "¥-8")
         #expect(formatSignedMoney(nil) == "--")
+    }
+
+    @Test("Monitor center notification name is stable")
+    func monitorCenterNotificationNameIsStable() {
+        #expect(Notification.Name.openMonitorCenter.rawValue == "OpenMonitorCenter")
     }
 }

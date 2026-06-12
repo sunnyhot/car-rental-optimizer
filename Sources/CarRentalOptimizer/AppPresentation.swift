@@ -1,6 +1,10 @@
 import CarRentalDomain
 import Foundation
 
+extension Notification.Name {
+    static let openMonitorCenter = Notification.Name("OpenMonitorCenter")
+}
+
 enum AppDefaults {
     static var searchRequest: SearchRequest {
         let pickupDate = AppDateRules.today

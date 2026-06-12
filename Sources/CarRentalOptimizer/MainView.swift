@@ -2,10 +2,14 @@ import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject var viewModel: SearchViewModel
+    @EnvironmentObject var monitorViewModel: MonitorCenterViewModel
+    @State private var showingMonitorCenter = false
 
     var body: some View {
         VStack(spacing: 0) {
-            WorkbenchHeader()
+            WorkbenchHeader {
+                showingMonitorCenter = true
+            }
 
             HSplitView {
                 SearchPanelView()
@@ -30,11 +34,20 @@ struct MainView: View {
             }
         }
         .background(WorkbenchStyle.background)
+        .sheet(isPresented: $showingMonitorCenter) {
+            MonitorCenterView()
+                .environmentObject(viewModel)
+                .environmentObject(monitorViewModel)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openMonitorCenter)) { _ in
+            showingMonitorCenter = true
+        }
     }
 }
 
 private struct WorkbenchHeader: View {
     @EnvironmentObject var viewModel: SearchViewModel
+    let onOpenMonitorCenter: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 18) {
@@ -71,6 +84,14 @@ private struct WorkbenchHeader: View {
                 value: selectedTotal,
                 icon: "yensign.circle"
             )
+
+            Button {
+                onOpenMonitorCenter()
+            } label: {
+                Label("监控中心", systemImage: "bell.badge")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
 
             StatusPill(
                 text: viewModel.isSearching ? "查询中" : "真实 API",
