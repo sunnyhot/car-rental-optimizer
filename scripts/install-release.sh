@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/install-release.sh
-#   scripts/install-release.sh ~/Downloads/CarRentalOptimizer-v0.7.0.zip
+#   scripts/install-release.sh ~/Downloads/CarRentalOptimizer-v0.8.0.zip
 #
 # Without Developer ID signing and notarization, a browser-downloaded app is
 # blocked by Gatekeeper. This script is an explicit local-install workaround for
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 REPO="${REPO:-sunnyhot/car-rental-optimizer}"
-RELEASE_VERSION="${RELEASE_VERSION:-v0.7.0}"
+RELEASE_VERSION="${RELEASE_VERSION:-v0.8.0}"
 ZIP_NAME="CarRentalOptimizer-${RELEASE_VERSION}.zip"
 ZIP_URL="https://github.com/${REPO}/releases/download/${RELEASE_VERSION}/${ZIP_NAME}"
 APP_NAME="租车比价助手.app"
