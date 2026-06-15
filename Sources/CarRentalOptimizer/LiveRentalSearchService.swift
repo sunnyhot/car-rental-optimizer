@@ -168,9 +168,7 @@ private final class ZucheAPIClient {
 
                 for dept in chooseCar.deptHangModels {
                     guard let store = makeStore(from: dept, request: request) else { continue }
-                    if hasVehicleQuery {
-                        guard store.distanceKm <= request.radiusKm else { continue }
-                    }
+                    guard store.distanceKm <= request.radiusKm else { continue }
 
                     let deptListings = listings(from: dept.models, store: store, request: request)
                     if !hasVehicleQuery {
@@ -266,8 +264,7 @@ private final class ZucheAPIClient {
 
     private func candidateStores(_ stores: [ZucheDept], request: SearchRequest) -> [Store] {
         let sorted = stores.compactMap { makeStore(from: $0, request: request) }.sorted { $0.distanceKm < $1.distanceKm }
-        let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasVehicleQuery ? sorted.filter { $0.distanceKm <= request.radiusKm } : sorted
+        return sorted.filter { $0.distanceKm <= request.radiusKm }
     }
 
     private func queryAnchors(candidates: [Store], request: SearchRequest) -> [GeoPoint] {
@@ -608,12 +605,15 @@ func makeEhiSearchScript(json: String) -> String {
           .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng))
           .map(s => ({ ...s, distanceKm: distanceKm(origin, { lat: s.lat, lng: s.lng }) }))
           .sort((a, b) => a.distanceKm - b.distanceKm);
-        const nearestStoreProbeLimit = 12;
+        const blankStoreProbeLimit = 40;
+        const blankStoreCandidates = storeCandidates.filter(s => s.distanceKm <= request.radiusKm);
         const candidates = hasVehicleQuery
           ? storeCandidates.filter(s => s.distanceKm <= request.radiusKm)
-          : storeCandidates.slice(0, nearestStoreProbeLimit);
+          : blankStoreCandidates.slice(0, blankStoreProbeLimit);
         if (!candidates.length) {
-          const message = hasVehicleQuery ? '一嗨在当前范围内没有可用取车点。' : '一嗨当前城市没有可用取车点。';
+          const message = hasVehicleQuery
+            ? '一嗨在当前范围内没有可用取车点。'
+            : `一嗨在当前 ${Math.round(request.radiusKm)}km 内没有可用取车点。`;
           return JSON.stringify({ statusKind: 'unavailable', message, sourceUrl, listings: [] });
         }
 
@@ -746,9 +746,12 @@ func makeEhiSearchScript(json: String) -> String {
         }
         const listings = Object.values(listingsByKey);
         if (!listings.length && !stockRequests && verifyFailures.length) {
+          const message = hasVehicleQuery
+            ? `一嗨真实接口返回成功，但候选门店不满足取还时间：${verifyFailures.slice(0, 2).join('；')}`
+            : `一嗨真实接口返回成功，但半径 ${Math.round(request.radiusKm)}km 内候选门店不满足取还时间：${verifyFailures.slice(0, 2).join('；')}`;
           return JSON.stringify({
             statusKind: 'unavailable',
-            message: `一嗨真实接口返回成功，但候选门店不满足取还时间：${verifyFailures.slice(0, 2).join('；')}`,
+            message,
             sourceUrl,
             listings: []
           });
@@ -769,9 +772,12 @@ func makeEhiSearchScript(json: String) -> String {
             listings: []
           });
         }
+        const blankUnavailableMessage = `一嗨真实接口返回成功，但半径 ${Math.round(request.radiusKm)}km 内已探测 ${candidates.length} 个候选门店没有可订车型。`;
         return JSON.stringify({
           statusKind: listings.length ? 'ready' : 'unavailable',
-          message: listings.length ? `已从一嗨 API 读取 ${listings.length} 个真实候选车型。` : '一嗨真实接口返回成功，但当前条件没有可订车型。',
+          message: listings.length
+            ? `已从一嗨 API 读取 ${listings.length} 个真实候选车型。`
+            : (hasVehicleQuery ? '一嗨真实接口返回成功，但当前条件没有可订车型。' : blankUnavailableMessage),
           sourceUrl,
           listings
         });

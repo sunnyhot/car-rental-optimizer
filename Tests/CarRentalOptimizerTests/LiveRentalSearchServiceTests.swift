@@ -79,15 +79,17 @@ struct LiveRentalSearchServiceTests {
         #expect(decodedPrice?.toDouble() == 123.5)
     }
 
-    @Test("eHi blank vehicle query keeps every model from the nearest priced store")
-    func ehiBlankVehicleQueryKeepsEveryModelFromNearestPricedStore() {
+    @Test("eHi blank vehicle query probes stores inside radius before reporting no cars")
+    func ehiBlankVehicleQueryProbesStoresInsideRadiusBeforeReportingNoCars() {
         let script = makeEhiSearchScript(json: "{}")
 
-        #expect(script.contains("nearestStoreProbeLimit = 12"))
-        #expect(script.contains("storeCandidates.slice(0, nearestStoreProbeLimit)"))
+        #expect(script.contains("blankStoreProbeLimit = 40"))
+        #expect(script.contains("const blankStoreCandidates = storeCandidates.filter(s => s.distanceKm <= request.radiusKm)"))
+        #expect(script.contains(": blankStoreCandidates.slice(0, blankStoreProbeLimit)"))
         #expect(script.contains("selectedBlankStoreId"))
         #expect(script.contains("!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId"))
-        #expect(!script.contains("storeCandidates.slice(0, 1)"))
+        #expect(script.contains("半径 ${Math.round(request.radiusKm)}km"))
+        #expect(!script.contains(": storeCandidates.slice(0, nearestStoreProbeLimit)"))
     }
 
     @Test("eHi city matching recognizes English Beijing address from Apple location")

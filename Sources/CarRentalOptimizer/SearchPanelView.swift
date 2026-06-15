@@ -98,7 +98,7 @@ struct SearchPanelView: View {
                     Slider(value: $viewModel.request.radiusKm, in: 10...500, step: 10)
 
                     Text(viewModel.request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? "车型为空：最近门店模式，半径不参与筛选。"
+                        ? "车型为空：查半径内最近有报价门店。"
                         : "车型已填写：半径内车型匹配。")
                         .font(.caption2)
                         .foregroundStyle(WorkbenchStyle.muted)
