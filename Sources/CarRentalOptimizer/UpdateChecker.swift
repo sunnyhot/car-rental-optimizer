@@ -163,13 +163,16 @@ enum UpdateInstallError: LocalizedError {
 struct MacReleaseInstaller: UpdateInstalling {
     private let downloader: ReleaseArchiveDownloading
     private let fileManager: FileManager
+    private let appBundleResolver: CurrentAppBundleResolver
 
     init(
         downloader: ReleaseArchiveDownloading = URLSession.shared,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        appBundleResolver: CurrentAppBundleResolver = CurrentAppBundleResolver()
     ) {
         self.downloader = downloader
         self.fileManager = fileManager
+        self.appBundleResolver = appBundleResolver
     }
 
     func prepareAndLaunchInstaller(for release: GitHubRelease) async throws {
@@ -205,11 +208,7 @@ struct MacReleaseInstaller: UpdateInstalling {
     }
 
     private func currentAppBundleURL() throws -> URL {
-        let bundleURL = Bundle.main.bundleURL
-        guard bundleURL.pathExtension == "app" else {
-            throw UpdateInstallError.appBundleMissing
-        }
-        return bundleURL
+        try appBundleResolver.currentAppBundleURL()
     }
 
     private func validateAppBundle(at appURL: URL) throws {
@@ -307,6 +306,32 @@ struct MacReleaseInstaller: UpdateInstalling {
         guard process.terminationStatus == 0 else {
             throw URLError(.badServerResponse)
         }
+    }
+}
+
+struct CurrentAppBundleResolver {
+    var mainBundleURL: URL
+    var runningApplicationBundleURL: URL?
+
+    init(
+        mainBundleURL: URL = Bundle.main.bundleURL,
+        runningApplicationBundleURL: URL? = NSRunningApplication.current.bundleURL
+    ) {
+        self.mainBundleURL = mainBundleURL
+        self.runningApplicationBundleURL = runningApplicationBundleURL
+    }
+
+    func currentAppBundleURL() throws -> URL {
+        if mainBundleURL.pathExtension == "app" {
+            return mainBundleURL
+        }
+
+        if let runningApplicationBundleURL,
+           runningApplicationBundleURL.pathExtension == "app" {
+            return runningApplicationBundleURL
+        }
+
+        throw UpdateInstallError.appBundleMissing
     }
 }
 

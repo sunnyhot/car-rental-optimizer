@@ -143,6 +143,18 @@ struct UpdateCheckerTests {
         #expect(dataLoader.requestedURLs == [latestURL])
         #expect(!dataLoader.requestedURLs.contains { $0.host == "api.github.com" })
     }
+
+    @Test("Installer resolves app bundle from running application when executable lives outside bundle")
+    func installerResolvesAppBundleFromRunningApplicationFallback() throws {
+        let runtimeURL = URL(fileURLWithPath: "/Users/me/Library/Application Support/CarRentalOptimizer/runtime", isDirectory: true)
+        let installedAppURL = URL(fileURLWithPath: "/Applications/租车比价助手.app", isDirectory: true)
+        let resolver = CurrentAppBundleResolver(
+            mainBundleURL: runtimeURL,
+            runningApplicationBundleURL: installedAppURL
+        )
+
+        #expect(try resolver.currentAppBundleURL() == installedAppURL)
+    }
 }
 
 private struct StubReleaseFetcher: ReleaseFetching {
