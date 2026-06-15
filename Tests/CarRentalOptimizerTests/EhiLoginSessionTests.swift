@@ -29,6 +29,18 @@ struct EhiLoginSessionTests {
         #expect(!EhiLoginSession.containsCaptchaValidationError("手机号登录"))
     }
 
+    @Test("Captcha observer reports validation errors inserted after page load")
+    func captchaObserverReportsDynamicValidationError() {
+        let source = EhiLoginSession.captchaValidationObserverSource(messageName: "testCaptchaObserver")
+
+        #expect(source.contains("const messageName = \"testCaptchaObserver\";"))
+        #expect(source.contains("new MutationObserver(notifyIfNeeded)"))
+        #expect(source.contains("childList: true"))
+        #expect(source.contains("subtree: true"))
+        #expect(source.contains("characterData: true"))
+        #expect(source.contains("handlers[messageName].postMessage(String(text).trim())"))
+    }
+
     @Test("Only eHi website data records are reset")
     func onlyEhiWebsiteDataRecordsAreReset() {
         #expect(EhiLoginSession.isEhiWebsiteDataRecordName("booking.1hai.cn"))

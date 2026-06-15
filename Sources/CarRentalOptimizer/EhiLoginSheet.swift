@@ -77,10 +77,16 @@ private struct EhiLoginWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.userContentController.addUserScript(EhiLoginSession.makeCaptchaValidationObserverScript())
+        configuration.userContentController.add(
+            context.coordinator,
+            name: EhiLoginSession.captchaValidationObserverMessageName
+        )
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         webView.navigationDelegate = context.coordinator
+        context.coordinator.webView = webView
         context.coordinator.lastReloadToken = reloadToken
         context.coordinator.loadLoginPage(
             in: webView,
@@ -94,6 +100,7 @@ private struct EhiLoginWebView: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.pageTitle = $pageTitle
         context.coordinator.currentURL = $currentURL
+        context.coordinator.webView = nsView
         if context.coordinator.lastReloadToken != reloadToken {
             context.coordinator.lastReloadToken = reloadToken
             context.coordinator.loadLoginPage(
@@ -105,10 +112,19 @@ private struct EhiLoginWebView: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        nsView.configuration.userContentController.removeScriptMessageHandler(
+            forName: EhiLoginSession.captchaValidationObserverMessageName
+        )
+        nsView.navigationDelegate = nil
+        coordinator.webView = nil
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var pageTitle: Binding<String>
         var currentURL: Binding<String>
         var lastReloadToken = 0
+        weak var webView: WKWebView?
         private var hasAutoRefreshedCaptchaError = false
 
         init(pageTitle: Binding<String>, currentURL: Binding<String>) {
@@ -123,6 +139,11 @@ private struct EhiLoginWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
             update(from: webView)
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == EhiLoginSession.captchaValidationObserverMessageName, let webView else { return }
+            recoverFromCaptchaError(in: webView)
         }
 
         func loadLoginPage(
@@ -164,15 +185,20 @@ private struct EhiLoginWebView: NSViewRepresentable {
         private func inspectCaptchaError(in webView: WKWebView) {
             webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self, weak webView] result, _ in
                 guard let self, let webView, let text = result as? String else { return }
-                guard EhiLoginSession.containsCaptchaValidationError(text), !self.hasAutoRefreshedCaptchaError else { return }
-                self.hasAutoRefreshedCaptchaError = true
-                self.loadLoginPage(
-                    in: webView,
-                    resetChallengeData: true,
-                    resetAutoRefreshGuard: false,
-                    restoreSavedSession: false
-                )
+                guard EhiLoginSession.containsCaptchaValidationError(text) else { return }
+                self.recoverFromCaptchaError(in: webView)
             }
+        }
+
+        private func recoverFromCaptchaError(in webView: WKWebView) {
+            guard !hasAutoRefreshedCaptchaError else { return }
+            hasAutoRefreshedCaptchaError = true
+            loadLoginPage(
+                in: webView,
+                resetChallengeData: true,
+                resetAutoRefreshGuard: false,
+                restoreSavedSession: false
+            )
         }
     }
 }

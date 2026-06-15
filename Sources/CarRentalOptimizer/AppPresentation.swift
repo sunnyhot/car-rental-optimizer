@@ -38,6 +38,32 @@ enum AppDateRules {
         calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: date)) ?? date
     }
 
+    static func monthStart(containing date: Date) -> Date {
+        let components = calendar.dateComponents([.year, .month], from: calendar.startOfDay(for: date))
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+    }
+
+    static func month(byAdding months: Int, to date: Date) -> Date {
+        let monthStart = monthStart(containing: date)
+        return calendar.date(byAdding: .month, value: months, to: monthStart) ?? monthStart
+    }
+
+    static func monthTitle(for date: Date) -> String {
+        let components = calendar.dateComponents([.year, .month], from: monthStart(containing: date))
+        return "\(components.year ?? 0) 年 \(components.month ?? 0) 月"
+    }
+
+    static func monthGrid(containing date: Date) -> [Date] {
+        let firstOfMonth = monthStart(containing: date)
+        let weekday = calendar.component(.weekday, from: firstOfMonth)
+        let leadingDays = max(0, weekday - 1)
+        let firstGridDay = calendar.date(byAdding: .day, value: -leadingDays, to: firstOfMonth) ?? firstOfMonth
+
+        return (0..<42).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: firstGridDay)
+        }
+    }
+
     static func normalizedRange(
         pickup: Date,
         returnDate: Date,

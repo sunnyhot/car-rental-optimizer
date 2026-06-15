@@ -484,22 +484,67 @@ private struct DateRangePickerPopover: View {
     @Binding var returnDate: Date
     @Binding var focusedEndpoint: DateRangeEndpoint
     let onDone: () -> Void
+    @State private var visibleMonth = AppDateRules.monthStart(containing: AppDateRules.today)
 
     private var rentalDays: Int {
         AppDateRules.rentalDaySpan(pickup: pickupDate, returnDate: returnDate)
     }
 
+    private var trailingMonth: Date {
+        AppDateRules.month(byAdding: 1, to: visibleMonth)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("选择租期")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                    Text("取车和还车日期联动，不能选择过去日期。")
-                        .font(.caption)
-                        .foregroundStyle(WorkbenchStyle.muted)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                rangeSummaryButton(endpoint: .pickup, title: "取车", date: pickupDate, accent: WorkbenchStyle.accent)
+                DateRangeDurationBadge(days: rentalDays)
+                rangeSummaryButton(endpoint: .return, title: "还车", date: returnDate, accent: WorkbenchStyle.teal)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(WorkbenchStyle.surface)
+
+            Divider()
+
+            HStack(alignment: .top, spacing: 18) {
+                DateRangeCalendarMonthView(
+                    month: visibleMonth,
+                    pickupDate: pickupDate,
+                    returnDate: returnDate,
+                    minimumDate: AppDateRules.today,
+                    focusedEndpoint: focusedEndpoint,
+                    showsLeadingNavigation: true,
+                    showsTrailingNavigation: false,
+                    onMonthChange: moveVisibleMonth,
+                    onSelect: selectDate
+                )
+
+                Divider()
+
+                DateRangeCalendarMonthView(
+                    month: trailingMonth,
+                    pickupDate: pickupDate,
+                    returnDate: returnDate,
+                    minimumDate: AppDateRules.today,
+                    focusedEndpoint: focusedEndpoint,
+                    showsLeadingNavigation: false,
+                    showsTrailingNavigation: true,
+                    onMonthChange: moveVisibleMonth,
+                    onSelect: selectDate
+                )
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 18)
+
+            Divider()
+
+            HStack {
+                Button("清除已选") {
+                    resetSelection()
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(WorkbenchStyle.accent)
 
                 Spacer()
 
@@ -508,64 +553,19 @@ private struct DateRangePickerPopover: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .tint(WorkbenchStyle.accent)
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             .background(WorkbenchStyle.surface)
-
-            Divider()
-
-            HStack(spacing: 10) {
-                rangeSummaryButton(endpoint: .pickup, title: "取车", date: pickupDate, accent: WorkbenchStyle.accent)
-                DateRangeDurationBadge(days: rentalDays)
-                rangeSummaryButton(endpoint: .return, title: "还车", date: returnDate, accent: WorkbenchStyle.teal)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-
-            HStack(alignment: .top, spacing: 14) {
-                LinkedCalendarColumn(
-                    title: "取车日期",
-                    date: Binding(
-                        get: { pickupDate },
-                        set: { newValue in
-                            let normalized = AppDateRules.calendar.startOfDay(for: newValue)
-                            pickupDate = normalized
-                            if returnDate < normalized {
-                                returnDate = normalized
-                            }
-                            focusedEndpoint = .return
-                        }
-                    ),
-                    minimumDate: AppDateRules.today,
-                    accent: WorkbenchStyle.accent,
-                    isActive: focusedEndpoint == .pickup
-                )
-
-                LinkedCalendarColumn(
-                    title: "还车日期",
-                    date: Binding(
-                        get: { returnDate },
-                        set: { newValue in
-                            returnDate = max(
-                                AppDateRules.calendar.startOfDay(for: newValue),
-                                AppDateRules.calendar.startOfDay(for: pickupDate)
-                            )
-                            focusedEndpoint = .return
-                        }
-                    ),
-                    minimumDate: pickupDate,
-                    accent: WorkbenchStyle.teal,
-                    isActive: focusedEndpoint == .return
-                )
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
         }
-        .frame(width: 690)
+        .frame(width: 666)
         .environment(\.calendar, AppDateRules.calendar)
         .environment(\.locale, Locale(identifier: "zh_CN"))
+        .onAppear {
+            visibleMonth = AppDateRules.monthStart(containing: pickupDate)
+        }
     }
 
     private func rangeSummaryButton(endpoint: DateRangeEndpoint, title: String, date: Date, accent: Color) -> some View {
@@ -600,48 +600,234 @@ private struct DateRangePickerPopover: View {
         }
         .buttonStyle(.plain)
     }
+
+    private func moveVisibleMonth(by months: Int) {
+        visibleMonth = AppDateRules.month(byAdding: months, to: visibleMonth)
+    }
+
+    private func selectDate(_ date: Date) {
+        let normalized = AppDateRules.calendar.startOfDay(for: date)
+        guard normalized >= AppDateRules.today else { return }
+
+        switch focusedEndpoint {
+        case .pickup:
+            pickupDate = normalized
+            if returnDate < normalized {
+                returnDate = normalized
+            }
+            focusedEndpoint = .return
+        case .return:
+            if normalized < pickupDate {
+                pickupDate = normalized
+                returnDate = normalized
+            } else {
+                returnDate = normalized
+            }
+            focusedEndpoint = .return
+        }
+    }
+
+    private func resetSelection() {
+        let today = AppDateRules.today
+        pickupDate = today
+        returnDate = AppDateRules.addingDays(1, to: today)
+        focusedEndpoint = .pickup
+        visibleMonth = AppDateRules.monthStart(containing: today)
+    }
 }
 
-private struct LinkedCalendarColumn: View {
-    let title: String
-    @Binding var date: Date
+private struct DateRangeCalendarMonthView: View {
+    let month: Date
+    let pickupDate: Date
+    let returnDate: Date
     let minimumDate: Date
-    let accent: Color
-    let isActive: Bool
+    let focusedEndpoint: DateRangeEndpoint
+    let showsLeadingNavigation: Bool
+    let showsTrailingNavigation: Bool
+    let onMonthChange: (Int) -> Void
+    let onSelect: (Date) -> Void
+
+    private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+    private let columns = Array(repeating: GridItem(.fixed(34), spacing: 6), count: 7)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(spacing: 14) {
+            monthHeader
+
             HStack(spacing: 6) {
-                Circle()
-                    .fill(accent)
-                    .frame(width: 7, height: 7)
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(WorkbenchStyle.ink)
-                Spacer()
+                ForEach(weekdays, id: \.self) { weekday in
+                    Text(weekday)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .frame(width: 34)
+                }
             }
 
-            DatePicker(
-                "",
-                selection: $date,
-                in: minimumDate...,
-                displayedComponents: [.date]
-            )
-            .labelsHidden()
-            .datePickerStyle(.graphical)
-            .frame(width: 314)
-            .frame(minHeight: 318)
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(AppDateRules.monthGrid(containing: month), id: \.self) { day in
+                    DateRangeCalendarDayButton(
+                        date: day,
+                        displayMonth: month,
+                        pickupDate: pickupDate,
+                        returnDate: returnDate,
+                        minimumDate: minimumDate,
+                        focusedEndpoint: focusedEndpoint
+                    ) {
+                        onSelect(day)
+                    }
+                }
+            }
         }
-        .padding(12)
-        .frame(width: 326, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isActive ? accent.opacity(0.08) : Color.black.opacity(0.025))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isActive ? accent.opacity(0.35) : WorkbenchStyle.line, lineWidth: 1)
-        )
+        .frame(width: 274, alignment: .top)
+    }
+
+    private var monthHeader: some View {
+        HStack(spacing: 6) {
+            if showsLeadingNavigation {
+                monthButton(systemImage: "chevron.left.2", offset: -12, help: "上一年")
+                monthButton(systemImage: "chevron.left", offset: -1, help: "上个月")
+            } else {
+                Color.clear
+                    .frame(width: 54, height: 24)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(AppDateRules.monthTitle(for: month))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(WorkbenchStyle.ink)
+                .monospacedDigit()
+
+            Spacer(minLength: 8)
+
+            if showsTrailingNavigation {
+                monthButton(systemImage: "chevron.right", offset: 1, help: "下个月")
+                monthButton(systemImage: "chevron.right.2", offset: 12, help: "下一年")
+            } else {
+                Color.clear
+                    .frame(width: 54, height: 24)
+            }
+        }
+        .frame(height: 34)
+    }
+
+    private func monthButton(systemImage: String, offset: Int, help: String) -> some View {
+        Button {
+            onMonthChange(offset)
+        } label: {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(WorkbenchStyle.ink)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
+
+private struct DateRangeCalendarDayButton: View {
+    let date: Date
+    let displayMonth: Date
+    let pickupDate: Date
+    let returnDate: Date
+    let minimumDate: Date
+    let focusedEndpoint: DateRangeEndpoint
+    let action: () -> Void
+
+    private var dayNumber: Int {
+        AppDateRules.calendar.component(.day, from: date)
+    }
+
+    private var normalizedDate: Date {
+        AppDateRules.calendar.startOfDay(for: date)
+    }
+
+    private var normalizedPickup: Date {
+        AppDateRules.calendar.startOfDay(for: pickupDate)
+    }
+
+    private var normalizedReturn: Date {
+        AppDateRules.calendar.startOfDay(for: returnDate)
+    }
+
+    private var isInDisplayedMonth: Bool {
+        AppDateRules.calendar.isDate(date, equalTo: displayMonth, toGranularity: .month)
+    }
+
+    private var isDisabled: Bool {
+        normalizedDate < AppDateRules.calendar.startOfDay(for: minimumDate)
+    }
+
+    private var isPickup: Bool {
+        AppDateRules.calendar.isDate(normalizedDate, inSameDayAs: normalizedPickup)
+    }
+
+    private var isReturn: Bool {
+        AppDateRules.calendar.isDate(normalizedDate, inSameDayAs: normalizedReturn)
+    }
+
+    private var isSelected: Bool {
+        isPickup || isReturn
+    }
+
+    private var isInRange: Bool {
+        normalizedDate >= normalizedPickup && normalizedDate <= normalizedReturn
+    }
+
+    private var isToday: Bool {
+        AppDateRules.calendar.isDateInToday(date)
+    }
+
+    private var selectionColor: Color {
+        isReturn && !isPickup ? WorkbenchStyle.teal : WorkbenchStyle.accent
+    }
+
+    private var textColor: Color {
+        if isDisabled {
+            return WorkbenchStyle.muted.opacity(0.32)
+        }
+        if isSelected {
+            return .white
+        }
+        if isInDisplayedMonth {
+            return WorkbenchStyle.ink
+        }
+        return WorkbenchStyle.muted.opacity(0.46)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isInRange && !isSelected ? WorkbenchStyle.accent.opacity(0.12) : Color.clear)
+                    .frame(width: 34, height: 30)
+
+                Circle()
+                    .fill(isSelected ? selectionColor : Color.clear)
+                    .frame(width: 30, height: 30)
+
+                Circle()
+                    .stroke(isToday && !isSelected ? WorkbenchStyle.accent.opacity(0.42) : Color.clear, lineWidth: 1)
+                    .frame(width: 30, height: 30)
+
+                Text("\(dayNumber)")
+                    .font(.callout.weight(isSelected ? .semibold : .regular))
+                    .foregroundStyle(textColor)
+                    .monospacedDigit()
+            }
+            .frame(width: 34, height: 34)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isInDisplayedMonth ? 1 : 0.72)
+        .accessibilityLabel(accessibilityLabel)
+        .help(focusedEndpoint.rawValue)
+    }
+
+    private var accessibilityLabel: String {
+        "\(AppDateRules.formatDisplayDate(date)) \(AppDateRules.formatWeekday(date))"
     }
 }
 

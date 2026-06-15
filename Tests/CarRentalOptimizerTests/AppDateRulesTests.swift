@@ -45,4 +45,28 @@ struct AppDateRulesTests {
         #expect(range.pickup == today)
         #expect(range.returnDate == today)
     }
+
+    @Test("Month grid uses six Sunday-first weeks around visible month")
+    func monthGridUsesSixSundayFirstWeeksAroundVisibleMonth() {
+        let month = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 15))!
+
+        let days = AppDateRules.monthGrid(containing: month)
+
+        #expect(days.count == 42)
+        #expect(AppDateRules.formatRequestDate(days[0]) == "2026-05-31")
+        #expect(AppDateRules.formatRequestDate(days[10]) == "2026-06-10")
+        #expect(AppDateRules.formatRequestDate(days[41]) == "2026-07-11")
+    }
+
+    @Test("Month title and month navigation use calendar month starts")
+    func monthTitleAndMonthNavigationUseCalendarMonthStarts() {
+        let date = AppDateRules.calendar.date(from: DateComponents(year: 2026, month: 6, day: 30))!
+
+        let nextMonth = AppDateRules.month(byAdding: 1, to: date)
+        let previousYear = AppDateRules.month(byAdding: -6, to: date)
+
+        #expect(AppDateRules.monthTitle(for: date) == "2026 年 6 月")
+        #expect(AppDateRules.formatRequestDate(nextMonth) == "2026-07-01")
+        #expect(AppDateRules.formatRequestDate(previousYear) == "2025-12-01")
+    }
 }
