@@ -49,6 +49,18 @@ struct CarRentalOptimizerApp: App {
                     NotificationCenter.default.post(name: .openMonitorCenter, object: nil)
                 }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
+
+                Button("立即巡查到期监控") {
+                    NotificationCenter.default.post(name: .runDueMonitorChecks, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            }
+
+            CommandMenu("搜索") {
+                Button("重新比较") {
+                    NotificationCenter.default.post(name: .retryLatestSearch, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command])
             }
         }
     }

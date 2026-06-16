@@ -43,7 +43,7 @@ struct MonitorCenterView: View {
     private var monitorList: some View {
         WorkbenchPanel(
             title: "监控中心",
-            subtitle: "\(monitorViewModel.monitors.count) 个价格监控",
+            subtitle: monitorListSubtitle,
             trailing: AnyView(
                 Button {
                     showingCreateSheet = true
@@ -54,13 +54,57 @@ struct MonitorCenterView: View {
                 .help("新建价格监控")
             )
         ) {
-            List(selection: $monitorViewModel.selectedMonitorID) {
-                ForEach(monitorViewModel.monitors) { monitor in
-                    MonitorListRow(monitor: monitor)
-                        .tag(monitor.id)
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    MonitorHealthStrip(
+                        summary: monitorViewModel.healthSummary,
+                        backgroundMonitoringEnabled: monitorViewModel.backgroundMonitoringEnabled
+                    )
+                    MonitorFilterBar(
+                        filter: $monitorViewModel.filter,
+                        count: { monitorViewModel.filterCount(for: $0) }
+                    )
+                    if let message = monitorViewModel.operationFeedbackMessage {
+                        StatusMessageRow(message: message, systemImage: "checkmark.circle.fill")
+                    }
                 }
+                .padding(12)
+
+                List(selection: $monitorViewModel.selectedMonitorID) {
+                    ForEach(monitorViewModel.displayedMonitors) { monitor in
+                        MonitorListRow(monitor: monitor)
+                            .tag(monitor.id)
+                    }
+                }
+                .listStyle(.sidebar)
+
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await monitorViewModel.runShownChecks() }
+                    } label: {
+                        Label("巡查当前", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(shownMonitorIDs.isEmpty)
+
+                    Button {
+                        Task { try? await monitorViewModel.pauseMonitors(ids: shownMonitorIDs) }
+                    } label: {
+                        Label("暂停当前", systemImage: "pause.circle")
+                    }
+                    .disabled(shownMonitorIDs.isEmpty)
+
+                    Button {
+                        Task { try? await monitorViewModel.resumeMonitors(ids: shownMonitorIDs) }
+                    } label: {
+                        Label("恢复当前", systemImage: "play.circle")
+                    }
+                    .disabled(shownMonitorIDs.isEmpty)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(12)
+                .subtleDividerOverlay()
             }
-            .listStyle(.sidebar)
         }
     }
 
@@ -72,6 +116,9 @@ struct MonitorCenterView: View {
             if let monitor = monitorViewModel.selectedMonitor {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        if let message = monitorViewModel.operationFeedbackMessage {
+                            StatusMessageRow(message: message, systemImage: "checkmark.circle.fill")
+                        }
                         MonitorSummaryBox(monitor: monitor, trend: monitorViewModel.selectedTrend)
                         Toggle(
                             "关闭窗口后继续巡查",
@@ -82,12 +129,8 @@ struct MonitorCenterView: View {
                         )
                         .toggleStyle(.checkbox)
                         .help("应用保持运行时，按设定频率自动巡查价格。退出应用后停止。")
-                        MonitorTrendChart(snapshots: monitorViewModel.selectedSnapshots)
-                            .frame(height: 220)
-                        MonitorEventList(events: monitorViewModel.selectedEvents)
-                        MonitorSnapshotTable(snapshots: monitorViewModel.selectedSnapshots)
                         HStack {
-                            Button(monitor.status == .paused ? "恢复监控" : "暂停监控") {
+                            Button {
                                 Task {
                                     if monitor.status == .paused {
                                         try? await monitorViewModel.resumeMonitor(id: monitor.id)
@@ -95,11 +138,20 @@ struct MonitorCenterView: View {
                                         try? await monitorViewModel.pauseMonitor(id: monitor.id)
                                     }
                                 }
+                            } label: {
+                                Label(monitor.status == .paused ? "恢复监控" : "暂停监控", systemImage: monitor.status == .paused ? "play.circle" : "pause.circle")
                             }
-                            Button("立即巡查") {
+                            Button {
                                 Task { await monitorViewModel.runDueChecks() }
+                            } label: {
+                                Label("立即巡查", systemImage: "arrow.triangle.2.circlepath")
                             }
                         }
+                        .buttonStyle(.bordered)
+                        MonitorTrendChart(snapshots: monitorViewModel.selectedSnapshots)
+                            .frame(height: 220)
+                        MonitorEventList(events: monitorViewModel.selectedEvents)
+                        MonitorSnapshotTable(snapshots: monitorViewModel.selectedSnapshots)
                     }
                     .padding(16)
                 }
@@ -107,6 +159,18 @@ struct MonitorCenterView: View {
                 EmptyStateBlock(icon: "bell.badge", title: "暂无监控", message: "从候选方案或这里新建价格监控。")
             }
         }
+    }
+
+    private var monitorListSubtitle: String {
+        let summary = monitorViewModel.healthSummary
+        if summary.totalCount == 0 {
+            return "暂无价格监控"
+        }
+        return "\(summary.totalCount) 个监控，\(summary.needsAttentionCount) 个需处理，\(summary.dueTodayCount) 个今日巡查"
+    }
+
+    private var shownMonitorIDs: [String] {
+        monitorViewModel.displayedMonitors.map(\.id)
     }
 }
 
@@ -132,8 +196,15 @@ private struct MonitorListRow: View {
             Text(monitor.frequency.label)
                 .font(.caption2)
                 .foregroundStyle(WorkbenchStyle.muted)
+            if let nextCheckAt = monitor.nextCheckAt {
+                Text("下次 \(formatCompactDateTime(nextCheckAt))")
+                    .font(.caption2)
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .lineLimit(1)
+            }
         }
         .padding(.vertical, 5)
+        .accessibilityLabel("\(monitor.name)，\(monitor.status.label)，\(monitor.frequency.label)")
     }
 }
 
@@ -141,9 +212,13 @@ private struct MonitorSummaryBox: View {
     let monitor: PriceMonitor
     let trend: PriceTrendSummary
 
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 120), spacing: 8)]
+    }
+
     var body: some View {
         SurfaceBox(fill: WorkbenchStyle.accentSoft) {
-            HStack {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                 MetricPill(title: "最近租车价", value: trend.latestPlatformRentalPrice.map(formatMoney) ?? "--")
                 MetricPill(
                     title: "相比上次",
@@ -154,8 +229,16 @@ private struct MonitorSummaryBox: View {
                     title: "下次巡查",
                     value: monitor.nextCheckAt.map { DateFormatter.localizedString(from: $0, dateStyle: .short, timeStyle: .short) } ?? "--"
                 )
+                MetricPill(title: "历史低点", value: trend.lowestPlatformRentalPrice.map(formatMoney) ?? "--", color: WorkbenchStyle.green)
+                MetricPill(title: "历史高点", value: trend.highestPlatformRentalPrice.map(formatMoney) ?? "--")
+                MetricPill(
+                    title: "首次至今",
+                    value: formatSignedMoney(trend.platformRentalDeltaFromFirst),
+                    color: (trend.platformRentalDeltaFromFirst ?? 0) < 0 ? WorkbenchStyle.green : WorkbenchStyle.muted
+                )
             }
         }
+        .accessibilityLabel("监控摘要，最近租车价 \(trend.latestPlatformRentalPrice.map(formatMoney) ?? "暂无")")
     }
 }
 
@@ -198,9 +281,15 @@ private struct MonitorEventList: View {
                         .foregroundStyle(WorkbenchStyle.muted)
                 } else {
                     ForEach(events) { event in
-                        Text(event.message)
-                            .font(.caption)
-                            .foregroundStyle(event.kind == .priceDrop ? WorkbenchStyle.green : WorkbenchStyle.muted)
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: event.kind == .priceDrop ? "arrow.down.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(event.kind == .priceDrop ? WorkbenchStyle.green : WorkbenchStyle.orange)
+                                .frame(width: 16)
+                            Text(event.message)
+                                .font(.caption)
+                                .foregroundStyle(event.kind == .priceDrop ? WorkbenchStyle.green : WorkbenchStyle.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             }
@@ -224,14 +313,71 @@ private struct MonitorSnapshotTable: View {
                         HStack {
                             Text(DateFormatter.localizedString(from: snapshot.checkedAt, dateStyle: .short, timeStyle: .short))
                             Spacer()
-                            Text(snapshot.platformRentalPrice.map(formatMoney) ?? snapshot.status.rawValue)
-                            Text("历史快照，可能已失效")
+                            Text(snapshot.platformRentalPrice.map(formatMoney) ?? snapshot.status.label)
+                            Text(snapshot.status == .successful ? "历史快照，可能已失效" : snapshot.message)
                                 .font(.caption2)
-                                .foregroundStyle(WorkbenchStyle.orange)
+                                .foregroundStyle(snapshot.status == .successful ? WorkbenchStyle.orange : WorkbenchStyle.muted)
+                                .lineLimit(1)
                         }
                         .font(.caption)
                     }
                 }
+            }
+        }
+    }
+}
+
+private struct MonitorHealthStrip: View {
+    let summary: MonitorHealthSummary
+    let backgroundMonitoringEnabled: Bool
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.surface, padding: 10) {
+            HStack(spacing: 8) {
+                MetricPill(title: "总数", value: "\(summary.totalCount)")
+                MetricPill(title: "需处理", value: "\(summary.needsAttentionCount)", color: summary.needsAttentionCount > 0 ? WorkbenchStyle.orange : WorkbenchStyle.muted)
+                MetricPill(title: "降价", value: "\(summary.recentPriceDropCount)", color: summary.recentPriceDropCount > 0 ? WorkbenchStyle.green : WorkbenchStyle.muted)
+                MetricPill(title: "今日", value: "\(summary.dueTodayCount)")
+                StatusPill(
+                    text: backgroundMonitoringEnabled ? "后台开" : "后台关",
+                    color: backgroundMonitoringEnabled ? WorkbenchStyle.green : WorkbenchStyle.muted,
+                    systemImage: backgroundMonitoringEnabled ? "checkmark.circle.fill" : "pause.circle"
+                )
+            }
+        }
+    }
+}
+
+private struct MonitorFilterBar: View {
+    @Binding var filter: MonitorCenterFilter
+    let count: (MonitorCenterFilter) -> Int
+
+    var body: some View {
+        Picker("监控筛选", selection: $filter) {
+            ForEach(MonitorCenterFilter.allCases, id: \.self) { filter in
+                Text("\(filter.label) \(count(filter))")
+                    .tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("监控筛选")
+    }
+}
+
+private struct StatusMessageRow: View {
+    let message: String
+    let systemImage: String
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.accentSoft, padding: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(WorkbenchStyle.accent)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(WorkbenchStyle.ink)
+                    .lineLimit(2)
+                Spacer()
             }
         }
     }

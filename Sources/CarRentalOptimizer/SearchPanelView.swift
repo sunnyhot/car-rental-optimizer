@@ -52,10 +52,17 @@ struct SearchPanelView: View {
                 dismissOriginInput()
                 viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
             }
+            .onChange(of: viewModel.request) { _, _ in
+                viewModel.refreshPreflightIssues()
+            }
             .sheet(isPresented: $showingEhiLogin) {
                 EhiLoginSheet {
                     Task { await viewModel.runSearch() }
                 }
+            }
+
+            if !viewModel.preflightIssues.isEmpty {
+                PreflightIssueList(issues: viewModel.preflightIssues)
             }
         }
     }
@@ -169,13 +176,42 @@ struct SearchPanelView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .tint(WorkbenchStyle.accent)
-        .disabled(viewModel.isSearching)
+        .disabled(viewModel.isSearching || viewModel.hasBlockingPreflightIssues)
     }
 
     private func dismissOriginInput() {
         originInputTask?.cancel()
         originInputDismissRequest += 1
         viewModel.dismissOriginSuggestions()
+    }
+}
+
+private struct PreflightIssueList: View {
+    let issues: [SearchPreflightIssue]
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.surface, padding: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(issues) { issue in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: issue.severity == .blocking ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(issue.severity == .blocking ? WorkbenchStyle.red : WorkbenchStyle.orange)
+                            .frame(width: 16)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(issue.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(WorkbenchStyle.ink)
+                            Text(issue.message)
+                                .font(.caption2)
+                                .foregroundStyle(WorkbenchStyle.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

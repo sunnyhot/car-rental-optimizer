@@ -7,6 +7,7 @@ build/
 
 # Swift build artifacts
 .build/
+.worktrees/
 *.xcodeproj/
 *.xcworkspace/
 xcuserdata/

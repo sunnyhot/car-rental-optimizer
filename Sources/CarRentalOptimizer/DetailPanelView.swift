@@ -86,13 +86,8 @@ private struct RecommendationDetailView: View {
 
                             CostLineView(label: "租车小计", value: recommendation.rentalTotal, bold: true)
 
-                            if recommendation.warnings.contains(.partialPrice) {
-                                Label("平台未完整返回服务费、保险或异店还车费，建议下单前复核。", systemImage: "exclamationmark.circle.fill")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(WorkbenchStyle.orange)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .padding(.top, 6)
-                            }
+                            QuoteCredibilityDetail(credibility: QuoteCredibility.make(for: recommendation))
+                                .padding(.top, 6)
                         }
                     }
                 }
@@ -208,6 +203,10 @@ private struct PlatformQuoteRowView: View {
                     .font(.caption2)
                     .foregroundStyle(WorkbenchStyle.muted)
                     .lineLimit(1)
+                Text(QuoteCredibility.make(for: quote).title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.orange)
+                    .lineLimit(1)
             }
 
             Spacer(minLength: 8)
@@ -222,6 +221,28 @@ private struct PlatformQuoteRowView: View {
                     .foregroundStyle(WorkbenchStyle.muted)
                     .monospacedDigit()
             }
+        }
+    }
+}
+
+private struct QuoteCredibilityDetail: View {
+    let credibility: QuoteCredibility
+
+    var body: some View {
+        Label(credibility.message, systemImage: credibility.systemImage)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var color: Color {
+        switch credibility.level {
+        case .complete:
+            return WorkbenchStyle.green
+        case .reviewRecommended:
+            return WorkbenchStyle.orange
+        case .blocked:
+            return WorkbenchStyle.red
         }
     }
 }

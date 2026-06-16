@@ -76,13 +76,18 @@ final class MonitorScheduler {
             snapshot = failureSnapshot(for: monitor, evidenceResults: evidenceResults, checkedAt: checkedAt)
         } else {
             let recommendations = await rankRentalListings(request: monitor.request, listings: listings, mapService: mapService)
-            if let selected = selectMonitoredRecommendation(
+            if let selected = selectMonitoredRecommendationWithExplanation(
                 from: recommendations,
                 signature: monitor.targetListingSignature,
                 targetVehicleQuery: monitor.targetVehicleQuery,
                 targetPlatform: monitor.targetPlatform
             ) {
-                snapshot = successSnapshot(for: monitor, recommendation: selected, checkedAt: checkedAt)
+                snapshot = successSnapshot(
+                    for: monitor,
+                    recommendation: selected.recommendation,
+                    matchSummary: selected.summary,
+                    checkedAt: checkedAt
+                )
             } else {
                 snapshot = PriceSnapshot(
                     id: idGenerator.nextID(prefix: "snapshot"),
@@ -96,6 +101,15 @@ final class MonitorScheduler {
 
         let previousSnapshots = try await store.snapshots(for: monitor.id)
         try await store.appendSnapshot(snapshot)
+        for event in makeMonitorLifecycleEvents(
+            monitor: monitor,
+            previousSnapshots: previousSnapshots,
+            currentSnapshot: snapshot,
+            checkedAt: checkedAt,
+            id: { idGenerator.nextID(prefix: "event") }
+        ) {
+            try await store.appendEvent(event)
+        }
         if let event = makePriceDropEvent(
             monitor: monitor,
             previousSnapshots: previousSnapshots,
@@ -122,6 +136,7 @@ final class MonitorScheduler {
     private func successSnapshot(
         for monitor: PriceMonitor,
         recommendation: Recommendation,
+        matchSummary: String,
         checkedAt: Date
     ) -> PriceSnapshot {
         PriceSnapshot(
@@ -137,7 +152,7 @@ final class MonitorScheduler {
             dataCompleteness: recommendation.listing.dataCompleteness,
             warnings: recommendation.warnings,
             sourceURL: recommendation.listing.sourceUrl,
-            message: "已记录本次官方报价。"
+            message: "已记录本次官方报价。\(matchSummary)"
         )
     }
 

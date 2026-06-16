@@ -79,6 +79,61 @@ struct MonitorSchedulerTests {
         #expect(try await store.events(for: monitor.id).isEmpty)
     }
 
+    @Test("Repeated equivalent failures create one attention event")
+    func repeatedEquivalentFailuresCreateOneAttentionEvent() async throws {
+        let store = InMemoryMonitorStore()
+        let monitor = makeMonitor(nextCheckAt: Date(timeIntervalSince1970: 100))
+        try await store.saveMonitor(monitor)
+        try await store.appendSnapshot(failureSnapshot(id: "old-1", monitorID: monitor.id, status: .loginRequired, checkedAt: Date(timeIntervalSince1970: 50)))
+        try await store.appendSnapshot(failureSnapshot(id: "old-2", monitorID: monitor.id, status: .loginRequired, checkedAt: Date(timeIntervalSince1970: 75)))
+        let scheduler = MonitorScheduler(
+            store: store,
+            searchProvider: StubRentalSearchProvider(results: [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .loginRequired, message: "一嗨需要登录。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: []
+                )
+            ]),
+            mapService: EstimatedMapService(),
+            notificationService: RecordingNotificationService(),
+            now: { Date(timeIntervalSince1970: 200) },
+            idGenerator: IncrementingIDGenerator()
+        )
+
+        try await scheduler.runDueChecks()
+
+        let events = try await store.events(for: monitor.id)
+        #expect(events.count == 1)
+        #expect(events.first?.kind == .repeatedFailure)
+        #expect(events.first?.previousSnapshotID == "old-2")
+        #expect(events.first?.currentSnapshotID == "snapshot-1")
+    }
+
+    @Test("Successful check after failures creates recovery event")
+    func successfulCheckAfterFailuresCreatesRecoveryEvent() async throws {
+        let store = InMemoryMonitorStore()
+        let monitor = makeMonitor(nextCheckAt: Date(timeIntervalSince1970: 100))
+        try await store.saveMonitor(monitor)
+        try await store.appendSnapshot(failureSnapshot(id: "old-failure", monitorID: monitor.id, status: .captchaRequired, checkedAt: Date(timeIntervalSince1970: 75)))
+        let scheduler = MonitorScheduler(
+            store: store,
+            searchProvider: StubRentalSearchProvider(results: [readyResult(price: 450)]),
+            mapService: EstimatedMapService(),
+            notificationService: RecordingNotificationService(),
+            now: { Date(timeIntervalSince1970: 200) },
+            idGenerator: IncrementingIDGenerator()
+        )
+
+        try await scheduler.runDueChecks()
+
+        let events = try await store.events(for: monitor.id)
+        #expect(events.count == 1)
+        #expect(events.first?.kind == .recovered)
+        #expect(events.first?.previousSnapshotID == "old-failure")
+        #expect(events.first?.currentSnapshotID == "snapshot-1")
+    }
+
     private func makeMonitor(nextCheckAt: Date) -> PriceMonitor {
         PriceMonitor(
             id: "monitor-1",
@@ -115,6 +170,10 @@ struct MonitorSchedulerTests {
 
     private func successSnapshot(id: String, monitorID: String, price: Double, total: Double) -> PriceSnapshot {
         PriceSnapshot(id: id, monitorID: monitorID, checkedAt: Date(timeIntervalSince1970: 50), status: .successful, platformRentalPrice: price, recommendationTotalCost: total, platform: .ehi, storeName: "一嗨通州店", vehicleName: "奇瑞 瑞虎8", message: "success")
+    }
+
+    private func failureSnapshot(id: String, monitorID: String, status: PriceSnapshotStatus, checkedAt: Date) -> PriceSnapshot {
+        PriceSnapshot(id: id, monitorID: monitorID, checkedAt: checkedAt, status: status, platform: .ehi, message: "failure")
     }
 }
 

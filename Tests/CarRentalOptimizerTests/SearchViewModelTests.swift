@@ -142,6 +142,57 @@ struct SearchViewModelTests {
         viewModel.recommendationSortMode = .dataCompleteness
         #expect(viewModel.displayedResults.map(\.id) == ["near-complete", "balanced", "cheap-far"])
     }
+
+    @Test("Preflight blocks searches without selected platforms")
+    func preflightBlocksSearchesWithoutSelectedPlatforms() async {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "不应调用。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: [makeTestListing()]
+                ),
+            ]),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.request.platforms = []
+
+        await viewModel.runSearch()
+
+        #expect(viewModel.results.isEmpty)
+        #expect(viewModel.searchProgressPhase == .failed)
+        #expect(viewModel.preflightIssues.contains { $0.id == "platforms-empty" && $0.severity == .blocking })
+        #expect(viewModel.status.contains("请选择平台"))
+    }
+
+    @Test("Failed search keeps last successful recommendations as stale results")
+    func failedSearchKeepsLastSuccessfulRecommendationsAsStaleResults() async {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "一嗨已返回报价。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: [makeTestListing()]
+                ),
+            ]),
+            geocoder: FailingAddressGeocoder(),
+            mapService: EstimatedMapService(),
+            now: { Date(timeIntervalSince1970: 1_800_000_000) }
+        )
+
+        await viewModel.runSearch()
+        let successfulResultIDs = viewModel.results.map(\.id)
+
+        viewModel.request.originLabel = "无法识别的位置"
+        await viewModel.runSearch()
+
+        #expect(!successfulResultIDs.isEmpty)
+        #expect(viewModel.results.map(\.id) == successfulResultIDs)
+        #expect(viewModel.isShowingStaleResults)
+        #expect(viewModel.retainedResultsNotice?.title == "显示上次成功结果")
+        #expect(viewModel.searchProgressPhase == .failed)
+    }
 }
 
 @MainActor

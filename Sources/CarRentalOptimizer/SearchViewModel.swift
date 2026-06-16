@@ -89,15 +89,23 @@ final class SearchViewModel: ObservableObject {
     @Published var originStatus = "正在获取当前位置。"
     @Published var status = "待查询：静默 API 准备就绪。"
     @Published var searchProgressPhase: SearchProgressPhase = .idle
+    @Published var preflightIssues: [SearchPreflightIssue] = []
+    @Published var searchDiagnosticSummary: SearchDiagnosticSummary = .empty
+    @Published var isShowingStaleResults = false
+    @Published var retainedResultsNotice: RetainedResultsNotice?
+    @Published var lastSuccessfulSearchAt: Date?
 
     private let searchProvider: RentalSearchProviding
     private let geocoder: AddressGeocoding
     private let mapService: MapService
     private let currentLocationProvider: CurrentLocationProviding
     private let addressSuggestionProvider: AddressSuggestionProviding
+    private let now: () -> Date
     private var hasRequestedInitialLocation = false
     private var originSuggestionRequestID = 0
     private var resolvedOriginLabel: String?
+    private var latestSuccessfulResults: [Recommendation] = []
+    private var latestSuccessfulSelectedId = ""
 
     init() {
         self.searchProvider = LiveRentalSearchService()
@@ -106,6 +114,7 @@ final class SearchViewModel: ObservableObject {
         self.currentLocationProvider = AppleCurrentLocationProvider()
         self.addressSuggestionProvider = AppleAddressSuggestionProvider()
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
+        self.now = Date.init
     }
 
     init(snapshotProvider: PlatformSnapshotProviding) {
@@ -115,6 +124,7 @@ final class SearchViewModel: ObservableObject {
         self.currentLocationProvider = UnavailableCurrentLocationProvider()
         self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
+        self.now = Date.init
     }
 
     init(
@@ -122,7 +132,8 @@ final class SearchViewModel: ObservableObject {
         geocoder: AddressGeocoding,
         mapService: MapService,
         currentLocationProvider: CurrentLocationProviding = UnavailableCurrentLocationProvider(),
-        addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider()
+        addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider(),
+        now: @escaping () -> Date = Date.init
     ) {
         self.searchProvider = searchProvider
         self.geocoder = geocoder
@@ -130,6 +141,7 @@ final class SearchViewModel: ObservableObject {
         self.currentLocationProvider = currentLocationProvider
         self.addressSuggestionProvider = addressSuggestionProvider
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
+        self.now = now
     }
 
     var selected: Recommendation? {
@@ -164,9 +176,31 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
+    var hasBlockingPreflightIssues: Bool {
+        preflightIssues.contains { $0.severity == .blocking }
+    }
+
+    func refreshPreflightIssues() {
+        preflightIssues = validateSearchPreflight(request).issues
+    }
+
     func runSearch() async {
         dismissOriginSuggestions()
+        refreshPreflightIssues()
+        if hasBlockingPreflightIssues {
+            searchProgressPhase = .failed
+            if let blockingIssue = preflightIssues.first(where: { $0.severity == .blocking }) {
+                status = "\(blockingIssue.title)：\(blockingIssue.message)"
+            } else {
+                status = "搜索条件不完整。"
+            }
+            searchDiagnosticSummary = .empty
+            return
+        }
+
         isSearching = true
+        isShowingStaleResults = false
+        retainedResultsNotice = nil
         results = []
         selectedId = ""
         searchProgressPhase = .resolvingLocation
@@ -191,6 +225,13 @@ final class SearchViewModel: ObservableObject {
             platformStatuses = request.platforms.map {
                 PlatformEvidenceStatus(platform: $0, kind: .parseFailed, message: "地址解析失败，暂未调用\($0.label)。", sourceUrl: officialPlatformURL(for: $0))
             }
+            searchDiagnosticSummary = SearchDiagnosticSummary.make(
+                evidenceResults: platformStatuses.map {
+                    PlatformEvidenceResult(platform: $0.platform, status: $0, listings: [])
+                },
+                recommendations: []
+            )
+            restoreLatestSuccessfulResultsIfAvailable()
             return
         }
 
@@ -201,7 +242,9 @@ final class SearchViewModel: ObservableObject {
         let listings = evidenceResults.flatMap(\.listings)
         guard !listings.isEmpty else {
             status = formatNoAPIListingsStatus(evidenceResults)
+            searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: [])
             searchProgressPhase = .completed
+            restoreLatestSuccessfulResultsIfAvailable()
             return
         }
 
@@ -214,6 +257,8 @@ final class SearchViewModel: ObservableObject {
 
         results = recommendations
         selectedId = recommendations.first?.id ?? ""
+        recordSuccessfulResults(recommendations)
+        searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: recommendations)
         status = formatSearchCompletionStatus(request: liveRequest, resultCount: recommendations.count)
         searchProgressPhase = .completed
     }
@@ -238,6 +283,7 @@ final class SearchViewModel: ObservableObject {
         if !results.isEmpty {
             status = "搜索条件已变更，点击「开始比较」重新计算总成本。"
         }
+        refreshPreflightIssues()
     }
 
     func platformStatus(for platform: PlatformId) -> PlatformEvidenceStatus {
@@ -253,6 +299,7 @@ final class SearchViewModel: ObservableObject {
         let normalized = AppDateRules.normalizedRange(pickup: pickup, returnDate: returnDate)
         request.pickupAt = AppDateRules.formatRequestDate(normalized.pickup)
         request.returnAt = AppDateRules.formatRequestDate(normalized.returnDate)
+        refreshPreflightIssues()
     }
 
     func refreshCurrentLocationIfNeeded() async {
@@ -276,6 +323,7 @@ final class SearchViewModel: ObservableObject {
             resolvedOriginLabel = location.label
             originSuggestions = []
             originStatus = "已定位当前位置。"
+            refreshPreflightIssues()
         } catch {
             originStatus = error.localizedDescription
         }
@@ -284,6 +332,7 @@ final class SearchViewModel: ObservableObject {
     func updateOriginInput(_ value: String) async {
         request.originLabel = value
         resolvedOriginLabel = nil
+        refreshPreflightIssues()
         originSuggestionRequestID += 1
         let requestID = originSuggestionRequestID
 
@@ -325,6 +374,7 @@ final class SearchViewModel: ObservableObject {
         isLoadingOriginSuggestions = false
         isOriginSuggestionPanelVisible = false
         originStatus = "已选择候选位置。"
+        refreshPreflightIssues()
     }
 
     func dismissOriginSuggestions() {
@@ -332,6 +382,29 @@ final class SearchViewModel: ObservableObject {
         originSuggestions = []
         isLoadingOriginSuggestions = false
         isOriginSuggestionPanelVisible = false
+    }
+
+    private func recordSuccessfulResults(_ recommendations: [Recommendation]) {
+        latestSuccessfulResults = recommendations
+        latestSuccessfulSelectedId = recommendations.first?.id ?? ""
+        lastSuccessfulSearchAt = now()
+        isShowingStaleResults = false
+        retainedResultsNotice = nil
+    }
+
+    private func restoreLatestSuccessfulResultsIfAvailable() {
+        guard !latestSuccessfulResults.isEmpty, let lastSuccessfulSearchAt else {
+            results = []
+            selectedId = ""
+            isShowingStaleResults = false
+            retainedResultsNotice = nil
+            return
+        }
+
+        results = latestSuccessfulResults
+        selectedId = latestSuccessfulSelectedId
+        isShowingStaleResults = true
+        retainedResultsNotice = RetainedResultsNotice.make(lastSuccessfulSearchAt: lastSuccessfulSearchAt)
     }
 }
 

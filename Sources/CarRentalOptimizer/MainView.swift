@@ -42,11 +42,18 @@ struct MainView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openMonitorCenter)) { _ in
             showingMonitorCenter = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .retryLatestSearch)) { _ in
+            Task { await viewModel.retrySearch() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .runDueMonitorChecks)) { _ in
+            Task { await monitorViewModel.runDueChecks() }
+        }
     }
 }
 
 private struct WorkbenchHeader: View {
     @EnvironmentObject var viewModel: SearchViewModel
+    @EnvironmentObject var monitorViewModel: MonitorCenterViewModel
     let onOpenMonitorCenter: () -> Void
 
     var body: some View {
@@ -74,15 +81,21 @@ private struct WorkbenchHeader: View {
             Spacer(minLength: 18)
 
             HeaderMetric(
-                title: "候选方案",
-                value: "\(viewModel.results.count)",
-                icon: "list.bullet.rectangle"
+                title: "上次搜索",
+                value: lastSuccessfulSearch,
+                icon: "clock.badge.checkmark"
             )
 
             HeaderMetric(
                 title: "当前推荐",
                 value: selectedTotal,
                 icon: "yensign.circle"
+            )
+
+            HeaderMetric(
+                title: "监控状态",
+                value: monitorHealthValue,
+                icon: "bell.badge"
             )
 
             Button {
@@ -98,6 +111,12 @@ private struct WorkbenchHeader: View {
                 color: viewModel.isSearching ? WorkbenchStyle.orange : WorkbenchStyle.accent,
                 systemImage: viewModel.isSearching ? "arrow.triangle.2.circlepath" : "bolt.horizontal.circle.fill"
             )
+
+            StatusPill(
+                text: monitorViewModel.backgroundMonitoringEnabled ? "后台巡查" : "手动巡查",
+                color: monitorViewModel.backgroundMonitoringEnabled ? WorkbenchStyle.green : WorkbenchStyle.muted,
+                systemImage: monitorViewModel.backgroundMonitoringEnabled ? "checkmark.circle.fill" : "pause.circle"
+            )
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -108,6 +127,20 @@ private struct WorkbenchHeader: View {
     private var selectedTotal: String {
         guard let selected = viewModel.selected else { return "--" }
         return formatMoney(selected.bestTotal)
+    }
+
+    private var lastSuccessfulSearch: String {
+        guard let lastSuccessfulSearchAt = viewModel.lastSuccessfulSearchAt else { return "--" }
+        return formatCompactDateTime(lastSuccessfulSearchAt)
+    }
+
+    private var monitorHealthValue: String {
+        let summary = monitorViewModel.healthSummary
+        guard summary.totalCount > 0 else { return "0" }
+        if summary.needsAttentionCount > 0 {
+            return "\(summary.needsAttentionCount)/\(summary.totalCount) 需处理"
+        }
+        return "\(summary.activeCount)/\(summary.totalCount) 正常"
     }
 }
 
@@ -125,10 +158,13 @@ private struct HeaderMetric: View {
                 Text(title)
                     .font(.caption2)
                     .foregroundStyle(WorkbenchStyle.muted)
+                    .lineLimit(1)
                 Text(value)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(WorkbenchStyle.ink)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
         }
         .padding(.horizontal, 12)

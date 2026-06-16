@@ -3,6 +3,8 @@ import Foundation
 
 extension Notification.Name {
     static let openMonitorCenter = Notification.Name("OpenMonitorCenter")
+    static let retryLatestSearch = Notification.Name("RetryLatestSearch")
+    static let runDueMonitorChecks = Notification.Name("RunDueMonitorChecks")
 }
 
 enum AppDefaults {
@@ -176,6 +178,67 @@ extension PriceMonitorStatus {
             return "已过期"
         }
     }
+}
+
+extension PriceSnapshotStatus {
+    var label: String {
+        switch self {
+        case .successful:
+            return "成功"
+        case .waitingForFirstCheck:
+            return "待巡查"
+        case .noMatch:
+            return "未匹配"
+        case .loginRequired:
+            return "需登录"
+        case .captchaRequired:
+            return "需验证"
+        case .unavailable:
+            return "不可用"
+        case .noCar:
+            return "无车"
+        case .parseFailed:
+            return "解析失败"
+        case .networkFailed:
+            return "网络失败"
+        }
+    }
+}
+
+extension MonitorCenterFilter {
+    var label: String {
+        switch self {
+        case .all:
+            return "全部"
+        case .active:
+            return "监控中"
+        case .needsAttention:
+            return "需处理"
+        case .paused:
+            return "已暂停"
+        case .expired:
+            return "已过期"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all:
+            return "tray.full"
+        case .active:
+            return "play.circle"
+        case .needsAttention:
+            return "exclamationmark.triangle"
+        case .paused:
+            return "pause.circle"
+        case .expired:
+            return "calendar.badge.exclamationmark"
+        }
+    }
+}
+
+func formatCompactDateTime(_ date: Date) -> String {
+    DateFormatter.localizedString(from: date, dateStyle: .short, timeStyle: .short)
 }
 
 func renderWarnings(_ warnings: [ResultWarning]) -> String {

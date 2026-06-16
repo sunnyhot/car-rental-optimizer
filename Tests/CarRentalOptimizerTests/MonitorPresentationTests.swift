@@ -34,4 +34,19 @@ struct MonitorPresentationTests {
     func monitorCenterNotificationNameIsStable() {
         #expect(Notification.Name.openMonitorCenter.rawValue == "OpenMonitorCenter")
     }
+
+    @Test("Workflow command notification names are stable")
+    func workflowCommandNotificationNamesAreStable() {
+        #expect(Notification.Name.retryLatestSearch.rawValue == "RetryLatestSearch")
+        #expect(Notification.Name.runDueMonitorChecks.rawValue == "RunDueMonitorChecks")
+    }
+
+    @Test("Monitor filter labels are concise")
+    func monitorFilterLabelsAreConcise() {
+        #expect(MonitorCenterFilter.all.label == "全部")
+        #expect(MonitorCenterFilter.active.label == "监控中")
+        #expect(MonitorCenterFilter.needsAttention.label == "需处理")
+        #expect(MonitorCenterFilter.paused.label == "已暂停")
+        #expect(MonitorCenterFilter.expired.label == "已过期")
+    }
 }

@@ -40,6 +40,58 @@ final class PriceMonitorMatchingTests: XCTestCase {
         XCTAssertEqual(selected?.id, "tiger")
     }
 
+    func testSelectionExplanationFollowsMatchingPriority() {
+        let original = recommendation(id: "original", platform: .ehi, storeID: "store-a", storeName: "一嗨通州万达店", vehicleName: "奇瑞 瑞虎8")
+        let samePlatform = recommendation(id: "same-platform", platform: .ehi, storeID: "store-b", storeName: "一嗨北苑店", vehicleName: "奇瑞瑞虎8")
+        let sameVehicle = recommendation(id: "same-vehicle", platform: .carInc, storeID: "store-c", storeName: "神州通州店", vehicleName: "奇瑞 瑞虎8")
+        let queryMatch = recommendation(id: "query", platform: .carInc, storeID: "store-d", storeName: "神州北苑店", vehicleName: "哈弗 H6")
+        let fallback = recommendation(id: "fallback", platform: .ehi, storeID: "store-e", storeName: "一嗨顺义店", vehicleName: "别克 GL8")
+        let signature = ListingSignature(recommendation: original)
+
+        let exactSelection = selectMonitoredRecommendationWithExplanation(
+            from: [sameVehicle, original],
+            signature: signature,
+            targetVehicleQuery: "瑞虎8",
+            targetPlatform: .ehi
+        )
+        let samePlatformSelection = selectMonitoredRecommendationWithExplanation(
+            from: [sameVehicle, samePlatform],
+            signature: signature,
+            targetVehicleQuery: "瑞虎8",
+            targetPlatform: .ehi
+        )
+        let sameVehicleSelection = selectMonitoredRecommendationWithExplanation(
+            from: [sameVehicle],
+            signature: signature,
+            targetVehicleQuery: "瑞虎8",
+            targetPlatform: .ehi
+        )
+        let querySelection = selectMonitoredRecommendationWithExplanation(
+            from: [fallback, queryMatch],
+            signature: nil,
+            targetVehicleQuery: "哈弗H6",
+            targetPlatform: .carInc
+        )
+        let fallbackSelection = selectMonitoredRecommendationWithExplanation(
+            from: [fallback],
+            signature: nil,
+            targetVehicleQuery: "不存在",
+            targetPlatform: .ehi
+        )
+
+        XCTAssertEqual(exactSelection?.recommendation.id, "original")
+        XCTAssertEqual(exactSelection?.strategy, .exactSignature)
+        XCTAssertEqual(exactSelection?.summary, "原门店与车型完全一致")
+        XCTAssertEqual(samePlatformSelection?.strategy, .samePlatformVehicle)
+        XCTAssertEqual(samePlatformSelection?.summary, "同平台同车型，门店已变化")
+        XCTAssertEqual(sameVehicleSelection?.strategy, .sameVehicle)
+        XCTAssertEqual(sameVehicleSelection?.summary, "跨平台同车型匹配")
+        XCTAssertEqual(querySelection?.strategy, .targetPlatformQuery)
+        XCTAssertEqual(querySelection?.summary, "目标平台内按车型关键词匹配")
+        XCTAssertEqual(fallbackSelection?.strategy, .fallbackRanked)
+        XCTAssertEqual(fallbackSelection?.summary, "未命中原车型，使用当前排序最优结果")
+    }
+
     private func recommendation(
         id: String,
         platform: PlatformId,

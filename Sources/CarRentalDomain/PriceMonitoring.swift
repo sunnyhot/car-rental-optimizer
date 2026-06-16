@@ -266,11 +266,138 @@ public struct PriceMonitorEvent: Codable, Equatable, Identifiable {
     }
 }
 
+public enum MonitorCenterFilter: String, Codable, Equatable, CaseIterable {
+    case all
+    case active
+    case needsAttention = "needs-attention"
+    case paused
+    case expired
+}
+
+public struct MonitorHealthSummary: Equatable {
+    public let totalCount: Int
+    public let activeCount: Int
+    public let needsAttentionCount: Int
+    public let recentPriceDropCount: Int
+    public let dueTodayCount: Int
+
+    public static func make(
+        monitors: [PriceMonitor],
+        eventsByMonitorID: [String: [PriceMonitorEvent]],
+        now: Date,
+        calendar: Calendar = Calendar(identifier: .gregorian)
+    ) -> MonitorHealthSummary {
+        let recentCutoff = now.addingTimeInterval(-24 * 60 * 60)
+        let recentPriceDropIDs = Set(eventsByMonitorID.flatMap { monitorID, events in
+            events.contains { $0.kind == .priceDrop && $0.occurredAt >= recentCutoff } ? [monitorID] : []
+        })
+        let dueTodayCount = monitors.filter { monitor in
+            guard monitor.status == .active || monitor.status == .needsAttention,
+                  let nextCheckAt = monitor.nextCheckAt
+            else { return false }
+            return calendar.isDate(nextCheckAt, inSameDayAs: now)
+        }.count
+
+        return MonitorHealthSummary(
+            totalCount: monitors.count,
+            activeCount: monitors.filter { $0.status == .active }.count,
+            needsAttentionCount: monitors.filter { $0.status == .needsAttention }.count,
+            recentPriceDropCount: recentPriceDropIDs.count,
+            dueTodayCount: dueTodayCount
+        )
+    }
+}
+
+public func filterMonitorsForCenter(
+    _ monitors: [PriceMonitor],
+    filter: MonitorCenterFilter
+) -> [PriceMonitor] {
+    switch filter {
+    case .all:
+        return monitors
+    case .active:
+        return monitors.filter { $0.status == .active || $0.status == .checking }
+    case .needsAttention:
+        return monitors.filter { $0.status == .needsAttention }
+    case .paused:
+        return monitors.filter { $0.status == .paused }
+    case .expired:
+        return monitors.filter { $0.status == .expired }
+    }
+}
+
+public func sortMonitorsForCenter(
+    _ monitors: [PriceMonitor],
+    eventsByMonitorID: [String: [PriceMonitorEvent]] = [:],
+    now: Date,
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> [PriceMonitor] {
+    monitors.sorted { lhs, rhs in
+        monitorCenterSortKey(lhs, events: eventsByMonitorID[lhs.id, default: []], now: now, calendar: calendar)
+            < monitorCenterSortKey(rhs, events: eventsByMonitorID[rhs.id, default: []], now: now, calendar: calendar)
+    }
+}
+
+public func makeMonitorLifecycleEvents(
+    monitor: PriceMonitor,
+    previousSnapshots: [PriceSnapshot],
+    currentSnapshot: PriceSnapshot,
+    checkedAt: Date,
+    repeatedFailureThreshold: Int = 3,
+    id: () -> String
+) -> [PriceMonitorEvent] {
+    let orderedPrevious = previousSnapshots.sorted { $0.checkedAt < $1.checkedAt }
+
+    if currentSnapshot.status == .successful {
+        guard let previous = orderedPrevious.last,
+              !previous.status.isSuccessful
+        else { return [] }
+
+        return [
+            PriceMonitorEvent(
+                id: id(),
+                monitorID: monitor.id,
+                occurredAt: checkedAt,
+                kind: .recovered,
+                previousSnapshotID: previous.id,
+                currentSnapshotID: currentSnapshot.id,
+                message: "\(monitor.name) 已从 \(previous.status.label) 恢复，重新记录到官方报价。"
+            )
+        ]
+    }
+
+    let sameFailureCount = orderedPrevious
+        .reversed()
+        .prefix { $0.status == currentSnapshot.status }
+        .count
+    guard sameFailureCount == repeatedFailureThreshold - 1 else { return [] }
+
+    return [
+        PriceMonitorEvent(
+            id: id(),
+            monitorID: monitor.id,
+            occurredAt: checkedAt,
+            kind: .repeatedFailure,
+            previousSnapshotID: orderedPrevious.last?.id,
+            currentSnapshotID: currentSnapshot.id,
+            message: "\(monitor.name) 连续 \(repeatedFailureThreshold) 次出现\(currentSnapshot.status.label)，需要处理后再继续巡查。"
+        )
+    ]
+}
+
 public struct PriceTrendSummary: Equatable {
     public let validPoints: [PriceSnapshot]
     public let latestPlatformRentalPrice: Double?
     public let previousPlatformRentalPrice: Double?
     public let platformRentalDelta: Double?
+    public let firstPlatformRentalPrice: Double?
+    public let lowestPlatformRentalPrice: Double?
+    public let highestPlatformRentalPrice: Double?
+    public let platformRentalDeltaFromFirst: Double?
+    public let latestRecommendationTotalCost: Double?
+    public let previousRecommendationTotalCost: Double?
+    public let recommendationTotalDelta: Double?
+    public let latestSuccessfulCheckAt: Date?
 
     public init(snapshots: [PriceSnapshot]) {
         self.validPoints = snapshots
@@ -278,10 +405,128 @@ public struct PriceTrendSummary: Equatable {
             .sorted { $0.checkedAt < $1.checkedAt }
         self.latestPlatformRentalPrice = validPoints.last?.platformRentalPrice
         self.previousPlatformRentalPrice = validPoints.dropLast().last?.platformRentalPrice
+        self.firstPlatformRentalPrice = validPoints.first?.platformRentalPrice
+        self.lowestPlatformRentalPrice = validPoints.compactMap(\.platformRentalPrice).min()
+        self.highestPlatformRentalPrice = validPoints.compactMap(\.platformRentalPrice).max()
+        self.latestRecommendationTotalCost = validPoints.last?.recommendationTotalCost
+        self.previousRecommendationTotalCost = validPoints.dropLast().last?.recommendationTotalCost
+        self.latestSuccessfulCheckAt = validPoints.last?.checkedAt
         if let latestPlatformRentalPrice, let previousPlatformRentalPrice {
             self.platformRentalDelta = latestPlatformRentalPrice - previousPlatformRentalPrice
         } else {
             self.platformRentalDelta = nil
+        }
+        if let latestPlatformRentalPrice, let firstPlatformRentalPrice {
+            self.platformRentalDeltaFromFirst = latestPlatformRentalPrice - firstPlatformRentalPrice
+        } else {
+            self.platformRentalDeltaFromFirst = nil
+        }
+        if let latestRecommendationTotalCost, let previousRecommendationTotalCost {
+            self.recommendationTotalDelta = latestRecommendationTotalCost - previousRecommendationTotalCost
+        } else {
+            self.recommendationTotalDelta = nil
+        }
+    }
+}
+
+private func monitorCenterSortKey(
+    _ monitor: PriceMonitor,
+    events: [PriceMonitorEvent],
+    now: Date,
+    calendar: Calendar
+) -> MonitorCenterSortKey {
+    MonitorCenterSortKey(
+        statusPriority: statusPriority(monitor.status),
+        recentDropPriority: hasRecentPriceDrop(events, now: now) ? 0 : 1,
+        pickupUrgencyPriority: pickupUrgencyPriority(monitor, now: now, calendar: calendar),
+        duePriority: (monitor.nextCheckAt ?? .distantFuture) <= now ? 0 : 1,
+        nextCheckAt: monitor.nextCheckAt ?? .distantFuture,
+        updatedAt: monitor.updatedAt,
+        id: monitor.id
+    )
+}
+
+private struct MonitorCenterSortKey: Comparable {
+    let statusPriority: Int
+    let recentDropPriority: Int
+    let pickupUrgencyPriority: Int
+    let duePriority: Int
+    let nextCheckAt: Date
+    let updatedAt: Date
+    let id: String
+
+    static func < (lhs: MonitorCenterSortKey, rhs: MonitorCenterSortKey) -> Bool {
+        if lhs.statusPriority != rhs.statusPriority { return lhs.statusPriority < rhs.statusPriority }
+        if lhs.recentDropPriority != rhs.recentDropPriority { return lhs.recentDropPriority < rhs.recentDropPriority }
+        if lhs.pickupUrgencyPriority != rhs.pickupUrgencyPriority { return lhs.pickupUrgencyPriority < rhs.pickupUrgencyPriority }
+        if lhs.duePriority != rhs.duePriority { return lhs.duePriority < rhs.duePriority }
+        if lhs.nextCheckAt != rhs.nextCheckAt { return lhs.nextCheckAt < rhs.nextCheckAt }
+        if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+        return lhs.id < rhs.id
+    }
+}
+
+private func statusPriority(_ status: PriceMonitorStatus) -> Int {
+    switch status {
+    case .needsAttention:
+        return 0
+    case .checking:
+        return 1
+    case .active:
+        return 2
+    case .paused:
+        return 3
+    case .expired:
+        return 4
+    }
+}
+
+private func hasRecentPriceDrop(_ events: [PriceMonitorEvent], now: Date) -> Bool {
+    let cutoff = now.addingTimeInterval(-24 * 60 * 60)
+    return events.contains { $0.kind == .priceDrop && $0.occurredAt >= cutoff }
+}
+
+private func pickupUrgencyPriority(
+    _ monitor: PriceMonitor,
+    now: Date,
+    calendar: Calendar
+) -> Int {
+    guard let pickupAt = parseMonitorRequestDate(monitor.request.pickupAt, calendar: calendar) else {
+        return 2
+    }
+    if pickupAt <= now { return 0 }
+    return pickupAt.timeIntervalSince(now) <= 48 * 60 * 60 ? 0 : 1
+}
+
+private func parseMonitorRequestDate(_ value: String, calendar: Calendar) -> Date? {
+    let formatter = DateFormatter()
+    formatter.calendar = calendar
+    formatter.timeZone = calendar.timeZone
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter.date(from: value)
+}
+
+private extension PriceSnapshotStatus {
+    var label: String {
+        switch self {
+        case .successful:
+            return "成功报价"
+        case .waitingForFirstCheck:
+            return "等待首次巡查"
+        case .noMatch:
+            return "未匹配车型"
+        case .loginRequired:
+            return "登录失效"
+        case .captchaRequired:
+            return "验证阻断"
+        case .unavailable:
+            return "平台不可用"
+        case .noCar:
+            return "暂无车辆"
+        case .parseFailed:
+            return "解析失败"
+        case .networkFailed:
+            return "网络失败"
         }
     }
 }

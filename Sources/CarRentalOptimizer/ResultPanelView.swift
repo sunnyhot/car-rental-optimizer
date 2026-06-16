@@ -1,4 +1,5 @@
 import CarRentalDomain
+import Foundation
 import SwiftUI
 
 struct ResultPanelView: View {
@@ -24,19 +25,27 @@ struct ResultPanelView: View {
                     }
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 10) {
-                            ForEach(Array(viewModel.displayedResults.enumerated()), id: \.element.id) { index, result in
-                                ResultRowView(
-                                    rank: index + 1,
-                                    recommendation: result,
-                                    isSelected: viewModel.selectedId == result.id
-                                ) {
-                                    viewModel.selectResult(result.id)
-                                    pendingMonitorRecommendation = result
-                                }
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    viewModel.selectResult(result.id)
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let notice = viewModel.retainedResultsNotice {
+                                RetainedResultsNoticeView(notice: notice)
+                            }
+
+                            SearchDiagnosticSummaryView(summary: viewModel.searchDiagnosticSummary)
+
+                            LazyVStack(spacing: 10) {
+                                ForEach(Array(viewModel.displayedResults.enumerated()), id: \.element.id) { index, result in
+                                    ResultRowView(
+                                        rank: index + 1,
+                                        recommendation: result,
+                                        isSelected: viewModel.selectedId == result.id
+                                    ) {
+                                        viewModel.selectResult(result.id)
+                                        pendingMonitorRecommendation = result
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        viewModel.selectResult(result.id)
+                                    }
                                 }
                             }
                         }
@@ -90,6 +99,9 @@ struct ResultPanelView: View {
     private var panelSubtitle: String {
         if viewModel.results.isEmpty {
             return "等待真实报价"
+        }
+        if viewModel.isShowingStaleResults {
+            return "\(viewModel.results.count) 个上次成功候选，等待本次查询恢复"
         }
         return "\(viewModel.results.count) 个真实候选，同车型取优后按总成本升序"
     }
@@ -152,6 +164,9 @@ private struct EmptyResultsView: View {
             }
             .frame(maxWidth: 460)
 
+            RecoverySuggestionList(statuses: statuses)
+                .frame(maxWidth: 460)
+
             Button {
                 onRetry()
             } label: {
@@ -182,6 +197,49 @@ private struct EmptyResultsView: View {
     }
 }
 
+private struct RetainedResultsNoticeView: View {
+    let notice: RetainedResultsNotice
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.orange.opacity(0.08), stroke: WorkbenchStyle.orange.opacity(0.22), padding: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "clock.badge.exclamationmark")
+                    .foregroundStyle(WorkbenchStyle.orange)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(notice.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                    Text("\(notice.message) 上次成功：\(DateFormatter.localizedString(from: notice.lastSuccessfulSearchAt, dateStyle: .short, timeStyle: .short))")
+                        .font(.caption2)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
+private struct SearchDiagnosticSummaryView: View {
+    let summary: SearchDiagnosticSummary
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.surface, padding: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    InlineMetric(title: "已查平台", value: "\(summary.queriedPlatforms.count)")
+                    InlineMetric(title: "成功平台", value: "\(summary.successfulPlatforms.count)")
+                    InlineMetric(title: "原始报价", value: "\(summary.listingCount)")
+                    InlineMetric(title: "可见结果", value: "\(summary.visibleResultCount)")
+                }
+                Text(summary.routeEstimateStatus)
+                    .font(.caption2)
+                    .foregroundStyle(WorkbenchStyle.muted)
+            }
+        }
+    }
+}
+
 private struct PlatformSummaryRow: View {
     let status: PlatformEvidenceStatus
 
@@ -205,6 +263,59 @@ private struct PlatformSummaryRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+}
+
+private struct RecoverySuggestionList: View {
+    let statuses: [PlatformEvidenceStatus]
+
+    private var actions: [SearchRecoveryAction] {
+        var seen = Set<String>()
+        return statuses.flatMap(SearchRecoveryAction.actions).filter { seen.insert($0.id).inserted }
+    }
+
+    var body: some View {
+        if !actions.isEmpty {
+            SurfaceBox(fill: WorkbenchStyle.surface, padding: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    MonitorSectionLikeTitle(icon: "wrench.and.screwdriver.fill", title: "建议操作")
+                    ForEach(actions) { action in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: action.systemImage)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(WorkbenchStyle.accent)
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(action.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(WorkbenchStyle.ink)
+                                Text(action.message)
+                                    .font(.caption2)
+                                    .foregroundStyle(WorkbenchStyle.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct MonitorSectionLikeTitle: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(WorkbenchStyle.accent)
+                .frame(width: 18)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WorkbenchStyle.ink)
+            Spacer()
+        }
     }
 }
 
@@ -294,11 +405,7 @@ private struct ResultRowView: View {
                     .foregroundStyle(WorkbenchStyle.muted)
                     .lineLimit(1)
 
-                if recommendation.warnings.contains(.partialPrice) {
-                    Label("部分价格需打开平台复核", systemImage: "exclamationmark.circle.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.orange)
-                }
+                QuoteCredibilityBadge(credibility: QuoteCredibility.make(for: recommendation))
             }
             .padding(14)
         }
@@ -363,5 +470,27 @@ private struct InlineMetric: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.black.opacity(0.035))
         )
+    }
+}
+
+private struct QuoteCredibilityBadge: View {
+    let credibility: QuoteCredibility
+
+    var body: some View {
+        Label(credibility.title, systemImage: credibility.systemImage)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .help(credibility.message)
+    }
+
+    private var color: Color {
+        switch credibility.level {
+        case .complete:
+            return WorkbenchStyle.green
+        case .reviewRecommended:
+            return WorkbenchStyle.orange
+        case .blocked:
+            return WorkbenchStyle.red
+        }
     }
 }
