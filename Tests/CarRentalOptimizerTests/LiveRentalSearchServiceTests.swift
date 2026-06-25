@@ -58,6 +58,54 @@ struct LiveRentalSearchServiceTests {
         #expect(script.contains("code - 57345"))
     }
 
+    @Test("eHi stock quote tries personal anonymous payload before login fallback")
+    func ehiStockQuoteTriesPersonalAnonymousPayloadBeforeLoginFallback() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("const stockPayloads = ["))
+        #expect(script.contains("label: '个人匿名'"))
+        #expect(script.contains("label: '默认上下文'"))
+        #expect(script.contains("isEnterprise: false"))
+        #expect(script.contains("isEnterprise: true"))
+        #expect(script.contains("loginRequired: loginRequiredFromStock401(label)"))
+        #expect(!script.contains("quote401Labels.length === attemptedQuoteCount"))
+    }
+
+    @Test("eHi stock 401 stops probing before the official page redirects to login")
+    func ehiStock401StopsProbingBeforeOfficialPageRedirectsToLogin() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("const loginRequiredFromStock401 = (label) =>"))
+        #expect(script.contains("一嗨库存报价 /Stock/Step2 返回 401"))
+        #expect(script.contains("请先登录一嗨后重试"))
+        #expect(script.contains("if (code === 401) {"))
+        #expect(script.contains("loginRequired: loginRequiredFromStock401(label)"))
+        #expect(script.contains("if (message.includes('401')) {"))
+        #expect(!script.contains("quote401Labels.push(label)"))
+    }
+
+    @Test("Platform timeout returns a typed failure instead of waiting forever")
+    func platformTimeoutReturnsTypedFailureInsteadOfWaitingForever() async {
+        let result = await platformResultWithTimeout(
+            platform: .ehi,
+            timeoutSeconds: 0.01
+        ) {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            return PlatformEvidenceResult(
+                platform: .ehi,
+                status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "不应采用取消后的结果。", sourceUrl: "https://booking.1hai.cn/"),
+                listings: []
+            )
+        }
+
+        #expect(result.platform == .ehi)
+        #expect(result.status.kind == .parseFailed)
+        #expect(result.status.message.contains("超时"))
+        #expect(result.listings.isEmpty)
+    }
+
     @Test("eHi obfuscated price digits convert to usable numeric prices")
     func ehiObfuscatedPriceDigitsConvertToUsableNumericPrices() throws {
         let context = try #require(JSContext())
@@ -92,6 +140,70 @@ struct LiveRentalSearchServiceTests {
         #expect(!script.contains(": storeCandidates.slice(0, nearestStoreProbeLimit)"))
     }
 
+    @Test("eHi specific vehicle query limits store probes to avoid bridge timeout")
+    func ehiSpecificVehicleQueryLimitsStoreProbesToAvoidBridgeTimeout() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("const ehiCandidateCities ="))
+        #expect(script.contains("const selectedStoreForCity = (cityPlan, cityStores) =>"))
+        #expect(script.contains("isRailwayStationStore"))
+        #expect(script.contains("cityPlan.isCurrentCity ? sortedStores[0]"))
+        #expect(script.contains("每个城市最多探测 1 个候选门店"))
+        #expect(!script.contains("vehicleStoreProbeLimit = 12"))
+        #expect(!script.contains("storesInsideRadius.slice(0, vehicleStoreProbeLimit)"))
+    }
+
+    @Test("eHi vehicle query probes cities and stock quotes with bounded concurrency")
+    func ehiVehicleQueryProbesCitiesAndStockQuotesWithBoundedConcurrency() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("const ehiProbeConcurrency = 3"))
+        #expect(script.contains("const mapWithConcurrency = async (items, limit, worker) =>"))
+        #expect(script.contains("const cityFetchResults = await mapWithConcurrency(storeCityPlans, ehiProbeConcurrency, fetchStoresForCity)"))
+        #expect(script.contains("const quoteStore = async (store) =>"))
+        #expect(script.contains("const quoteResults = hasVehicleQuery"))
+        #expect(script.contains("? await mapWithConcurrency(candidates, ehiProbeConcurrency, quoteStore)"))
+        #expect(!script.contains("for (const cityPlan of storeCityPlans) {"))
+    }
+
+    @Test("eHi bridge API calls have an in-page timeout")
+    func ehiBridgeAPICallsHaveInPageTimeout() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("apiTimeoutMs = 6000"))
+        #expect(script.contains("withAPITimeout"))
+        #expect(script.contains("withAPITimeout(http.getEncrypt('/Address/City/List'"))
+        #expect(script.contains("withAPITimeout(http.postEncrypt('/Verify/Step1'"))
+        #expect(script.contains("withAPITimeout(http.postEncrypt('/Stock/Step2'"))
+    }
+
+    @Test("eHi bridge guards empty verify and stock responses")
+    func ehiBridgeGuardsEmptyVerifyAndStockResponses() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("const hasResponseBody = (value) =>"))
+        #expect(script.contains("const verify = responseBody(verifyResp)"))
+        #expect(script.contains("校验接口没有返回内容"))
+        #expect(script.contains("const code = stockResp?.code"))
+        #expect(script.contains("报价接口没有返回内容"))
+        #expect(!script.contains("verifyResp.data || verifyResp"))
+        #expect(!script.contains("stockResp.code ?? stockResp.status"))
+    }
+
+    @Test("eHi store-level empty responses are skipped instead of failing the whole platform")
+    func ehiStoreLevelEmptyResponsesAreSkippedInsteadOfFailingTheWholePlatform() {
+        let script = makeEhiSearchScript(json: "{}")
+
+        #expect(script.contains("const storeSkips = []"))
+        #expect(script.contains("storeSkips.push(`${store.name} ${label}: 校验接口没有返回内容`)"))
+        #expect(script.contains("storeSkips.push(`${store.name} ${label}: 报价接口没有返回内容`)"))
+        #expect(script.contains("storeSkips.push(`${store.name} ${label}: ${message}`)"))
+        #expect(script.contains("候选门店暂不可报价"))
+        #expect(!script.contains("queryErrors.push(`${store.name} ${label}: 校验接口没有返回内容`)"))
+        #expect(!script.contains("queryErrors.push(`${store.name} ${label}: 报价接口没有返回内容`)"))
+        #expect(!script.contains("queryErrors.push(`${store.name} ${label}: ${message}`)"))
+    }
+
     @Test("eHi city matching recognizes English Beijing address from Apple location")
     func ehiCityMatchingRecognizesEnglishBeijingAddressFromAppleLocation() {
         let candidates = originCityCandidates(
@@ -107,6 +219,120 @@ struct LiveRentalSearchServiceTests {
         #expect(candidates.contains("通州"))
         #expect(script.contains("originCityCandidates"))
         #expect(script.contains("aliasMatchesCity"))
+    }
+
+    @Test("CAR Inc gateway prefers mobile host and keeps desktop fallback")
+    func carIncGatewayPrefersMobileHostAndKeepsDesktopFallback() throws {
+        let endpoints = zucheGatewayEndpoints(for: "/action/carrctapi/order/cityList/v1")
+
+        #expect(endpoints.map { $0.url.host() } == ["m.zuche.com", "www.zuche.com"])
+        #expect(endpoints.map(\.referer) == ["https://m.zuche.com/", "https://www.zuche.com/"])
+        #expect(endpoints.allSatisfy { $0.url.absoluteString.contains("/api/gw.do?uri=/action/carrctapi/order/cityList/v1") })
+    }
+
+    @Test("CAR Inc gateway retries transport-level TLS and timeout errors on the alternate host")
+    func carIncGatewayRetriesTransportLevelTLSAndTimeoutErrors() {
+        #expect(isRetryableZucheTransportError(URLError(.secureConnectionFailed)))
+        #expect(isRetryableZucheTransportError(URLError(.timedOut)))
+        #expect(isRetryableZucheTransportError(URLError(.networkConnectionLost)))
+        #expect(!isRetryableZucheTransportError(URLError(.userAuthenticationRequired)))
+    }
+
+    @Test("CAR Inc vehicle search plans one current city and one station city inside radius")
+    func carIncVehicleSearchPlansOneCurrentCityAndOneStationCityInsideRadius() {
+        let request = makeSearchRequest(
+            originLabel: "北京市 通州区 京东总部",
+            origin: GeoPoint(lat: 39.90, lng: 116.65),
+            radiusKm: 160
+        )
+        let cities = [
+            ZucheSearchCity(id: "beijing", name: "北京", location: GeoPoint(lat: 39.90, lng: 116.40)),
+            ZucheSearchCity(id: "tianjin", name: "天津", location: GeoPoint(lat: 39.08, lng: 117.20)),
+            ZucheSearchCity(id: "jinan", name: "济南", location: GeoPoint(lat: 36.65, lng: 117.12)),
+        ]
+
+        let candidates = zucheCandidateCities(from: cities, request: request)
+
+        #expect(candidates.map(\.city.id) == ["beijing", "tianjin"])
+        #expect(candidates.first?.isCurrentCity == true)
+        #expect(candidates.dropFirst().allSatisfy { !$0.isCurrentCity })
+    }
+
+    @Test("CAR Inc store picker uses nearest current store and station-only stores outside current city")
+    func carIncStorePickerUsesNearestCurrentStoreAndStationOnlyStoresOutsideCurrentCity() throws {
+        let current = zucheSelectedStore(
+            from: [
+                makeStore(id: "far-station", name: "北京南站店", city: "北京", distanceKm: 18),
+                makeStore(id: "nearest", name: "北京通州万达店", city: "北京", distanceKm: 2),
+            ],
+            cityName: "北京",
+            isCurrentCity: true
+        )
+
+        let other = zucheSelectedStore(
+            from: [
+                makeStore(id: "downtown", name: "天津和平路店", city: "天津", distanceKm: 115),
+                makeStore(id: "station", name: "天津南站高铁店", city: "天津", distanceKm: 123),
+                makeStore(id: "airport", name: "天津滨海机场店", city: "天津", distanceKm: 130),
+            ],
+            cityName: "天津",
+            isCurrentCity: false
+        )
+
+        #expect(try #require(current).id == "nearest")
+        #expect(try #require(other).id == "station")
+        #expect(zucheSelectedStore(
+            from: [makeStore(id: "downtown", name: "廊坊万达店", city: "廊坊", distanceKm: 70)],
+            cityName: "廊坊",
+            isCurrentCity: false
+        ) == nil)
+    }
+
+    @Test("CAR Inc confirmation fee parser uses official base service fee and ignores preparation fee")
+    func carIncConfirmationFeeParserUsesOfficialBaseServiceFeeAndIgnoresPreparationFee() throws {
+        let json = """
+        {
+          "feeInfos": {
+            "baseFeeInfo": [
+              {"itemName": "车辆租赁及服务费", "itemPrice": "188"},
+              {"itemName": "基础服务费", "itemDesc": "¥50*2天=¥100", "itemPrice": "100"},
+              {"itemName": "车辆整备费", "itemPrice": "20"}
+            ]
+          },
+          "bottomInfo": {"totalPrice": "308"}
+        }
+        """
+        let content = try JSONDecoder().decode(ZucheConfirmOrderContent.self, from: Data(json.utf8))
+
+        #expect(zucheActualBaseServiceFee(from: content) == 100)
+    }
+
+    @Test("CAR Inc confirmation fee parser accepts higher per-car service fee from official response")
+    func carIncConfirmationFeeParserAcceptsHigherPerCarServiceFeeFromOfficialResponse() throws {
+        let json = """
+        {
+          "feeInfos": {
+            "baseFeeInfo": [
+              {"itemName": "基础服务费", "itemDesc": "¥80*2天=¥160"}
+            ]
+          }
+        }
+        """
+        let content = try JSONDecoder().decode(ZucheConfirmOrderContent.self, from: Data(json.utf8))
+
+        #expect(zucheActualBaseServiceFee(from: content) == 160)
+    }
+
+    @Test("CAR Inc listings use logged-in confirmation data instead of hardcoded service fees")
+    func carIncListingsUseLoggedInConfirmationDataInsteadOfHardcodedServiceFees() throws {
+        let source = try liveRentalSearchServiceSource()
+
+        #expect(source.contains("/action/carrctapi/order/confirmOrderInfo/v4"))
+        #expect(source.contains("WKWebsiteDataStore.default().httpCookieStore"))
+        #expect(source.contains("await ZucheCookieVault.restore(into: store)"))
+        #expect(source.contains("zucheActualBaseServiceFee(from: content)"))
+        #expect(!source.contains("estimatedZucheMandatoryFees"))
+        #expect(!source.contains("zucheBaseServiceFeePerDay"))
     }
 
     @Test("Blank vehicle query keeps all vehicles from nearest priced store only")
@@ -170,4 +396,50 @@ private func makeListing(
         sourceUrl: "https://m.zuche.com/",
         dataCompleteness: 0.88
     )
+}
+
+private func makeSearchRequest(
+    originLabel: String,
+    origin: GeoPoint,
+    radiusKm: Double
+) -> SearchRequest {
+    SearchRequest(
+        origin: origin,
+        originLabel: originLabel,
+        pickupAt: "2026-06-25",
+        returnAt: "2026-06-26",
+        returnMode: .sameStore,
+        radiusKm: radiusKm,
+        vehicleQuery: "瑞虎8",
+        platforms: [.carInc]
+    )
+}
+
+private func makeStore(
+    id: String,
+    name: String,
+    city: String,
+    distanceKm: Double
+) -> Store {
+    Store(
+        id: id,
+        platform: .carInc,
+        name: name,
+        city: city,
+        address: name,
+        location: GeoPoint(lat: 39.9 + distanceKm / 100, lng: 116.65),
+        distanceKm: distanceKm,
+        hours: "08:00-21:00"
+    )
+}
+
+private func liveRentalSearchServiceSource() throws -> String {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let sourceURL = repositoryRoot
+        .appendingPathComponent("Sources/CarRentalOptimizer/LiveRentalSearchService.swift")
+    return try String(contentsOf: sourceURL, encoding: .utf8)
 }

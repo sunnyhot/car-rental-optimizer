@@ -1,16 +1,24 @@
 import CarRentalDomain
+import AppKit
 import SwiftUI
 
 enum WorkbenchStyle {
-    static let accent = Color(red: 0.07, green: 0.32, blue: 0.78)
-    static let accentSoft = Color(red: 0.88, green: 0.93, blue: 1.0)
-    static let teal = Color(red: 0.00, green: 0.48, blue: 0.44)
-    static let green = Color(red: 0.05, green: 0.54, blue: 0.25)
-    static let orange = Color(red: 0.86, green: 0.43, blue: 0.05)
-    static let red = Color(red: 0.80, green: 0.16, blue: 0.16)
-    static let ink = Color(red: 0.10, green: 0.12, blue: 0.15)
-    static let muted = Color(red: 0.39, green: 0.43, blue: 0.49)
-    static let line = Color.black.opacity(0.08)
+    static let accent = Color(nsColor: .systemBlue)
+    static let accentSoft = adaptiveColor(
+        light: NSColor(calibratedRed: 0.88, green: 0.93, blue: 1.0, alpha: 1),
+        dark: NSColor(calibratedRed: 0.07, green: 0.13, blue: 0.25, alpha: 1)
+    )
+    static let teal = Color(nsColor: .systemTeal)
+    static let green = Color(nsColor: .systemGreen)
+    static let orange = Color(nsColor: .systemOrange)
+    static let red = Color(nsColor: .systemRed)
+    static let ink = Color(nsColor: .labelColor)
+    static let muted = Color(nsColor: .secondaryLabelColor)
+    static let line = Color(nsColor: .separatorColor)
+    static let quietFill = adaptiveColor(
+        light: NSColor.black.withAlphaComponent(0.035),
+        dark: NSColor.white.withAlphaComponent(0.075)
+    )
     static let background = Color(nsColor: .windowBackgroundColor)
     static let panel = Color(nsColor: .controlBackgroundColor)
     static let surface = Color(nsColor: .textBackgroundColor)
@@ -22,7 +30,7 @@ enum WorkbenchStyle {
         case .unavailable:
             return orange
         case .loginRequired, .captchaRequired:
-            return Color(red: 0.72, green: 0.50, blue: 0.03)
+            return orange
         case .parseFailed:
             return red
         case .waitingForEvidence:
@@ -45,6 +53,13 @@ enum WorkbenchStyle {
         case .waitingForEvidence:
             return "clock.fill"
         }
+    }
+
+    private static func adaptiveColor(light: NSColor, dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark ? dark : light
+        })
     }
 }
 
@@ -162,7 +177,7 @@ struct MetricPill: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.black.opacity(0.035))
+                .fill(WorkbenchStyle.quietFill)
         )
     }
 }
@@ -180,7 +195,7 @@ struct EmptyStateBlock: View {
                 .frame(width: 58, height: 58)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.black.opacity(0.04))
+                        .fill(WorkbenchStyle.quietFill)
                 )
             Text(title)
                 .font(.headline.weight(.semibold))

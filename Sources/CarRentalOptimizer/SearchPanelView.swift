@@ -6,6 +6,7 @@ struct SearchPanelView: View {
     @State private var pickupDate = AppDateRules.today
     @State private var returnDate = AppDateRules.addingDays(1, to: AppDateRules.today)
     @State private var showingEhiLogin = false
+    @State private var showingCarIncLogin = false
     @State private var originInputTask: Task<Void, Never>?
     @State private var originInputDismissRequest = 0
 
@@ -57,6 +58,11 @@ struct SearchPanelView: View {
             }
             .sheet(isPresented: $showingEhiLogin) {
                 EhiLoginSheet {
+                    Task { await viewModel.runSearch() }
+                }
+            }
+            .sheet(isPresented: $showingCarIncLogin) {
+                PlatformLoginSheet(platform: .carInc) {
                     Task { await viewModel.runSearch() }
                 }
             }
@@ -140,7 +146,7 @@ struct SearchPanelView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(viewModel.request.platforms.enumerated()), id: \.element) { index, platform in
                         PlatformStatusRow(platform: platform) {
-                            showingEhiLogin = true
+                            showLogin(for: platform)
                         }
 
                         if index < viewModel.request.platforms.count - 1 {
@@ -183,6 +189,15 @@ struct SearchPanelView: View {
         originInputTask?.cancel()
         originInputDismissRequest += 1
         viewModel.dismissOriginSuggestions()
+    }
+
+    private func showLogin(for platform: PlatformId) {
+        switch platform {
+        case .ehi:
+            showingEhiLogin = true
+        case .carInc:
+            showingCarIncLogin = true
+        }
     }
 }
 
@@ -882,7 +897,7 @@ private struct DateRangeDurationBadge: View {
         .frame(width: 42, height: 44)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.black.opacity(0.035))
+                .fill(WorkbenchStyle.quietFill)
         )
         .accessibilityLabel("租期 \(days) 天")
     }
@@ -936,7 +951,7 @@ private struct PlatformToggleButton: View {
             .foregroundStyle(isSelected ? WorkbenchStyle.accent : WorkbenchStyle.muted)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? WorkbenchStyle.accentSoft : Color.black.opacity(0.035))
+                    .fill(isSelected ? WorkbenchStyle.accentSoft : WorkbenchStyle.quietFill)
                     .overlay(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .stroke(isSelected ? WorkbenchStyle.accent.opacity(0.35) : WorkbenchStyle.line)
@@ -980,11 +995,11 @@ private struct PlatformStatusRow: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if platform == .ehi && status.kind == .loginRequired {
+                if status.kind == .loginRequired {
                     Button {
                         loginAction()
                     } label: {
-                        Label("登录一嗨", systemImage: "person.badge.key.fill")
+                        Label(loginButtonTitle(for: platform), systemImage: "person.badge.key.fill")
                     }
                     .font(.caption.weight(.semibold))
                     .buttonStyle(.bordered)
@@ -1009,6 +1024,15 @@ private struct PlatformStatusRow: View {
             return "失败"
         case .waitingForEvidence:
             return "等待"
+        }
+    }
+
+    private func loginButtonTitle(for platform: PlatformId) -> String {
+        switch platform {
+        case .ehi:
+            return "登录一嗨"
+        case .carInc:
+            return "登录神州补费用"
         }
     }
 }

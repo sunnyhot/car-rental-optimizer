@@ -67,11 +67,156 @@ enum RecommendationSortMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum RecommendationPlatformFilter: String, CaseIterable, Identifiable {
+    case all
+    case ehi
+    case carInc
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all:
+            return "全部"
+        case .ehi:
+            return "一嗨"
+        case .carInc:
+            return "神州"
+        }
+    }
+
+    var platform: PlatformId? {
+        switch self {
+        case .all:
+            return nil
+        case .ehi:
+            return .ehi
+        case .carInc:
+            return .carInc
+        }
+    }
+}
+
+enum RecommendationVehicleClassFilter: String, CaseIterable, Identifiable {
+    case all
+    case sedan
+    case suv
+    case mpv
+    case newEnergy
+    case unspecified
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all:
+            return "全部"
+        case .sedan:
+            return "轿车"
+        case .suv:
+            return "SUV"
+        case .mpv:
+            return "MPV"
+        case .newEnergy:
+            return "新能源"
+        case .unspecified:
+            return "未指定"
+        }
+    }
+}
+
+enum RecommendationBudgetFilter: String, CaseIterable, Identifiable {
+    case all
+    case upTo1500
+    case upTo2000
+    case upTo3000
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all:
+            return "不限"
+        case .upTo1500:
+            return "≤1500"
+        case .upTo2000:
+            return "≤2000"
+        case .upTo3000:
+            return "≤3000"
+        }
+    }
+
+    var maxTotalCost: Double? {
+        switch self {
+        case .all:
+            return nil
+        case .upTo1500:
+            return 1_500
+        case .upTo2000:
+            return 2_000
+        case .upTo3000:
+            return 3_000
+        }
+    }
+}
+
+enum RecommendationDistanceFilter: String, CaseIterable, Identifiable {
+    case all
+    case within1
+    case within3
+    case within10
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all:
+            return "不限"
+        case .within1:
+            return "≤1km"
+        case .within3:
+            return "≤3km"
+        case .within10:
+            return "≤10km"
+        }
+    }
+
+    var maxDistanceKm: Double? {
+        switch self {
+        case .all:
+            return nil
+        case .within1:
+            return 1
+        case .within3:
+            return 3
+        case .within10:
+            return 10
+        }
+    }
+}
+
+struct RecommendationFilterState: Equatable {
+    var platform: RecommendationPlatformFilter = .all
+    var vehicleClass: RecommendationVehicleClassFilter = .all
+    var maxTotalCost: RecommendationBudgetFilter = .all
+    var maxDistance: RecommendationDistanceFilter = .all
+    var hideIncompleteFees = false
+    var deduplicateByStore = false
+    var deduplicateByVehicle = false
+
+    static let empty = RecommendationFilterState()
+
+    var isActive: Bool {
+        self != .empty
+    }
+}
+
 @MainActor
 final class SearchViewModel: ObservableObject {
     @Published var request = AppDefaults.searchRequest
     @Published var results: [Recommendation] = []
     @Published var recommendationSortMode: RecommendationSortMode = .bestTotal
+    @Published var recommendationFilter = RecommendationFilterState()
     @Published var platformStatuses: [PlatformEvidenceStatus] = AppDefaults.searchRequest.platforms.map {
         PlatformEvidenceStatus(
             platform: $0,
@@ -100,12 +245,15 @@ final class SearchViewModel: ObservableObject {
     private let mapService: MapService
     private let currentLocationProvider: CurrentLocationProviding
     private let addressSuggestionProvider: AddressSuggestionProviding
+    private let initialLocationRetryDelayNanoseconds: UInt64
     private let now: () -> Date
     private var hasRequestedInitialLocation = false
     private var originSuggestionRequestID = 0
     private var resolvedOriginLabel: String?
     private var latestSuccessfulResults: [Recommendation] = []
     private var latestSuccessfulSelectedId = ""
+    private var latestEvidenceRequest: SearchRequest?
+    private var latestEvidenceResultsByPlatform: [PlatformId: PlatformEvidenceResult] = [:]
 
     init() {
         self.searchProvider = LiveRentalSearchService()
@@ -113,6 +261,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = AppleMapService()
         self.currentLocationProvider = AppleCurrentLocationProvider()
         self.addressSuggestionProvider = AppleAddressSuggestionProvider()
+        self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
     }
@@ -123,6 +272,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = EstimatedMapService()
         self.currentLocationProvider = UnavailableCurrentLocationProvider()
         self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
+        self.initialLocationRetryDelayNanoseconds = 0
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
     }
@@ -133,6 +283,7 @@ final class SearchViewModel: ObservableObject {
         mapService: MapService,
         currentLocationProvider: CurrentLocationProviding = UnavailableCurrentLocationProvider(),
         addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider(),
+        initialLocationRetryDelayNanoseconds: UInt64 = defaultInitialLocationRetryDelayNanoseconds,
         now: @escaping () -> Date = Date.init
     ) {
         self.searchProvider = searchProvider
@@ -140,40 +291,207 @@ final class SearchViewModel: ObservableObject {
         self.mapService = mapService
         self.currentLocationProvider = currentLocationProvider
         self.addressSuggestionProvider = addressSuggestionProvider
+        self.initialLocationRetryDelayNanoseconds = initialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = now
     }
 
     var selected: Recommendation? {
-        results.first { $0.id == selectedId } ?? results.first
+        displayedResults.first { $0.id == selectedId } ?? displayedResults.first
     }
 
     var displayedResults: [Recommendation] {
+        let filtered = filteredRecommendations(results)
+        return sortedRecommendations(filtered)
+    }
+
+    var filteredResultCount: Int {
+        displayedResults.count
+    }
+
+    var hasActiveRecommendationFilters: Bool {
+        recommendationFilter.isActive
+    }
+
+    private func sortedRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
         switch recommendationSortMode {
         case .bestTotal:
-            return results
+            return recommendations
         case .rentalSubtotal:
-            return results.sorted {
+            return recommendations.sorted {
                 if $0.rentalTotal != $1.rentalTotal {
                     return $0.rentalTotal < $1.rentalTotal
                 }
                 return $0.bestTotal < $1.bestTotal
             }
         case .distance:
-            return results.sorted {
+            return recommendations.sorted {
                 if $0.listing.store.distanceKm != $1.listing.store.distanceKm {
                     return $0.listing.store.distanceKm < $1.listing.store.distanceKm
                 }
                 return $0.bestTotal < $1.bestTotal
             }
         case .dataCompleteness:
-            return results.sorted {
+            return recommendations.sorted {
                 if $0.listing.dataCompleteness != $1.listing.dataCompleteness {
                     return $0.listing.dataCompleteness > $1.listing.dataCompleteness
                 }
                 return $0.bestTotal < $1.bestTotal
             }
         }
+    }
+
+    private func filteredRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
+        var filtered = recommendations.filter(matchesRecommendationFilter)
+        if recommendationFilter.deduplicateByStore {
+            filtered = deduplicateRecommendations(filtered, key: storeDeduplicationKey)
+        }
+        if recommendationFilter.deduplicateByVehicle {
+            filtered = deduplicateRecommendations(filtered, key: vehicleDeduplicationKey)
+        }
+        return filtered
+    }
+
+    private func matchesRecommendationFilter(_ recommendation: Recommendation) -> Bool {
+        if let platform = recommendationFilter.platform.platform, recommendation.listing.platform != platform {
+            return false
+        }
+
+        switch recommendationFilter.vehicleClass {
+        case .all:
+            break
+        case .sedan, .suv, .mpv, .newEnergy, .unspecified:
+            guard detectedVehicleClass(for: recommendation) == recommendationFilter.vehicleClass else { return false }
+        }
+
+        if let maxTotalCost = recommendationFilter.maxTotalCost.maxTotalCost, recommendation.bestTotal > maxTotalCost {
+            return false
+        }
+
+        if let maxDistanceKm = recommendationFilter.maxDistance.maxDistanceKm, recommendation.listing.store.distanceKm > maxDistanceKm {
+            return false
+        }
+
+        if recommendationFilter.hideIncompleteFees, hasIncompleteFees(recommendation) {
+            return false
+        }
+
+        return true
+    }
+
+    private func deduplicateRecommendations(
+        _ recommendations: [Recommendation],
+        key: (Recommendation) -> String
+    ) -> [Recommendation] {
+        var orderedKeys: [String] = []
+        var bestByKey: [String: Recommendation] = [:]
+        for recommendation in recommendations {
+            let key = key(recommendation)
+            if let current = bestByKey[key] {
+                if isLowerCost(recommendation, than: current) {
+                    bestByKey[key] = recommendation
+                }
+            } else {
+                orderedKeys.append(key)
+                bestByKey[key] = recommendation
+            }
+        }
+        return orderedKeys.compactMap { bestByKey[$0] }
+    }
+
+    private func isLowerCost(_ lhs: Recommendation, than rhs: Recommendation) -> Bool {
+        if lhs.bestTotal != rhs.bestTotal {
+            return lhs.bestTotal < rhs.bestTotal
+        }
+        if lhs.rentalTotal != rhs.rentalTotal {
+            return lhs.rentalTotal < rhs.rentalTotal
+        }
+        if lhs.listing.store.distanceKm != rhs.listing.store.distanceKm {
+            return lhs.listing.store.distanceKm < rhs.listing.store.distanceKm
+        }
+        return lhs.id < rhs.id
+    }
+
+    private func storeDeduplicationKey(_ recommendation: Recommendation) -> String {
+        let store = recommendation.listing.store
+        let stableStoreKey = store.id.isEmpty ? "\(store.name)|\(store.address)" : store.id
+        return "\(recommendation.listing.platform.rawValue)|\(normalizedRecommendationKey(stableStoreKey))"
+    }
+
+    private func vehicleDeduplicationKey(_ recommendation: Recommendation) -> String {
+        normalizedRecommendationKey(recommendation.listing.vehicleName)
+    }
+
+    private func detectedVehicleClass(for recommendation: Recommendation) -> RecommendationVehicleClassFilter {
+        let listing = recommendation.listing
+        let combined = "\(listing.vehicleClass) \(listing.vehicleName) \(recommendation.match.label)"
+        let normalized = combined.lowercased()
+
+        if listing.vehicleName.contains("未指定")
+            || listing.vehicleClass.contains("未指定")
+            || recommendation.match.kind == .notSpecified {
+            return .unspecified
+        }
+
+        if normalized.contains("新能源")
+            || normalized.contains("纯电")
+            || normalized.contains("电动")
+            || normalized.contains("插电")
+            || normalized.contains("混动")
+            || normalized.contains(" ev")
+            || normalized.hasSuffix("ev")
+            || normalized.contains("dm-i") {
+            return .newEnergy
+        }
+
+        if normalized.contains("suv") || normalized.contains("越野") {
+            return .suv
+        }
+
+        if normalized.contains("mpv")
+            || normalized.contains("商务")
+            || normalized.contains("gl8")
+            || normalized.contains("奥德赛")
+            || normalized.contains("艾力绅") {
+            return .mpv
+        }
+
+        if normalized.contains("轿车")
+            || normalized.contains("紧凑型车")
+            || normalized.contains("中型车")
+            || normalized.contains("中大型车")
+            || normalized.contains("大型车")
+            || normalized.contains("小型车")
+            || normalized.contains("三厢")
+            || normalized.contains("两厢")
+            || normalized.contains("sedan")
+            || normalized.contains("朗逸")
+            || normalized.contains("轩逸")
+            || normalized.contains("科鲁泽")
+            || normalized.contains("卡罗拉")
+            || normalized.contains("速腾")
+            || normalized.contains("宝来")
+            || normalized.contains("迈腾")
+            || normalized.contains("帕萨特")
+            || normalized.contains("凯美瑞")
+            || normalized.contains("雅阁")
+            || normalized.contains("天籁") {
+            return .sedan
+        }
+
+        return .unspecified
+    }
+
+    private func normalizedRecommendationKey(_ value: String) -> String {
+        value
+            .lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .joined()
+    }
+
+    private func hasIncompleteFees(_ recommendation: Recommendation) -> Bool {
+        let warnings = recommendation.listing.warnings + recommendation.warnings
+        return recommendation.listing.dataCompleteness < 0.9 || warnings.contains(.partialPrice)
     }
 
     var hasBlockingPreflightIssues: Bool {
@@ -185,6 +503,10 @@ final class SearchViewModel: ObservableObject {
     }
 
     func runSearch() async {
+        await performSearch(retryingFailedPlatformsOnly: false)
+    }
+
+    private func performSearch(retryingFailedPlatformsOnly: Bool) async {
         dismissOriginSuggestions()
         refreshPreflightIssues()
         if hasBlockingPreflightIssues {
@@ -236,8 +558,12 @@ final class SearchViewModel: ObservableObject {
         }
 
         searchProgressPhase = .queryingPlatforms
-        let evidenceResults = await searchProvider.search(request: liveRequest)
-        platformStatuses = evidenceResults.map(\.status)
+        let evidenceResults = await searchEvidenceResults(
+            request: liveRequest,
+            retryingFailedPlatformsOnly: retryingFailedPlatformsOnly
+        )
+        recordEvidenceResults(evidenceResults, request: liveRequest)
+        platformStatuses = displayPlatformStatuses(from: evidenceResults)
 
         let listings = evidenceResults.flatMap(\.listings)
         guard !listings.isEmpty else {
@@ -264,11 +590,15 @@ final class SearchViewModel: ObservableObject {
     }
 
     func retrySearch() async {
-        await runSearch()
+        await performSearch(retryingFailedPlatformsOnly: true)
     }
 
     func selectResult(_ id: String) {
         selectedId = id
+    }
+
+    func clearRecommendationFilters() {
+        recommendationFilter = .empty
     }
 
     func togglePlatform(_ platform: PlatformId) {
@@ -295,6 +625,91 @@ final class SearchViewModel: ObservableObject {
         )
     }
 
+    private func displayPlatformStatuses(from evidenceResults: [PlatformEvidenceResult]) -> [PlatformEvidenceStatus] {
+        evidenceResults.map { result in
+            guard result.status.kind == .ready,
+                  result.listings.contains(where: { $0.platform == result.platform && $0.warnings.contains(.loginRequired) }) else {
+                return result.status
+            }
+
+            return PlatformEvidenceStatus(
+                platform: result.platform,
+                kind: .loginRequired,
+                message: loginRequiredMessage(for: result.platform),
+                sourceUrl: result.status.sourceUrl
+            )
+        }
+    }
+
+    private func searchEvidenceResults(
+        request liveRequest: SearchRequest,
+        retryingFailedPlatformsOnly: Bool
+    ) async -> [PlatformEvidenceResult] {
+        guard retryingFailedPlatformsOnly,
+              latestEvidenceRequest == liveRequest
+        else {
+            return await searchProvider.search(request: liveRequest)
+        }
+
+        let previousResults = liveRequest.platforms.compactMap { latestEvidenceResultsByPlatform[$0] }
+        let platformsToRetry = platformsNeedingRetry(from: previousResults, request: liveRequest)
+        guard !platformsToRetry.isEmpty,
+              platformsToRetry.count < liveRequest.platforms.count
+        else {
+            return await searchProvider.search(request: liveRequest)
+        }
+
+        var retryRequest = liveRequest
+        retryRequest.platforms = platformsToRetry
+        let retriedResults = await searchProvider.search(request: retryRequest)
+        return mergeEvidenceResults(previous: previousResults, updates: retriedResults, platforms: liveRequest.platforms)
+    }
+
+    private func platformsNeedingRetry(
+        from evidenceResults: [PlatformEvidenceResult],
+        request: SearchRequest
+    ) -> [PlatformId] {
+        let resultsByPlatform = evidenceResultsByPlatform(evidenceResults)
+        return request.platforms.filter { platform in
+            guard let result = resultsByPlatform[platform] else { return true }
+            return result.listings.isEmpty
+        }
+    }
+
+    private func mergeEvidenceResults(
+        previous: [PlatformEvidenceResult],
+        updates: [PlatformEvidenceResult],
+        platforms: [PlatformId]
+    ) -> [PlatformEvidenceResult] {
+        var resultsByPlatform = evidenceResultsByPlatform(previous)
+        for update in updates {
+            resultsByPlatform[update.platform] = update
+        }
+        return platforms.compactMap { resultsByPlatform[$0] }
+    }
+
+    private func recordEvidenceResults(_ evidenceResults: [PlatformEvidenceResult], request: SearchRequest) {
+        latestEvidenceRequest = request
+        latestEvidenceResultsByPlatform = evidenceResultsByPlatform(evidenceResults)
+    }
+
+    private func evidenceResultsByPlatform(_ evidenceResults: [PlatformEvidenceResult]) -> [PlatformId: PlatformEvidenceResult] {
+        var resultsByPlatform: [PlatformId: PlatformEvidenceResult] = [:]
+        for evidenceResult in evidenceResults {
+            resultsByPlatform[evidenceResult.platform] = evidenceResult
+        }
+        return resultsByPlatform
+    }
+
+    private func loginRequiredMessage(for platform: PlatformId) -> String {
+        switch platform {
+        case .ehi:
+            return "一嗨已返回部分信息；登录一嗨后可确认完整报价并重新比较。"
+        case .carInc:
+            return "神州已返回车辆租赁费；登录神州后可补全确认页基础服务费并重新比较。"
+        }
+    }
+
     func applyDates(pickup: Date, returnDate: Date) {
         let normalized = AppDateRules.normalizedRange(pickup: pickup, returnDate: returnDate)
         request.pickupAt = AppDateRules.formatRequestDate(normalized.pickup)
@@ -305,10 +720,34 @@ final class SearchViewModel: ObservableObject {
     func refreshCurrentLocationIfNeeded() async {
         guard !hasRequestedInitialLocation else { return }
         hasRequestedInitialLocation = true
-        await refreshCurrentLocation()
+        await refreshInitialCurrentLocationWithRetry()
+    }
+
+    func startInitialCurrentLocationRefresh() {
+        guard !hasRequestedInitialLocation else { return }
+        hasRequestedInitialLocation = true
+        Task { [weak self] in
+            await self?.refreshInitialCurrentLocationWithRetry()
+        }
     }
 
     func refreshCurrentLocation() async {
+        _ = await refreshCurrentLocationOutcome()
+    }
+
+    private func refreshInitialCurrentLocationWithRetry() async {
+        let outcome = await refreshCurrentLocationOutcome()
+        guard outcome.shouldRetry else { return }
+
+        originStatus = "正在重新获取当前位置。"
+        if initialLocationRetryDelayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: initialLocationRetryDelayNanoseconds)
+        }
+        guard !Task.isCancelled else { return }
+        _ = await refreshCurrentLocationOutcome()
+    }
+
+    private func refreshCurrentLocationOutcome() async -> CurrentLocationRefreshOutcome {
         dismissOriginSuggestions()
         isLocatingOrigin = true
         originStatus = "正在获取当前位置。"
@@ -324,8 +763,11 @@ final class SearchViewModel: ObservableObject {
             originSuggestions = []
             originStatus = "已定位当前位置。"
             refreshPreflightIssues()
+            return .success
         } catch {
-            originStatus = error.localizedDescription
+            let normalizedError = CurrentLocationError.normalized(error)
+            originStatus = normalizedError.localizedDescription
+            return CurrentLocationError.isRetryable(normalizedError) ? .retryableFailure : .blockedFailure
         }
     }
 
@@ -405,6 +847,18 @@ final class SearchViewModel: ObservableObject {
         selectedId = latestSuccessfulSelectedId
         isShowingStaleResults = true
         retainedResultsNotice = RetainedResultsNotice.make(lastSuccessfulSearchAt: lastSuccessfulSearchAt)
+    }
+}
+
+private let defaultInitialLocationRetryDelayNanoseconds: UInt64 = 500_000_000
+
+private enum CurrentLocationRefreshOutcome {
+    case success
+    case retryableFailure
+    case blockedFailure
+
+    var shouldRetry: Bool {
+        self == .retryableFailure
     }
 }
 

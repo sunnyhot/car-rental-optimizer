@@ -31,6 +31,7 @@ struct ContentView: View {
             .environmentObject(viewModel)
             .environmentObject(monitorViewModel)
             .task {
+                viewModel.startInitialCurrentLocationRefresh()
                 try? await monitorViewModel.reload()
                 await monitorViewModel.runDueChecks()
             }

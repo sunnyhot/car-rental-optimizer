@@ -144,6 +144,19 @@ struct SearchRecoveryAction: Equatable, Identifiable {
                     retrySameRequest,
                 ]
             }
+            if status.platform == .carInc {
+                return [
+                    SearchRecoveryAction(
+                        id: "carinc-login",
+                        title: "登录神州",
+                        message: "登录后会复用神州官方页面的 session，再重试同一查询补全基础服务费。",
+                        systemImage: "person.badge.key.fill",
+                        opensEhiLogin: false,
+                        opensPlatform: false
+                    ),
+                    retrySameRequest,
+                ]
+            }
             return [openPlatform, retrySameRequest]
         case .captchaRequired:
             return [

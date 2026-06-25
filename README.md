@@ -29,18 +29,18 @@ GitHub Release 里的当前 ZIP 是本机测试包。macOS 会对浏览器下载
 本机测试安装请用：
 
 ```bash
-scripts/install-local-app.sh build/CarRentalOptimizer-v0.9.0.zip
+scripts/install-local-app.sh build/CarRentalOptimizer-v0.9.1.zip
 ```
 
 或下载 release 后：
 
 ```bash
-scripts/install-local-app.sh ~/Downloads/CarRentalOptimizer-v0.9.0.zip
+scripts/install-local-app.sh ~/Downloads/CarRentalOptimizer-v0.9.1.zip
 ```
 
 脚本会复制到 `/Applications/租车比价助手.app`、清除 quarantine、把真实可执行文件安装到
 `~/Library/Application Support/CarRentalOptimizer/runtime/`，再验证 bundle 并做一次启动 smoke test。
-一嗨登录 cookie 保存在同一 Application Support 目录下的独立文件，覆盖安装不会清掉它。
+一嗨和神州登录 cookie 会保存在同一 Application Support 目录下的独立文件，覆盖安装不会清掉它们。
 
 ### 运行测试
 
@@ -66,7 +66,7 @@ swift test
 - 监控支持手动指定车型、批量暂停/恢复当前筛选、立即巡查当前筛选，以及应用保持运行时的后台巡查开关。
 - 菜单快捷键支持 `⌘R` 重新比较，`⇧⌘R` 立即巡查到期监控，`⇧⌘M` 打开监控中心。
 - 菜单「检查更新…」会读取 GitHub Release；发现新版本后可自动下载、替换安装并重启。
-- 一嗨库存报价如果返回登录态 401，左侧平台状态会提供一嗨登录入口；登录后会保存 1hai 相关 session cookie 到本机 Application Support，并在覆盖安装或重启后自动恢复。
+- 一嗨库存报价如果返回登录态 401，左侧平台状态会提供一嗨登录入口；神州确认页费用接口需要登录时会提供神州登录入口。登录后会保存对应平台 session cookie 到本机 Application Support，并在覆盖安装或重启后自动恢复。
 
 原生版本不再使用内置车源数据生成生产推荐，也不需要用户复制搜索结果。没有官方接口结果时，应用不会给出推测价格或候选车源。神州城市、门店和车型价格使用 H5 网关匿名直调；一嗨城市和门店可匿名读取，库存报价会先匿名请求，只有平台明确返回 401 时才提示登录。路线成本使用 MapKit 路线距离估算，用于辅助比较到店成本。
 价格监控同样只基于官方接口结果记录历史快照；历史报价会标记为可能失效，最终下单前仍应打开平台复核实时价格。

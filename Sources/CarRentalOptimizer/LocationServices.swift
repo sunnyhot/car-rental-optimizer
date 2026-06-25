@@ -41,48 +41,100 @@ enum CurrentLocationError: LocalizedError {
         case .disabled:
             return "系统定位服务未开启，可手动输入地址。"
         case .unavailable:
-            return "暂时没有获取到当前位置。"
+            return "暂时没有获取到当前位置，可重试定位或手动输入地址。"
         }
+    }
+
+    static func normalized(_ error: Error) -> Error {
+        guard let code = coreLocationCode(for: error) else { return error }
+
+        switch code {
+        case .denied:
+            return CurrentLocationError.denied
+        case .locationUnknown, .network:
+            return CurrentLocationError.unavailable
+        default:
+            return error
+        }
+    }
+
+    static func displayDescription(for error: Error) -> String {
+        normalized(error).localizedDescription
+    }
+
+    static func isRetryable(_ error: Error) -> Bool {
+        let normalizedError = normalized(error)
+        if let currentLocationError = normalizedError as? CurrentLocationError {
+            return currentLocationError == .unavailable
+        }
+
+        guard let code = coreLocationCode(for: normalizedError) else { return true }
+        return code == .locationUnknown || code == .network
+    }
+
+    static func coreLocationCode(for error: Error) -> CLError.Code? {
+        if let clError = error as? CLError {
+            return clError.code
+        }
+
+        let nsError = error as NSError
+        guard nsError.domain == kCLErrorDomain else { return nil }
+        return CLError.Code(rawValue: nsError.code)
     }
 }
 
 @MainActor
-final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, CLLocationManagerDelegate {
+final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, @preconcurrency CLLocationManagerDelegate {
     private var manager: CLLocationManager?
     private var continuation: CheckedContinuation<CLLocation, Error>?
     private var timeoutTask: Task<Void, Never>?
+    private var activeLocationRequest: Task<CLLocation, Error>?
+    private var bestLocation: CLLocation?
 
     func currentLocation() async throws -> ResolvedLocation {
         guard CLLocationManager.locationServicesEnabled() else {
             throw CurrentLocationError.disabled
         }
 
-        let location = try await requestLocation()
+        let location = try await requestCoalescedLocation()
         return ResolvedLocation(
             label: await reverseGeocodeLabel(for: location),
             point: GeoPoint(lat: location.coordinate.latitude, lng: location.coordinate.longitude)
         )
     }
 
+    private func requestCoalescedLocation() async throws -> CLLocation {
+        if let activeLocationRequest {
+            return try await activeLocationRequest.value
+        }
+
+        let task = Task<CLLocation, Error> { @MainActor in
+            try await self.requestLocation()
+        }
+        activeLocationRequest = task
+        defer {
+            activeLocationRequest = nil
+        }
+        return try await task.value
+    }
+
     private func requestLocation() async throws -> CLLocation {
         try await withCheckedThrowingContinuation { continuation in
             let manager = CLLocationManager()
             manager.delegate = self
-            manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+            manager.distanceFilter = kCLDistanceFilterNone
             self.manager = manager
             self.continuation = continuation
-            timeoutTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                await MainActor.run {
-                    self?.finish(with: .failure(CurrentLocationError.unavailable))
-                }
-            }
+            bestLocation = nil
+            timeoutTask?.cancel()
+            timeoutTask = nil
 
             switch manager.authorizationStatus {
             case .notDetermined:
                 manager.requestWhenInUseAuthorization()
             case .authorizedAlways, .authorizedWhenInUse:
-                manager.requestLocation()
+                startUpdatingLocation(with: manager)
             case .denied, .restricted:
                 finish(with: .failure(CurrentLocationError.denied))
             @unknown default:
@@ -94,7 +146,7 @@ final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, CL
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
-            manager.requestLocation()
+            startUpdatingLocation(with: manager)
         case .denied, .restricted:
             finish(with: .failure(CurrentLocationError.denied))
         case .notDetermined:
@@ -105,15 +157,45 @@ final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, CL
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else {
+        let candidates = locations + (bestLocation.map { [$0] } ?? [])
+        guard let location = bestCurrentLocation(from: candidates) else {
             finish(with: .failure(CurrentLocationError.unavailable))
             return
         }
-        finish(with: .success(location))
+        bestLocation = location
+
+        if location.horizontalAccuracy <= preferredCurrentLocationAccuracyMeters {
+            finish(with: .success(location))
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        finish(with: .failure(error))
+        if CurrentLocationError.coreLocationCode(for: error) == .locationUnknown {
+            return
+        }
+        finish(with: .failure(CurrentLocationError.normalized(error)))
+    }
+
+    private func startUpdatingLocation(with manager: CLLocationManager) {
+        guard self.manager === manager, continuation != nil else { return }
+        manager.startUpdatingLocation()
+        startLocationTimeout()
+    }
+
+    private func startLocationTimeout() {
+        guard timeoutTask == nil else { return }
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: currentLocationWaitTimeoutNanoseconds)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if let location = bestLocation {
+                    finish(with: .success(location))
+                } else {
+                    finish(with: .failure(CurrentLocationError.unavailable))
+                }
+            }
+        }
     }
 
     private func finish(with result: Result<CLLocation, Error>) {
@@ -121,8 +203,10 @@ final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, CL
         self.continuation = nil
         timeoutTask?.cancel()
         timeoutTask = nil
+        manager?.stopUpdatingLocation()
         manager?.delegate = nil
         manager = nil
+        bestLocation = nil
 
         switch result {
         case let .success(location):
@@ -149,6 +233,19 @@ final class AppleCurrentLocationProvider: NSObject, CurrentLocationProviding, CL
 
         let label = unique(parts).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         return label.isEmpty ? fallback : localizedChineseLocationText(label)
+    }
+}
+
+let preferredCurrentLocationAccuracyMeters: CLLocationAccuracy = 200
+let currentLocationWaitTimeoutNanoseconds: UInt64 = 3_500_000_000
+
+func bestCurrentLocation(from locations: [CLLocation]) -> CLLocation? {
+    let validLocations = locations.filter { $0.horizontalAccuracy >= 0 }
+    return validLocations.min { lhs, rhs in
+        if lhs.horizontalAccuracy == rhs.horizontalAccuracy {
+            return lhs.timestamp > rhs.timestamp
+        }
+        return lhs.horizontalAccuracy < rhs.horizontalAccuracy
     }
 }
 

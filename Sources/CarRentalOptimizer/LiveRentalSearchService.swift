@@ -6,6 +6,72 @@ protocol RentalSearchProviding {
     func search(request: SearchRequest) async -> [PlatformEvidenceResult]
 }
 
+let livePlatformQueryTimeoutSeconds: TimeInterval = 35
+
+@MainActor
+func platformResultWithTimeout(
+    platform: PlatformId,
+    timeoutSeconds: TimeInterval = livePlatformQueryTimeoutSeconds,
+    onTimeout: @escaping @MainActor () -> Void = {},
+    operation: @escaping @MainActor () async -> PlatformEvidenceResult
+) async -> PlatformEvidenceResult {
+    let operationTask = Task { @MainActor in
+        await operation()
+    }
+    let timeoutTask = Task {
+        let nanoseconds = timeoutNanoseconds(for: timeoutSeconds)
+        if nanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: nanoseconds)
+        }
+        return platformTimeoutResult(platform: platform, timeoutSeconds: timeoutSeconds)
+    }
+
+    return await withCheckedContinuation { continuation in
+        var didResume = false
+
+        let finishWithOperation: @MainActor (PlatformEvidenceResult) -> Void = { result in
+            guard !didResume else { return }
+            didResume = true
+            timeoutTask.cancel()
+            continuation.resume(returning: result)
+        }
+
+        let finishWithTimeout: @MainActor (PlatformEvidenceResult) -> Void = { result in
+            guard !didResume else { return }
+            didResume = true
+            operationTask.cancel()
+            onTimeout()
+            continuation.resume(returning: result)
+        }
+
+        Task { @MainActor in
+            finishWithOperation(await operationTask.value)
+        }
+        Task { @MainActor in
+            finishWithTimeout(await timeoutTask.value)
+        }
+    }
+}
+
+private func timeoutNanoseconds(for timeoutSeconds: TimeInterval) -> UInt64 {
+    let clampedSeconds = min(max(timeoutSeconds, 0), 3_600)
+    return UInt64(clampedSeconds * 1_000_000_000)
+}
+
+private func platformTimeoutResult(platform: PlatformId, timeoutSeconds: TimeInterval) -> PlatformEvidenceResult {
+    let seconds = max(1, Int(ceil(timeoutSeconds)))
+    return PlatformEvidenceResult(
+        platform: platform,
+        status: PlatformEvidenceStatus(
+            platform: platform,
+            kind: .parseFailed,
+            message: "\(platform.label) API 查询超时（超过 \(seconds) 秒），已停止等待，请稍后重试。",
+            sourceUrl: officialPlatformURL(for: platform)
+        ),
+        listings: []
+    )
+}
+
 @MainActor
 final class LiveRentalSearchService: NSObject, RentalSearchProviding {
     private let zucheClient = ZucheAPIClient()
@@ -15,7 +81,9 @@ final class LiveRentalSearchService: NSObject, RentalSearchProviding {
         var results: [PlatformEvidenceResult] = []
 
         if request.platforms.contains(.carInc) {
-            results.append(await zucheClient.search(request: request))
+            results.append(await platformResultWithTimeout(platform: .carInc) {
+                await self.zucheClient.search(request: request)
+            })
         }
 
         if request.platforms.contains(.ehi) {
@@ -64,6 +132,204 @@ struct SnapshotRentalSearchService: RentalSearchProviding {
 struct StoreListingsBatch {
     let distanceKm: Double
     let listings: [RentalListing]
+}
+
+private struct ZucheListingCandidate {
+    let listing: RentalListing
+    let confirmationContext: ZucheConfirmationContext
+}
+
+private struct ZucheConfirmationContext: Hashable {
+    let modelId: Int
+    let pickupCityId: String
+    let returnCityId: String
+    let pickupDeptId: Int
+    let returnDeptId: Int
+    let pickupTime: String
+    let returnTime: String
+    let entrance: Int
+    let priceType: Int
+    let prepaidFlag: Bool
+    let pickUpWebsite: Int?
+    let pickUpAppropriate: Int?
+    let allianceBusinessFlag: Bool
+
+    var payload: [String: Any] {
+        var baseInfo: [String: Any] = [
+            "pickupWay": 0,
+            "returnWay": 0,
+            "modelId": modelId,
+            "prepaidFlag": prepaidFlag,
+            "priceType": priceType,
+            "allianceBusinessFlag": allianceBusinessFlag,
+            "estimatedPickupTime": pickupTime,
+            "estimatedReturnTime": returnTime,
+            "entrance": entrance,
+            "enterpriseUseCarType": entrance == 5 ? 2 : 1,
+            "pickupDeptId": pickupDeptId,
+            "returnDeptId": returnDeptId,
+            "pickupCityId": pickupCityId,
+            "returnCityId": returnCityId
+        ]
+        if let pickUpWebsite {
+            baseInfo["pickUpWebsite"] = pickUpWebsite
+        }
+        if let pickUpAppropriate {
+            baseInfo["pickUpAppropriate"] = pickUpAppropriate
+        }
+        return ["baseInfo": baseInfo]
+    }
+}
+
+private struct ZucheFeeEnrichment {
+    let listings: [RentalListing]
+    let attemptedWithCookies: Bool
+    let confirmedFeeCount: Int
+    let loginRejected: Bool
+}
+
+private let maxConcurrentZucheConfirmationRequests = 4
+private let zucheGatewayRequestTimeoutSeconds: TimeInterval = 10
+
+struct ZucheGatewayEndpoint: Equatable {
+    let url: URL
+    let referer: String
+}
+
+func zucheGatewayEndpoints(for uri: String) -> [ZucheGatewayEndpoint] {
+    let normalizedURI = uri.hasPrefix("/") ? uri : "/\(uri)"
+    return [
+        ZucheGatewayEndpoint(
+            url: URL(string: "https://m.zuche.com/api/gw.do?uri=\(normalizedURI)")!,
+            referer: "https://m.zuche.com/"
+        ),
+        ZucheGatewayEndpoint(
+            url: URL(string: "https://www.zuche.com/api/gw.do?uri=\(normalizedURI)")!,
+            referer: "https://www.zuche.com/"
+        )
+    ]
+}
+
+func isRetryableZucheTransportError(_ error: Error) -> Bool {
+    guard let urlError = error as? URLError else { return false }
+    switch urlError.code {
+    case .secureConnectionFailed,
+         .timedOut,
+         .networkConnectionLost,
+         .cannotFindHost,
+         .cannotConnectToHost,
+         .dnsLookupFailed:
+        return true
+    default:
+        return false
+    }
+}
+
+struct ZucheSearchCity: Equatable {
+    let id: String
+    let name: String
+    let location: GeoPoint?
+}
+
+struct ZucheCandidateCity: Equatable {
+    let city: ZucheSearchCity
+    let distanceKm: Double
+    let isCurrentCity: Bool
+}
+
+func zucheCandidateCities(from cities: [ZucheSearchCity], request: SearchRequest) -> [ZucheCandidateCity] {
+    guard !cities.isEmpty else { return [] }
+    let currentCityID = currentZucheCityID(from: cities, request: request)
+
+    return cities.compactMap { city -> ZucheCandidateCity? in
+        let distanceKm = city.location.map { distanceKmBetween(from: request.origin, to: $0) }
+        let isCurrentCity = city.id == currentCityID
+        guard isCurrentCity || (distanceKm.map { $0 <= request.radiusKm } ?? false) else {
+            return nil
+        }
+        return ZucheCandidateCity(
+            city: city,
+            distanceKm: distanceKm ?? 0,
+            isCurrentCity: isCurrentCity
+        )
+    }
+    .sorted {
+        if $0.isCurrentCity != $1.isCurrentCity {
+            return $0.isCurrentCity
+        }
+        if $0.distanceKm != $1.distanceKm {
+            return $0.distanceKm < $1.distanceKm
+        }
+        return $0.city.name.localizedStandardCompare($1.city.name) == .orderedAscending
+    }
+}
+
+func zucheSelectedStore(from stores: [Store], cityName: String, isCurrentCity: Bool) -> Store? {
+    let sortedStores = stores.sorted {
+        if $0.distanceKm != $1.distanceKm {
+            return $0.distanceKm < $1.distanceKm
+        }
+        return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+    }
+    if isCurrentCity {
+        return sortedStores.first
+    }
+    return sortedStores.first { isZucheRailwayStationStore($0, cityName: cityName) }
+}
+
+private func currentZucheCityID(from cities: [ZucheSearchCity], request: SearchRequest) -> String? {
+    if let exact = cities.first(where: { zucheCityNameMatchesOrigin($0.name, request: request) }) {
+        return exact.id
+    }
+    return cities
+        .compactMap { city -> (String, Double)? in
+            guard let location = city.location else { return nil }
+            return (city.id, distanceKmBetween(from: request.origin, to: location))
+        }
+        .min { $0.1 < $1.1 }?
+        .0
+}
+
+private func zucheCityNameMatchesOrigin(_ cityName: String, request: SearchRequest) -> Bool {
+    let label = localizedChineseLocationText(request.originLabel)
+    let aliases = originCityCandidates(from: request.originLabel)
+    let normalizedCityName = normalizedZucheCityName(cityName)
+    guard !normalizedCityName.isEmpty else { return false }
+
+    return label.contains(cityName)
+        || label.contains(normalizedCityName)
+        || aliases.contains(cityName)
+        || aliases.contains(normalizedCityName)
+}
+
+private func isZucheRailwayStationStore(_ store: Store, cityName: String) -> Bool {
+    let text = "\(store.name) \(store.address)"
+    if text.contains("机场") {
+        return false
+    }
+    if ["火车站", "高铁站", "高铁", "动车站", "铁路"].contains(where: { text.contains($0) }) {
+        return true
+    }
+
+    let normalizedCityName = normalizedZucheCityName(cityName)
+    guard !normalizedCityName.isEmpty else { return false }
+    let stationTokens = [
+        "\(normalizedCityName)站",
+        "\(normalizedCityName)东站",
+        "\(normalizedCityName)西站",
+        "\(normalizedCityName)南站",
+        "\(normalizedCityName)北站"
+    ]
+    if stationTokens.contains(where: { text.contains($0) }) {
+        return true
+    }
+    return false
+}
+
+private func normalizedZucheCityName(_ cityName: String) -> String {
+    localizedChineseLocationText(cityName)
+        .replacingOccurrences(of: "市", with: "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 func blankVehicleCandidateListings(
@@ -121,31 +387,51 @@ private final class ZucheAPIClient {
     func search(request: SearchRequest) async -> PlatformEvidenceResult {
         do {
             let cities: ZucheCityListContent = try await postGateway(uri: "/action/carrctapi/order/cityList/v1", payload: [:])
-            guard let city = selectCity(from: cities.allCities, request: request) else {
-                return status(.unavailable, "神州没有识别到当前位置对应的可租城市。")
-            }
-
-            let deptList: ZucheDeptListContent = try await postGateway(
-                uri: "/action/carrctapi/order/deptList/v1",
-                payload: ["cityId": city.cityId, "entrance": 1, "pickupFlag": 1]
+            let candidateCities = zucheCandidateCities(
+                from: cities.allCities.map(\.searchCity),
+                request: request
             )
-            let stores = flattenDepartments(deptList)
-            guard !stores.isEmpty else {
-                return status(.unavailable, "神州当前城市没有返回可用取车点。")
-            }
-
-            let candidates = candidateStores(stores, request: request)
-            guard !candidates.isEmpty else {
-                return status(.unavailable, "神州在当前范围内没有可用取车点。")
+            guard !candidateCities.isEmpty else {
+                return status(.unavailable, "神州没有识别到当前位置对应的可租城市。")
             }
 
             let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
             let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let plannedCities = hasVehicleQuery ? candidateCities : Array(candidateCities.prefix(1))
+            var citiesByID: [String: ZucheCity] = [:]
+            for city in cities.allCities {
+                citiesByID[city.cityId] = city
+            }
             var listingsByKey: [String: RentalListing] = [:]
             var nearestStoreBatches: [StoreListingsBatch] = []
+            var confirmationContextsByListingID: [String: ZucheConfirmationContext] = [:]
             var queryErrors: [String] = []
 
-            for anchor in queryAnchors(candidates: candidates, request: request) {
+            for cityCandidate in plannedCities {
+                guard let city = citiesByID[cityCandidate.city.id] else { continue }
+
+                let deptList: ZucheDeptListContent
+                do {
+                    deptList = try await postGateway(
+                        uri: "/action/carrctapi/order/deptList/v1",
+                        payload: ["cityId": city.cityId, "entrance": 1, "pickupFlag": 1]
+                    )
+                } catch {
+                    queryErrors.append("\(city.cityName)：\(error.localizedDescription)")
+                    continue
+                }
+
+                let stores = flattenDepartments(deptList)
+                    .compactMap { makeStore(from: $0, cityName: city.cityName, request: request) }
+                    .filter { $0.distanceKm <= request.radiusKm }
+                guard let selectedStore = zucheSelectedStore(
+                    from: stores,
+                    cityName: city.cityName,
+                    isCurrentCity: cityCandidate.isCurrentCity
+                ) else {
+                    continue
+                }
+
                 let chooseCar: ZucheChooseCarContent
                 do {
                     chooseCar = try await postGateway(
@@ -156,27 +442,32 @@ private final class ZucheAPIClient {
                             "returnCityId": city.cityId,
                             "returnTime": timeRange.returnTime,
                             "entrance": 1,
-                            "userChooseLat": String(anchor.lat),
-                            "userChooseLon": String(anchor.lng),
+                            "userChooseLat": String(selectedStore.location.lat),
+                            "userChooseLon": String(selectedStore.location.lng),
                             "holidaysWaitingFlag": 0,
                         ]
                     )
                 } catch {
-                    queryErrors.append(error.localizedDescription)
+                    queryErrors.append("\(city.cityName)：\(error.localizedDescription)")
                     continue
                 }
 
                 for dept in chooseCar.deptHangModels {
-                    guard let store = makeStore(from: dept, request: request) else { continue }
+                    guard let store = makeStore(from: dept, cityName: city.cityName, request: request) else { continue }
                     guard store.distanceKm <= request.radiusKm else { continue }
+                    guard store.id == selectedStore.id else { continue }
 
-                    let deptListings = listings(from: dept.models, store: store, request: request)
+                    let deptListings = listings(from: dept.models, city: city, dept: dept, store: store, request: request, timeRange: timeRange)
+                    for candidate in deptListings {
+                        confirmationContextsByListingID[candidate.listing.id] = candidate.confirmationContext
+                    }
+                    let listings = deptListings.map(\.listing)
                     if !hasVehicleQuery {
-                        nearestStoreBatches.append(StoreListingsBatch(distanceKm: store.distanceKm, listings: deptListings))
+                        nearestStoreBatches.append(StoreListingsBatch(distanceKm: store.distanceKm, listings: listings))
                         continue
                     }
 
-                    for listing in deptListings {
+                    for listing in listings {
                         let key = "\(store.id)-\(listing.vehicleName)"
                         if let old = listingsByKey[key], old.basePrice <= listing.basePrice {
                             continue
@@ -186,25 +477,30 @@ private final class ZucheAPIClient {
                 }
             }
 
-            let listings = hasVehicleQuery
+            let rawListings = hasVehicleQuery
                 ? Array(listingsByKey.values)
                 : blankVehicleCandidateListings(from: nearestStoreBatches)
-            guard !listings.isEmpty else {
+            guard !rawListings.isEmpty else {
                 if !queryErrors.isEmpty {
                     return status(.parseFailed, "神州 API 部分查询失败：\(queryErrors.prefix(2).joined(separator: "；"))")
                 }
                 return status(.unavailable, "神州真实接口返回成功，但当前条件没有可订车型。")
             }
 
+            let feeEnrichment = await enrichListingsWithConfirmationFees(
+                rawListings,
+                contextsByListingID: confirmationContextsByListingID
+            )
+
             return PlatformEvidenceResult(
                 platform: .carInc,
                 status: PlatformEvidenceStatus(
                     platform: .carInc,
                     kind: .ready,
-                    message: "已从神州 API 读取 \(listings.count) 个真实候选车型。",
-                    sourceUrl: "https://m.zuche.com/"
+                    message: zucheStatusMessage(listingCount: feeEnrichment.listings.count, feeEnrichment: feeEnrichment),
+                    sourceUrl: "https://www.zuche.com/"
                 ),
-                listings: listings
+                listings: feeEnrichment.listings
             )
         } catch {
             return status(.parseFailed, "神州 API 查询失败：\(error.localizedDescription)")
@@ -212,18 +508,47 @@ private final class ZucheAPIClient {
     }
 
     private func postGateway<Response: Decodable>(uri: String, payload: [String: Any]) async throws -> Response {
-        let envelope: ZucheResponse<Response> = try await postForm(
-            url: URL(string: "https://m.zuche.com/api/gw.do?uri=\(uri)")!,
-            payload: payload,
-            referer: "https://m.zuche.com/"
-        )
+        let envelope: ZucheResponse<Response> = try await postGatewayForm(uri: uri, payload: payload)
         guard envelope.code == 1 || envelope.status == "SUCCESS", let content = envelope.content else {
             throw PlatformAPIError.message(envelope.msg ?? "神州接口返回异常")
         }
         return content
     }
 
-    private func postForm<Response: Decodable>(url: URL, payload: [String: Any], referer: String) async throws -> ZucheResponse<Response> {
+    private func postGatewayForm<Response: Decodable>(
+        uri: String,
+        payload: [String: Any],
+        cookieHeader: String? = nil
+    ) async throws -> ZucheResponse<Response> {
+        var transportErrors: [String] = []
+        for endpoint in zucheGatewayEndpoints(for: uri) {
+            do {
+                return try await postForm(
+                    url: endpoint.url,
+                    payload: payload,
+                    referer: endpoint.referer,
+                    cookieHeader: cookieHeader
+                )
+            } catch let error as PlatformAPIError {
+                throw error
+            } catch {
+                guard isRetryableZucheTransportError(error) else {
+                    throw error
+                }
+                let host = endpoint.url.host() ?? endpoint.url.host ?? endpoint.url.absoluteString
+                transportErrors.append("\(host)：\(error.localizedDescription)")
+            }
+        }
+
+        throw PlatformAPIError.message("神州 API 网络连接失败：\(transportErrors.joined(separator: "；"))")
+    }
+
+    private func postForm<Response: Decodable>(
+        url: URL,
+        payload: [String: Any],
+        referer: String,
+        cookieHeader: String? = nil
+    ) async throws -> ZucheResponse<Response> {
         let data = try JSONSerialization.data(withJSONObject: payload, options: [])
         let json = String(data: data, encoding: .utf8) ?? "{}"
         var components = URLComponents()
@@ -231,10 +556,14 @@ private final class ZucheAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = zucheGatewayRequestTimeoutSeconds
         request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue(referer, forHTTPHeaderField: "Referer")
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
+        if let cookieHeader {
+            request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        }
 
         let (responseData, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
@@ -243,60 +572,24 @@ private final class ZucheAPIClient {
         return try JSONDecoder().decode(ZucheResponse<Response>.self, from: responseData)
     }
 
-    private func selectCity(from cities: [ZucheCity], request: SearchRequest) -> ZucheCity? {
-        let label = request.originLabel
-        if let exact = cities.first(where: { label.contains($0.cityName) }) {
-            return exact
-        }
-
-        return cities
-            .compactMap { city -> (ZucheCity, Double)? in
-                guard let point = city.location else { return nil }
-                return (city, distanceKmBetween(from: request.origin, to: point))
-            }
-            .min { $0.1 < $1.1 }?
-            .0
-    }
-
     private func flattenDepartments(_ content: ZucheDeptListContent) -> [ZucheDept] {
         content.districtList.flatMap(\.deptList).filter { $0.inventoryAbleFlag != false }
     }
 
-    private func candidateStores(_ stores: [ZucheDept], request: SearchRequest) -> [Store] {
-        let sorted = stores.compactMap { makeStore(from: $0, request: request) }.sorted { $0.distanceKm < $1.distanceKm }
-        return sorted.filter { $0.distanceKm <= request.radiusKm }
-    }
-
-    private func queryAnchors(candidates: [Store], request: SearchRequest) -> [GeoPoint] {
-        let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard hasVehicleQuery else {
-            return [request.origin]
-        }
-
-        let maxAnchorCount = 6
-        let minimumSpacingKm = max(8, request.radiusKm / 4)
-        var anchors = [request.origin]
-
-        for candidate in candidates {
-            guard anchors.count < maxAnchorCount else { break }
-            let isFarEnough = anchors.allSatisfy {
-                distanceKmBetween(from: $0, to: candidate.location) >= minimumSpacingKm
-            }
-            if isFarEnough {
-                anchors.append(candidate.location)
-            }
-        }
-
-        return anchors
-    }
-
-    private func listings(from models: [ZucheModel], store: Store, request: SearchRequest) -> [RentalListing] {
+    private func listings(
+        from models: [ZucheModel],
+        city: ZucheCity,
+        dept: ZucheDeptModels,
+        store: Store,
+        request: SearchRequest,
+        timeRange: PlatformQueryTimeRange
+    ) -> [ZucheListingCandidate] {
         models.compactMap { model in
             guard model.bookFlag != false && model.havePriceFlag != false,
                   let dailyPrice = model.price
             else { return nil }
 
-            return RentalListing(
+            let listing = RentalListing(
                 id: "car-inc-\(store.id)-\(model.modelId)",
                 platform: .carInc,
                 store: store,
@@ -306,20 +599,192 @@ private final class ZucheAPIClient {
                 platformFees: 0,
                 insuranceFees: 0,
                 oneWayFee: 0,
-                sourceUrl: "https://m.zuche.com/#/rent/list",
-                dataCompleteness: 0.88,
-                warnings: [.partialPrice]
+                sourceUrl: "https://www.zuche.com/#/rent/list",
+                dataCompleteness: 0.72,
+                warnings: [.partialPrice, .loginRequired]
+            )
+
+            return ZucheListingCandidate(
+                listing: listing,
+                confirmationContext: ZucheConfirmationContext(
+                    modelId: model.modelId,
+                    pickupCityId: city.cityId,
+                    returnCityId: city.cityId,
+                    pickupDeptId: dept.deptId,
+                    returnDeptId: dept.deptId,
+                    pickupTime: timeRange.pickupTime,
+                    returnTime: timeRange.returnTime,
+                    entrance: 1,
+                    priceType: 1,
+                    prepaidFlag: false,
+                    pickUpWebsite: dept.pickupWebsite,
+                    pickUpAppropriate: dept.pickupAppropriate,
+                    allianceBusinessFlag: dept.chainFlag ?? false
+                )
             )
         }
     }
 
-    private func makeStore(from dept: ZucheDept, request: SearchRequest) -> Store? {
+    private func enrichListingsWithConfirmationFees(
+        _ listings: [RentalListing],
+        contextsByListingID: [String: ZucheConfirmationContext]
+    ) async -> ZucheFeeEnrichment {
+        guard let cookieHeader = await zucheCookieHeader() else {
+            return ZucheFeeEnrichment(
+                listings: listings,
+                attemptedWithCookies: false,
+                confirmedFeeCount: 0,
+                loginRejected: false
+            )
+        }
+
+        let confirmationInputs = listings.compactMap { listing -> (String, ZucheConfirmationContext)? in
+            guard let context = contextsByListingID[listing.id] else { return nil }
+            return (listing.id, context)
+        }
+        guard !confirmationInputs.isEmpty else {
+            return ZucheFeeEnrichment(
+                listings: listings,
+                attemptedWithCookies: true,
+                confirmedFeeCount: 0,
+                loginRejected: false
+            )
+        }
+
+        var feesByListingID: [String: Double] = [:]
+        var loginRejected = false
+        var nextIndex = 0
+
+        await withTaskGroup(of: (String, Result<Double?, PlatformAPIError>).self) { group in
+            func addNext() {
+                guard nextIndex < confirmationInputs.count else { return }
+                let input = confirmationInputs[nextIndex]
+                nextIndex += 1
+                group.addTask { [weak self] in
+                    guard let self else { return (input.0, .success(nil)) }
+                    do {
+                        let fee = try await self.confirmationBaseServiceFee(
+                            context: input.1,
+                            cookieHeader: cookieHeader
+                        )
+                        return (input.0, .success(fee))
+                    } catch let error as PlatformAPIError {
+                        return (input.0, .failure(error))
+                    } catch {
+                        return (input.0, .failure(.message(error.localizedDescription)))
+                    }
+                }
+            }
+
+            for _ in 0..<min(maxConcurrentZucheConfirmationRequests, confirmationInputs.count) {
+                addNext()
+            }
+
+            while let (listingID, result) = await group.next() {
+                switch result {
+                case .success(let fee):
+                    if let fee {
+                        feesByListingID[listingID] = fee
+                    }
+                case .failure(.loginRequired):
+                    loginRejected = true
+                    group.cancelAll()
+                case .failure:
+                    break
+                }
+                if !loginRejected {
+                    addNext()
+                }
+            }
+        }
+
+        let enrichedListings = listings.map { listing in
+            guard let serviceFee = feesByListingID[listing.id] else { return listing }
+            return listingWithConfirmedZucheServiceFee(listing, serviceFee: serviceFee)
+        }
+
+        return ZucheFeeEnrichment(
+            listings: enrichedListings,
+            attemptedWithCookies: true,
+            confirmedFeeCount: feesByListingID.count,
+            loginRejected: loginRejected
+        )
+    }
+
+    private func confirmationBaseServiceFee(
+        context: ZucheConfirmationContext,
+        cookieHeader: String
+    ) async throws -> Double? {
+        let envelope: ZucheResponse<ZucheConfirmOrderContent> = try await postGatewayForm(
+            uri: "/action/carrctapi/order/confirmOrderInfo/v4",
+            payload: context.payload,
+            cookieHeader: cookieHeader
+        )
+        if envelope.status == "NOT_LOGIN" || envelope.code == 5 {
+            throw PlatformAPIError.loginRequired
+        }
+        guard envelope.code == 1 || envelope.status == "SUCCESS", let content = envelope.content else {
+            throw PlatformAPIError.message(envelope.msg ?? "神州确认页接口返回异常")
+        }
+        return zucheActualBaseServiceFee(from: content)
+    }
+
+    @MainActor
+    private func zucheCookieHeader() async -> String? {
+        let store = WKWebsiteDataStore.default().httpCookieStore
+        await ZucheCookieVault.restore(into: store)
+        return await withCheckedContinuation { continuation in
+            store.getAllCookies { cookies in
+                let zucheCookies = cookies.filter { cookie in
+                    let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+                    return domain == "zuche.com" || domain.hasSuffix(".zuche.com")
+                }
+                guard !zucheCookies.isEmpty else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: HTTPCookie.requestHeaderFields(with: zucheCookies)["Cookie"])
+            }
+        }
+    }
+
+    private func listingWithConfirmedZucheServiceFee(_ listing: RentalListing, serviceFee: Double) -> RentalListing {
+        RentalListing(
+            id: listing.id,
+            platform: listing.platform,
+            store: listing.store,
+            vehicleName: listing.vehicleName,
+            vehicleClass: listing.vehicleClass,
+            basePrice: listing.basePrice,
+            platformFees: serviceFee,
+            insuranceFees: listing.insuranceFees,
+            oneWayFee: listing.oneWayFee,
+            sourceUrl: listing.sourceUrl,
+            dataCompleteness: 0.90,
+            warnings: listing.warnings.filter { $0 != .loginRequired }
+        )
+    }
+
+    private func zucheStatusMessage(listingCount: Int, feeEnrichment: ZucheFeeEnrichment) -> String {
+        if feeEnrichment.confirmedFeeCount > 0 {
+            return "已从神州 API 读取 \(listingCount) 个真实候选车型，其中 \(feeEnrichment.confirmedFeeCount) 个已补入确认页基础服务费。"
+        }
+        if feeEnrichment.attemptedWithCookies && feeEnrichment.loginRejected {
+            return "已从神州 API 读取 \(listingCount) 个真实候选车型；确认页费用接口提示登录已失效，当前仅含车辆租赁费。"
+        }
+        if feeEnrichment.attemptedWithCookies {
+            return "已从神州 API 读取 \(listingCount) 个真实候选车型；确认页暂未返回基础服务费，当前仅含车辆租赁费。"
+        }
+        return "已从神州 API 读取 \(listingCount) 个真实候选车型；未检测到神州登录态，当前仅含车辆租赁费。"
+    }
+
+    private func makeStore(from dept: ZucheDept, cityName: String, request: SearchRequest) -> Store? {
         guard let location = dept.location else { return nil }
         return Store(
             id: String(dept.deptId),
             platform: .carInc,
             name: dept.deptName,
-            city: request.originLabel.contains("北京") ? "北京" : "",
+            city: cityName,
             address: dept.deptAddress,
             location: location,
             distanceKm: distanceKmBetween(from: request.origin, to: location),
@@ -327,13 +792,13 @@ private final class ZucheAPIClient {
         )
     }
 
-    private func makeStore(from dept: ZucheDeptModels, request: SearchRequest) -> Store? {
+    private func makeStore(from dept: ZucheDeptModels, cityName: String, request: SearchRequest) -> Store? {
         guard let location = dept.location else { return nil }
         return Store(
             id: String(dept.deptId),
             platform: .carInc,
             name: dept.deptName,
-            city: request.originLabel.contains("北京") ? "北京" : "",
+            city: cityName,
             address: dept.deptAddress,
             location: location,
             distanceKm: distanceKmBetween(from: request.origin, to: location),
@@ -344,7 +809,7 @@ private final class ZucheAPIClient {
     private func status(_ kind: PlatformEvidenceStatusKind, _ message: String) -> PlatformEvidenceResult {
         PlatformEvidenceResult(
             platform: .carInc,
-            status: PlatformEvidenceStatus(platform: .carInc, kind: kind, message: message, sourceUrl: "https://m.zuche.com/"),
+            status: PlatformEvidenceStatus(platform: .carInc, kind: kind, message: message, sourceUrl: "https://www.zuche.com/"),
             listings: []
         )
     }
@@ -378,6 +843,29 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     }
 
     func search(request: SearchRequest) async -> PlatformEvidenceResult {
+        await platformResultWithTimeout(
+            platform: .ehi,
+            onTimeout: { [weak self] in
+                self?.resetWebView()
+            }
+        ) { [weak self] in
+            guard let self else {
+                return PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(
+                        platform: .ehi,
+                        kind: .parseFailed,
+                        message: "一嗨 API 查询已取消，请重试。",
+                        sourceUrl: "https://booking.1hai.cn/order/firstStep"
+                    ),
+                    listings: []
+                )
+            }
+            return await self.performSearch(request: request)
+        }
+    }
+
+    private func performSearch(request: SearchRequest) async -> PlatformEvidenceResult {
         do {
             let webView = try await readyWebView()
             let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
@@ -475,8 +963,27 @@ func makeEhiSearchScript(json: String) -> String {
         window.webpackChunkbooking.push([[reqId], {}, function(r) { requireFn = r; }]);
         const http = requireFn(4211).A;
         const util = requireFn(2780).A;
+        const apiTimeoutMs = 6000;
+        const withAPITimeout = (promise, label) => Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} 超时`)), apiTimeoutMs))
+        ]);
         const days = request.rentalDays || Math.max(1, Math.ceil((Date.parse(request.returnTime.replace(' ', 'T') + ':00+08:00') - Date.parse(request.pickupTime.replace(' ', 'T') + ':00+08:00')) / 86400000));
         const hasVehicleQuery = (request.vehicleQuery || '').trim().length > 0;
+        const ehiProbeConcurrency = 3;
+        const mapWithConcurrency = async (items, limit, worker) => {
+          const workerCount = Math.max(1, Math.min(limit, items.length));
+          const results = new Array(items.length);
+          let nextIndex = 0;
+          await Promise.all(Array.from({ length: workerCount }, async () => {
+            while (nextIndex < items.length) {
+              const currentIndex = nextIndex;
+              nextIndex += 1;
+              results[currentIndex] = await worker(items[currentIndex], currentIndex);
+            }
+          }));
+          return results;
+        };
         const decodeObfuscatedDigits = (value) => String(value).split('').map(ch => {
           const code = ch.charCodeAt(0);
           return code >= 57345 && code <= 57354 ? String(code - 57345) : ch;
@@ -511,6 +1018,11 @@ func makeEhiSearchScript(json: String) -> String {
           return 6371 * 2 * Math.asin(Math.sqrt(h));
         };
         const responseBody = (resp) => (resp && resp.data && (resp.data.result ?? resp.data.data ?? resp.data)) ?? (resp && (resp.result ?? resp.data)) ?? resp ?? {};
+        const hasResponseBody = (value) => {
+          if (value === null || value === undefined) return false;
+          if (Array.isArray(value)) return value.length > 0;
+          return typeof value !== 'object' || Object.keys(value).length > 0;
+        };
         const shape = (value) => Array.isArray(value) ? `array(${value.length})` : `${typeof value}:${Object.keys(value || {}).slice(0, 8).join(',')}`;
         const arraysFrom = (value) => {
           if (Array.isArray(value)) return value;
@@ -531,7 +1043,7 @@ func makeEhiSearchScript(json: String) -> String {
         const originLabel = request.originLabel || '';
         const originCityCandidates = Array.isArray(request.originCityCandidates) ? request.originCityCandidates : [];
 
-        const cityListResp = await http.getEncrypt('/Address/City/List', {});
+        const cityListResp = await withAPITimeout(http.getEncrypt('/Address/City/List', {}), '一嗨城市接口');
         const cityResult = responseBody(cityListResp);
         const cities = arraysFrom(cityResult).filter(city => city && typeof city === 'object' && cityId(city) !== undefined);
         if (!cities.length) {
@@ -549,24 +1061,58 @@ func makeEhiSearchScript(json: String) -> String {
             return value && (name.includes(value) || normalized.includes(value) || value.includes(name) || value.includes(normalized));
           });
         };
-        let city = cities.find(candidate => {
+        const normalizedCityName = (name) => String(name || '').replace(/市$/, '').trim();
+        const cityMatchesOrigin = (candidate) => {
           const name = cityName(candidate);
-          const normalized = name.replace(/市$/, '');
+          const normalized = normalizedCityName(name);
           return name && (originLabel.includes(name) || originLabel.includes(normalized) || aliasMatchesCity(name));
+        };
+        const cityEntries = cities.map(candidate => {
+          const point = cityPoint(candidate);
+          return {
+            city: candidate,
+            distanceKm: point ? distanceKm(origin, point) : null,
+            isCurrentCity: false
+          };
         });
-        if (!city) {
-          city = cities
-            .map(candidate => {
-              const point = cityPoint(candidate);
-              return point ? { city: candidate, distance: distanceKm(origin, point) } : null;
-            })
-            .filter(Boolean)
-            .sort((a, b) => a.distance - b.distance)[0]?.city;
+        const currentCityEntry = cityEntries.find(entry => cityMatchesOrigin(entry.city))
+          || cityEntries
+            .filter(entry => Number.isFinite(entry.distanceKm))
+            .sort((a, b) => a.distanceKm - b.distanceKm)[0];
+        if (!currentCityEntry) {
+          return JSON.stringify({ statusKind: 'unavailable', message: `一嗨没有识别到“${originLabel}”对应的可租城市。`, sourceUrl, listings: [] });
         }
-        if (!city) {
+        const currentCityId = String(cityId(currentCityEntry.city));
+        const ehiCandidateCities = cityEntries
+          .map(entry => ({
+            ...entry,
+            isCurrentCity: String(cityId(entry.city)) === currentCityId,
+            distanceKm: Number.isFinite(entry.distanceKm) ? entry.distanceKm : 0
+          }))
+          .filter(entry => entry.isCurrentCity || (Number.isFinite(entry.distanceKm) && entry.distanceKm <= request.radiusKm))
+          .sort((a, b) => {
+            if (a.isCurrentCity !== b.isCurrentCity) return a.isCurrentCity ? -1 : 1;
+            if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm;
+            return cityName(a.city).localeCompare(cityName(b.city), 'zh-Hans-CN');
+          });
+        if (!ehiCandidateCities.length) {
           return JSON.stringify({ statusKind: 'unavailable', message: `一嗨没有识别到“${originLabel}”对应的可租城市。`, sourceUrl, listings: [] });
         }
 
+        const isRailwayStationStore = (store, cityPlan) => {
+          const text = `${store.name} ${store.address}`;
+          if (text.includes('机场')) return false;
+          if (['火车站', '高铁站', '高铁', '动车站', '铁路'].some(token => text.includes(token))) return true;
+          const normalized = normalizedCityName(cityName(cityPlan.city));
+          return normalized && [`${normalized}站`, `${normalized}东站`, `${normalized}西站`, `${normalized}南站`, `${normalized}北站`].some(token => text.includes(token));
+        };
+        const selectedStoreForCity = (cityPlan, cityStores) => {
+          const sortedStores = cityStores.slice().sort((a, b) => {
+            if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm;
+            return a.name.localeCompare(b.name, 'zh-Hans-CN');
+          });
+          return cityPlan.isCurrentCity ? sortedStores[0] : sortedStores.find(store => isRailwayStationStore(store, cityPlan));
+        };
         const collectStores = (value, output = []) => {
           if (!value) return output;
           if (Array.isArray(value)) {
@@ -584,31 +1130,62 @@ func makeEhiSearchScript(json: String) -> String {
           ['stores', 'storeList', 'children', 'items', 'list', 'records', 'data', 'result'].forEach(key => collectStores(value[key], output));
           return output;
         };
-        const storeResp = await http.getEncrypt('/Address/ReservationBooking/List', { cityId: cityId(city), operationTime: request.pickupTime });
-        const storeResult = responseBody(storeResp);
-        const storesById = {};
-        for (const store of collectStores(storeResult)) {
-          const id = String(store.id ?? store.managerId ?? store.storeId ?? store.manageStoreId);
-          storesById[id] = store;
+        const storeCityPlans = hasVehicleQuery
+          ? ehiCandidateCities
+          : ehiCandidateCities.filter(entry => entry.isCurrentCity).slice(0, 1);
+        const queryErrors = [];
+        const cityStoreCandidates = [];
+        const vehicleStoreCandidates = [];
+        const fetchStoresForCity = async (cityPlan) => {
+          let storeResult = null;
+          try {
+            const storeResp = await withAPITimeout(
+              http.getEncrypt('/Address/ReservationBooking/List', { cityId: cityId(cityPlan.city), operationTime: request.pickupTime }),
+              `${cityName(cityPlan.city)}一嗨门店接口`
+            );
+            storeResult = responseBody(storeResp);
+          } catch (error) {
+            return {
+              cityStores: [],
+              selectedStore: null,
+              error: `${cityName(cityPlan.city)}门店接口: ${String(error && (error.message || error.stack) || error)}`
+            };
+          }
+          const storesById = {};
+          for (const store of collectStores(storeResult)) {
+            const id = String(store.id ?? store.managerId ?? store.storeId ?? store.manageStoreId);
+            storesById[id] = store;
+          }
+          const cityStores = Object.values(storesById)
+            .map(s => ({
+              raw: s,
+              city: cityPlan.city,
+              cityId: cityId(cityPlan.city),
+              id: String(s.id ?? s.managerId ?? s.storeId ?? s.manageStoreId),
+              name: firstText(s.name, s.shortName, s.storeName, '一嗨门店'),
+              address: firstText(s.address, s.pickupAddress, s.pickupDropoffAddress),
+              lat: firstNumber(s.amapPickupLatitude, s.pickupLatitude, s.latitude, s.lat, s.storeLat),
+              lng: firstNumber(s.amapPickupLongitude, s.pickupLongitude, s.longitude, s.lng, s.storeLng),
+              hours: `${firstText(String(s.fromTime || '').slice(11, 16), '以平台为准')}-${firstText(String(s.toTime || '').slice(11, 16), '')}`
+            }))
+            .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng))
+            .map(s => ({ ...s, distanceKm: distanceKm(origin, { lat: s.lat, lng: s.lng }) }))
+            .sort((a, b) => a.distanceKm - b.distanceKm);
+          const storesInsideRadiusForCity = cityStores.filter(s => s.distanceKm <= request.radiusKm);
+          const selectedStore = selectedStoreForCity(cityPlan, storesInsideRadiusForCity);
+          return { cityStores, selectedStore, error: null };
+        };
+        const cityFetchResults = await mapWithConcurrency(storeCityPlans, ehiProbeConcurrency, fetchStoresForCity);
+        for (const cityFetchResult of cityFetchResults) {
+          if (cityFetchResult.error) queryErrors.push(cityFetchResult.error);
+          cityStoreCandidates.push(...cityFetchResult.cityStores);
+          if (cityFetchResult.selectedStore) vehicleStoreCandidates.push(cityFetchResult.selectedStore);
         }
-        const stores = Object.values(storesById);
-        const storeCandidates = stores
-          .map(s => ({
-            raw: s,
-            id: String(s.id ?? s.managerId ?? s.storeId ?? s.manageStoreId),
-            name: firstText(s.name, s.shortName, s.storeName, '一嗨门店'),
-            address: firstText(s.address, s.pickupAddress, s.pickupDropoffAddress),
-            lat: firstNumber(s.amapPickupLatitude, s.pickupLatitude, s.latitude, s.lat, s.storeLat),
-            lng: firstNumber(s.amapPickupLongitude, s.pickupLongitude, s.longitude, s.lng, s.storeLng),
-            hours: `${firstText(String(s.fromTime || '').slice(11, 16), '以平台为准')}-${firstText(String(s.toTime || '').slice(11, 16), '')}`
-          }))
-          .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng))
-          .map(s => ({ ...s, distanceKm: distanceKm(origin, { lat: s.lat, lng: s.lng }) }))
-          .sort((a, b) => a.distanceKm - b.distanceKm);
+        const storeCandidates = cityStoreCandidates.sort((a, b) => a.distanceKm - b.distanceKm);
         const blankStoreProbeLimit = 40;
         const blankStoreCandidates = storeCandidates.filter(s => s.distanceKm <= request.radiusKm);
         const candidates = hasVehicleQuery
-          ? storeCandidates.filter(s => s.distanceKm <= request.radiusKm)
+          ? vehicleStoreCandidates
           : blankStoreCandidates.slice(0, blankStoreProbeLimit);
         if (!candidates.length) {
           const message = hasVehicleQuery
@@ -651,20 +1228,24 @@ func makeEhiSearchScript(json: String) -> String {
         };
 
         const listingsByKey = {};
-        const verifyFailures = [];
-        const queryErrors = [];
-        let stockRequests = 0;
+        const storeSkips = [];
+        const loginRequiredFromStock401 = (label) => JSON.stringify({
+          statusKind: 'login-required',
+          message: `一嗨库存报价 /Stock/Step2 返回 401（${label}）；请先登录一嗨后重试。已识别 ${storeCandidates.length} 个门店。`,
+          sourceUrl,
+          listings: []
+        });
         let carsSeen = 0;
         let selectedBlankStoreId = null;
-        for (const store of candidates) {
-          if (!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId) break;
+        const quoteStore = async (store) => {
+          const storeSkips = [];
           const storeListings = [];
-          const payload = {
+          const makeStockPayload = (isEnterprise) => ({
             stockType: 1,
             whereFilter: null,
-            pickupDto: { cityId: cityId(city), storeId: Number(store.id), operationTime: request.pickupTime, isService: false },
+            pickupDto: { cityId: store.cityId, storeId: Number(store.id), operationTime: request.pickupTime, isService: false },
             pickupAddressDto: null,
-            returnDto: { cityId: cityId(city), storeId: Number(store.id), operationTime: request.returnTime, isService: false },
+            returnDto: { cityId: store.cityId, storeId: Number(store.id), operationTime: request.returnTime, isService: false },
             returnAddressDto: null,
             requestContext: {
               platform: util.getGD('platform'),
@@ -673,89 +1254,119 @@ func makeEhiSearchScript(json: String) -> String {
               userId: null,
               channelId: null,
               enterpriseId: null,
-              optionTag: { isRecalculation: false, isChargeFee: false, choose: 3, isEnterprise: true, moduleIds: null }
+              optionTag: { isRecalculation: false, isChargeFee: false, choose: 3, isEnterprise, moduleIds: null }
             }
-          };
-          try {
-            const verifyResp = await http.postEncrypt('/Verify/Step1', '', payload);
-            const verify = verifyResp.data || verifyResp;
-            if (!verify.isSuccess) {
-              verifyFailures.push(`${store.name}: ${verify.message || '取还时间不可用'}`);
-              continue;
+          });
+          const stockPayloads = [
+            { label: '个人匿名', isEnterprise: false },
+            { label: '默认上下文', isEnterprise: true }
+          ];
+
+          let stockResult = null;
+          for (const { label, isEnterprise } of stockPayloads) {
+            const payload = makeStockPayload(isEnterprise);
+            try {
+              const verifyResp = await withAPITimeout(http.postEncrypt('/Verify/Step1', '', payload), `${store.name} ${label} 校验接口`);
+              const verify = responseBody(verifyResp);
+              if (!hasResponseBody(verify)) {
+                storeSkips.push(`${store.name} ${label}: 校验接口没有返回内容`);
+                continue;
+              }
+              if (!verify.isSuccess) {
+                storeSkips.push(`${store.name} ${label}: ${verify.message || '取还时间不可用'}`);
+                continue;
+              }
+              const stockResp = await withAPITimeout(http.postEncrypt('/Stock/Step2', '', payload), `${store.name} ${label} 报价接口`);
+              const code = stockResp?.code ?? stockResp?.status ?? stockResp?.data?.code ?? stockResp?.data?.status;
+              if (code === 401) {
+                return { loginRequired: loginRequiredFromStock401(label), storeListings: [], storeSkips, carsSeen: 0 };
+              }
+              stockResult = responseBody(stockResp);
+              if (!hasResponseBody(stockResult)) {
+                storeSkips.push(`${store.name} ${label}: 报价接口没有返回内容`);
+                stockResult = null;
+                continue;
+              }
+              break;
+            } catch (error) {
+              const message = String(error && (error.message || error.stack) || error);
+              if (message.includes('401')) {
+                return { loginRequired: loginRequiredFromStock401(label), storeListings: [], storeSkips, carsSeen: 0 };
+              }
+              storeSkips.push(`${store.name} ${label}: ${message}`);
             }
-            stockRequests += 1;
-            const stockResp = await http.postEncrypt('/Stock/Step2', '', payload);
-            const code = stockResp.code ?? stockResp.status ?? stockResp.data?.code ?? stockResp.data?.status;
-            if (code === 401) {
-              return JSON.stringify({
-                statusKind: 'login-required',
-                message: `一嗨城市和门店 API 可匿名读取，但库存报价 /Stock/Step2 返回 401；请登录一嗨后重试。已识别 ${stores.length} 个门店。`,
-                sourceUrl,
-                listings: []
-              });
-            }
-            const stockResult = responseBody(stockResp);
-            const carItems = collectCarItems(stockResult);
-            for (const item of carItems) {
-              const car = item.carType || item.car || item.vehicle || item.model || item;
-              const name = carName(item, car);
-              if (!name) continue;
-              carsSeen += 1;
-              const basePrice = priceFrom(item, car);
-              if (!basePrice) continue;
-              const key = `${store.id}-${name}`;
-              const listing = {
-                id: `ehi-${store.id}-${carId(item, car, name)}`,
-                storeId: store.id,
-                storeName: store.name,
-                city: cityName(city),
-                address: store.address,
-                lat: store.lat,
-                lng: store.lng,
-                distanceKm: store.distanceKm,
-                hours: store.hours,
-                vehicleName: name,
-                vehicleClass: [
-                  firstText(car.gearName, item.gearName),
-                  firstText(car.structureName, item.structureName),
-                  firstText(car.maxPassenger ? `${car.maxPassenger}座` : '', item.maxPassenger ? `${item.maxPassenger}座` : '')
-                ].filter(Boolean).join(' | '),
-                basePrice,
-                platformFees: 0,
-                insuranceFees: 0,
-                oneWayFee: 0,
-                sourceUrl,
-                dataCompleteness: 0.88
-              };
-              storeListings.push({ key, listing });
-            }
-            for (const { key, listing } of storeListings) {
-              if (!listingsByKey[key] || listingsByKey[key].basePrice > listing.basePrice) listingsByKey[key] = listing;
-            }
-            if (!hasVehicleQuery && storeListings.length) {
+          }
+          if (!stockResult) {
+            return { loginRequired: null, storeListings: [], storeSkips, carsSeen: 0 };
+          }
+
+          let storeCarsSeen = 0;
+          const carItems = collectCarItems(stockResult);
+          for (const item of carItems) {
+            const car = item.carType || item.car || item.vehicle || item.model || item;
+            const name = carName(item, car);
+            if (!name) continue;
+            storeCarsSeen += 1;
+            const basePrice = priceFrom(item, car);
+            if (!basePrice) continue;
+            const key = `${store.id}-${name}`;
+            const listing = {
+              id: `ehi-${store.id}-${carId(item, car, name)}`,
+              storeId: store.id,
+              storeName: store.name,
+              city: cityName(store.city),
+              address: store.address,
+              lat: store.lat,
+              lng: store.lng,
+              distanceKm: store.distanceKm,
+              hours: store.hours,
+              vehicleName: name,
+              vehicleClass: [
+                firstText(car.gearName, item.gearName),
+                firstText(car.structureName, item.structureName),
+                firstText(car.maxPassenger ? `${car.maxPassenger}座` : '', item.maxPassenger ? `${item.maxPassenger}座` : '')
+              ].filter(Boolean).join(' | '),
+              basePrice,
+              platformFees: 0,
+              insuranceFees: 0,
+              oneWayFee: 0,
+              sourceUrl,
+              dataCompleteness: 0.88
+            };
+            storeListings.push({ key, listing });
+          }
+          return { loginRequired: null, storeListings, storeSkips, carsSeen: storeCarsSeen };
+        };
+        const applyQuoteResult = (quoteResult) => {
+          if (quoteResult.loginRequired) return quoteResult.loginRequired;
+          storeSkips.push(...quoteResult.storeSkips);
+          carsSeen += quoteResult.carsSeen;
+          for (const { key, listing } of quoteResult.storeListings) {
+            if (!listingsByKey[key] || listingsByKey[key].basePrice > listing.basePrice) listingsByKey[key] = listing;
+          }
+          return null;
+        };
+        const quoteResults = hasVehicleQuery
+          ? await mapWithConcurrency(candidates, ehiProbeConcurrency, quoteStore)
+          : [];
+        if (hasVehicleQuery) {
+          for (const quoteResult of quoteResults) {
+            const loginRequired = applyQuoteResult(quoteResult);
+            if (loginRequired) return loginRequired;
+          }
+        } else {
+          for (const store of candidates) {
+            if (!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId) break;
+            const quoteResult = await quoteStore(store);
+            const loginRequired = applyQuoteResult(quoteResult);
+            if (loginRequired) return loginRequired;
+            if (quoteResult.storeListings.length) {
               selectedBlankStoreId = store.id;
               break;
             }
-          } catch (error) {
-            const message = String(error && (error.message || error.stack) || error);
-            if (message.includes('401')) {
-              return JSON.stringify({ statusKind: 'login-required', message: '一嗨库存报价接口返回 401，请登录一嗨后重试。', sourceUrl, listings: [] });
-            }
-            queryErrors.push(`${store.name}: ${message}`);
           }
         }
         const listings = Object.values(listingsByKey);
-        if (!listings.length && !stockRequests && verifyFailures.length) {
-          const message = hasVehicleQuery
-            ? `一嗨真实接口返回成功，但候选门店不满足取还时间：${verifyFailures.slice(0, 2).join('；')}`
-            : `一嗨真实接口返回成功，但半径 ${Math.round(request.radiusKm)}km 内候选门店不满足取还时间：${verifyFailures.slice(0, 2).join('；')}`;
-          return JSON.stringify({
-            statusKind: 'unavailable',
-            message,
-            sourceUrl,
-            listings: []
-          });
-        }
         if (!listings.length && carsSeen > 0) {
           return JSON.stringify({
             statusKind: 'parse-failed',
@@ -772,12 +1383,24 @@ func makeEhiSearchScript(json: String) -> String {
             listings: []
           });
         }
+        if (!listings.length && storeSkips.length) {
+          const message = hasVehicleQuery
+            ? `一嗨真实接口可访问，但候选门店暂不可报价：${storeSkips.slice(0, 2).join('；')}`
+            : `一嗨真实接口可访问，但半径 ${Math.round(request.radiusKm)}km 内候选门店暂不可报价：${storeSkips.slice(0, 2).join('；')}`;
+          return JSON.stringify({
+            statusKind: 'unavailable',
+            message,
+            sourceUrl,
+            listings: []
+          });
+        }
         const blankUnavailableMessage = `一嗨真实接口返回成功，但半径 ${Math.round(request.radiusKm)}km 内已探测 ${candidates.length} 个候选门店没有可订车型。`;
+        const vehicleUnavailableMessage = `一嗨真实接口返回成功，但为避免超时已按每个城市最多探测 1 个候选门店，没有找到匹配车型。`;
         return JSON.stringify({
           statusKind: listings.length ? 'ready' : 'unavailable',
           message: listings.length
             ? `已从一嗨 API 读取 ${listings.length} 个真实候选车型。`
-            : (hasVehicleQuery ? '一嗨真实接口返回成功，但当前条件没有可订车型。' : blankUnavailableMessage),
+            : (hasVehicleQuery ? vehicleUnavailableMessage : blankUnavailableMessage),
           sourceUrl,
           listings
         });
@@ -802,6 +1425,10 @@ private struct ZucheCity: Decodable {
     let cityName: String
     let cityLat: String?
     let cityLon: String?
+
+    var searchCity: ZucheSearchCity {
+        ZucheSearchCity(id: cityId, name: cityName, location: location)
+    }
 
     var location: GeoPoint? {
         guard let lat = Double(cityLat ?? ""), let lng = Double(cityLon ?? "") else { return nil }
@@ -843,6 +1470,10 @@ private struct ZucheDeptModels: Decodable {
     let deptAddress: String
     let workTime: String
     let deptId: Int
+    let cityId: Int?
+    let pickupWebsite: Int?
+    let pickupAppropriate: Int?
+    let chainFlag: Bool?
     let models: [ZucheModel]
 
     var location: GeoPoint? {
@@ -862,6 +1493,121 @@ private struct ZucheModel: Decodable {
 
     var price: Double? {
         lowPrice ?? Double(packagePrice ?? "")
+    }
+}
+
+struct ZucheConfirmOrderContent: Decodable {
+    let feeInfos: ZucheConfirmFeeInfos?
+    let bottomInfo: ZucheConfirmBottomInfo?
+}
+
+struct ZucheConfirmFeeInfos: Decodable {
+    let baseFeeInfo: [ZucheConfirmFeeItem]?
+}
+
+struct ZucheConfirmFeeItem: Decodable {
+    let itemName: String?
+    let itemDesc: String?
+    let itemPrice: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case itemName
+        case itemDesc
+        case itemPrice
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        itemName = try container.decodeIfPresent(String.self, forKey: .itemName)
+        itemDesc = try container.decodeIfPresent(String.self, forKey: .itemDesc)
+        itemPrice = try container.decodeLosslessDoubleIfPresent(forKey: .itemPrice)
+    }
+}
+
+struct ZucheConfirmBottomInfo: Decodable {
+    let totalPrice: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case totalPrice
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        totalPrice = try container.decodeLosslessDoubleIfPresent(forKey: .totalPrice)
+    }
+}
+
+func zucheActualBaseServiceFee(from content: ZucheConfirmOrderContent) -> Double? {
+    let feeItems = content.feeInfos?.baseFeeInfo ?? []
+    let serviceFee = feeItems
+        .filter { item in
+            let name = item.itemName ?? ""
+            return name.contains("基础服务费") || name.contains("基本服务费")
+        }
+        .compactMap(zucheFeeAmount)
+        .reduce(0, +)
+    return serviceFee > 0 ? serviceFee : nil
+}
+
+private func zucheFeeAmount(from item: ZucheConfirmFeeItem) -> Double? {
+    if let itemPrice = item.itemPrice {
+        return itemPrice
+    }
+    if let itemDesc = item.itemDesc {
+        return parseZucheMoneyAmount(from: itemDesc, preferTrailingTotal: true)
+    }
+    return nil
+}
+
+private func parseZucheMoneyAmount(from text: String, preferTrailingTotal: Bool = false) -> Double? {
+    let candidateText: String
+    if preferTrailingTotal, let equalIndex = text.lastIndex(of: "=") {
+        candidateText = String(text[text.index(after: equalIndex)...])
+    } else {
+        candidateText = text
+    }
+    let amounts = extractNumericAmounts(from: candidateText)
+    return preferTrailingTotal ? amounts.last : amounts.first
+}
+
+private func extractNumericAmounts(from text: String) -> [Double] {
+    var amounts: [Double] = []
+    var buffer = ""
+
+    func flush() {
+        guard !buffer.isEmpty, buffer != "-", buffer != "." else {
+            buffer = ""
+            return
+        }
+        if let value = Double(buffer) {
+            amounts.append(value)
+        }
+        buffer = ""
+    }
+
+    for character in text {
+        if character.isNumber || character == "." || (character == "-" && buffer.isEmpty) {
+            buffer.append(character)
+        } else {
+            flush()
+        }
+    }
+    flush()
+    return amounts
+}
+
+private extension KeyedDecodingContainer {
+    func decodeLosslessDoubleIfPresent(forKey key: Key) throws -> Double? {
+        if let value = try? decodeIfPresent(Double.self, forKey: key) {
+            return value
+        }
+        if let value = try? decodeIfPresent(Int.self, forKey: key) {
+            return Double(value)
+        }
+        if let value = try? decodeIfPresent(String.self, forKey: key) {
+            return parseZucheMoneyAmount(from: value)
+        }
+        return nil
     }
 }
 
@@ -947,11 +1693,14 @@ private struct EhiBridgeListing: Decodable {
 
 private enum PlatformAPIError: LocalizedError {
     case message(String)
+    case loginRequired
 
     var errorDescription: String? {
         switch self {
         case .message(let message):
             return message
+        case .loginRequired:
+            return "需要登录"
         }
     }
 }

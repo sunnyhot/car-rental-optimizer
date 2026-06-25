@@ -45,8 +45,16 @@ struct SearchTrustPresentationTests {
             message: "神州返回字段未识别。",
             sourceUrl: "https://m.zuche.com/"
         )
+        let carIncLogin = PlatformEvidenceStatus(
+            platform: .carInc,
+            kind: .loginRequired,
+            message: "登录神州后可补全基础服务费。",
+            sourceUrl: "https://www.zuche.com/"
+        )
 
         #expect(SearchRecoveryAction.actions(for: login).map(\.id) == ["ehi-login", "retry-same-request"])
+        #expect(SearchRecoveryAction.actions(for: carIncLogin).map(\.id) == ["carinc-login", "retry-same-request"])
+        #expect(SearchRecoveryAction.actions(for: carIncLogin).first?.title == "登录神州")
         #expect(SearchRecoveryAction.actions(for: parseFailed).map(\.id) == ["retry-later", "open-platform"])
     }
 

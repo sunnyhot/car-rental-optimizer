@@ -6,6 +6,8 @@ struct EhiLoginSheet: View {
     @State private var pageTitle = "一嗨登录"
     @State private var currentURL = EhiLoginSession.loginURL.absoluteString
     @State private var reloadToken = 0
+    @State private var resetToken = 0
+    @State private var captchaWarning: String?
 
     let onCompleted: () -> Void
 
@@ -30,6 +32,7 @@ struct EhiLoginSheet: View {
                 Spacer()
 
                 Button {
+                    captchaWarning = nil
                     reloadToken += 1
                 } label: {
                     Label("刷新登录页", systemImage: "arrow.clockwise")
@@ -58,7 +61,38 @@ struct EhiLoginSheet: View {
             .background(WorkbenchStyle.surface)
             .subtleDividerOverlay()
 
-            EhiLoginWebView(pageTitle: $pageTitle, currentURL: $currentURL, reloadToken: reloadToken)
+            if let captchaWarning {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(WorkbenchStyle.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(captchaWarning)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WorkbenchStyle.ink)
+                        Text("已停止自动刷新登录页，避免打断验证码输入。先点「刷新登录页」重新获取验证码，仍异常再重置验证状态。")
+                            .font(.caption2)
+                            .foregroundStyle(WorkbenchStyle.muted)
+                    }
+                    Spacer(minLength: 12)
+                    Button("重置验证状态") {
+                        self.captchaWarning = nil
+                        resetToken += 1
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(WorkbenchStyle.orange.opacity(0.10))
+                .subtleDividerOverlay()
+            }
+
+            EhiLoginWebView(
+                pageTitle: $pageTitle,
+                currentURL: $currentURL,
+                captchaWarning: $captchaWarning,
+                reloadToken: reloadToken,
+                resetToken: resetToken
+            )
                 .frame(minWidth: 760, minHeight: 620)
         }
         .frame(minWidth: 760, minHeight: 680)
@@ -68,10 +102,12 @@ struct EhiLoginSheet: View {
 private struct EhiLoginWebView: NSViewRepresentable {
     @Binding var pageTitle: String
     @Binding var currentURL: String
+    @Binding var captchaWarning: String?
     let reloadToken: Int
+    let resetToken: Int
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(pageTitle: $pageTitle, currentURL: $currentURL)
+        Coordinator(pageTitle: $pageTitle, currentURL: $currentURL, captchaWarning: $captchaWarning)
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -88,10 +124,10 @@ private struct EhiLoginWebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
         context.coordinator.lastReloadToken = reloadToken
+        context.coordinator.lastResetToken = resetToken
         context.coordinator.loadLoginPage(
             in: webView,
             resetChallengeData: false,
-            resetAutoRefreshGuard: false,
             restoreSavedSession: true
         )
         return webView
@@ -100,13 +136,21 @@ private struct EhiLoginWebView: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.pageTitle = $pageTitle
         context.coordinator.currentURL = $currentURL
+        context.coordinator.captchaWarning = $captchaWarning
         context.coordinator.webView = nsView
         if context.coordinator.lastReloadToken != reloadToken {
             context.coordinator.lastReloadToken = reloadToken
             context.coordinator.loadLoginPage(
                 in: nsView,
+                resetChallengeData: false,
+                restoreSavedSession: true
+            )
+        }
+        if context.coordinator.lastResetToken != resetToken {
+            context.coordinator.lastResetToken = resetToken
+            context.coordinator.loadLoginPage(
+                in: nsView,
                 resetChallengeData: true,
-                resetAutoRefreshGuard: true,
                 restoreSavedSession: false
             )
         }
@@ -123,13 +167,15 @@ private struct EhiLoginWebView: NSViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var pageTitle: Binding<String>
         var currentURL: Binding<String>
+        var captchaWarning: Binding<String?>
         var lastReloadToken = 0
+        var lastResetToken = 0
         weak var webView: WKWebView?
-        private var hasAutoRefreshedCaptchaError = false
 
-        init(pageTitle: Binding<String>, currentURL: Binding<String>) {
+        init(pageTitle: Binding<String>, currentURL: Binding<String>, captchaWarning: Binding<String?>) {
             self.pageTitle = pageTitle
             self.currentURL = currentURL
+            self.captchaWarning = captchaWarning
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -142,23 +188,19 @@ private struct EhiLoginWebView: NSViewRepresentable {
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == EhiLoginSession.captchaValidationObserverMessageName, let webView else { return }
-            recoverFromCaptchaError(in: webView)
+            guard message.name == EhiLoginSession.captchaValidationObserverMessageName else { return }
+            showCaptchaWarning(message.body as? String)
         }
 
         func loadLoginPage(
             in webView: WKWebView,
             resetChallengeData: Bool,
-            resetAutoRefreshGuard: Bool,
             restoreSavedSession: Bool
         ) {
-            if resetAutoRefreshGuard {
-                hasAutoRefreshedCaptchaError = false
-            }
-
             let load = { [weak self, weak webView] in
                 guard let self, let webView else { return }
                 Task { @MainActor in
+                    self.captchaWarning.wrappedValue = nil
                     self.pageTitle.wrappedValue = "一嗨登录"
                     self.currentURL.wrappedValue = EhiLoginSession.loginURL.absoluteString
                     webView.stopLoading()
@@ -170,7 +212,6 @@ private struct EhiLoginWebView: NSViewRepresentable {
             }
 
             if resetChallengeData {
-                EhiCookieVault.discardSavedSession()
                 EhiLoginSession.resetLoginChallengeData(completion: load)
             } else {
                 load()
@@ -183,22 +224,30 @@ private struct EhiLoginWebView: NSViewRepresentable {
         }
 
         private func inspectCaptchaError(in webView: WKWebView) {
-            webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self, weak webView] result, _ in
-                guard let self, let webView, let text = result as? String else { return }
+            webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self] result, _ in
+                guard let self, let text = result as? String else { return }
                 guard EhiLoginSession.containsCaptchaValidationError(text) else { return }
-                self.recoverFromCaptchaError(in: webView)
+                self.showCaptchaWarning(text)
             }
         }
 
-        private func recoverFromCaptchaError(in webView: WKWebView) {
-            guard !hasAutoRefreshedCaptchaError else { return }
-            hasAutoRefreshedCaptchaError = true
-            loadLoginPage(
-                in: webView,
-                resetChallengeData: true,
-                resetAutoRefreshGuard: false,
-                restoreSavedSession: false
-            )
+        private func showCaptchaWarning(_ rawText: String?) {
+            let message = warningMessage(from: rawText)
+            Task { @MainActor in
+                captchaWarning.wrappedValue = message
+            }
+        }
+
+        private func warningMessage(from rawText: String?) -> String {
+            guard let rawText else {
+                return "一嗨验证码校验异常，请刷新或重置验证状态后重试。"
+            }
+            let lines = rawText
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return lines.first(where: EhiLoginSession.containsCaptchaValidationError)
+                ?? "一嗨验证码校验异常，请刷新或重置验证状态后重试。"
         }
     }
 }

@@ -31,20 +31,28 @@ struct ResultPanelView: View {
                             }
 
                             SearchDiagnosticSummaryView(summary: viewModel.searchDiagnosticSummary)
+                            RecommendationFilterBar()
 
-                            LazyVStack(spacing: 10) {
-                                ForEach(Array(viewModel.displayedResults.enumerated()), id: \.element.id) { index, result in
-                                    ResultRowView(
-                                        rank: index + 1,
-                                        recommendation: result,
-                                        isSelected: viewModel.selectedId == result.id
-                                    ) {
-                                        viewModel.selectResult(result.id)
-                                        pendingMonitorRecommendation = result
-                                    }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        viewModel.selectResult(result.id)
+                            let displayedResults = viewModel.displayedResults
+                            if displayedResults.isEmpty {
+                                FilteredResultsEmptyView {
+                                    viewModel.clearRecommendationFilters()
+                                }
+                            } else {
+                                LazyVStack(spacing: 10) {
+                                    ForEach(Array(displayedResults.enumerated()), id: \.element.id) { index, result in
+                                        ResultRowView(
+                                            rank: index + 1,
+                                            recommendation: result,
+                                            isSelected: viewModel.selected?.id == result.id
+                                        ) {
+                                            viewModel.selectResult(result.id)
+                                            pendingMonitorRecommendation = result
+                                        }
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            viewModel.selectResult(result.id)
+                                        }
                                     }
                                 }
                             }
@@ -102,6 +110,9 @@ struct ResultPanelView: View {
         }
         if viewModel.isShowingStaleResults {
             return "\(viewModel.results.count) 个上次成功候选，等待本次查询恢复"
+        }
+        if viewModel.hasActiveRecommendationFilters {
+            return "\(viewModel.filteredResultCount)/\(viewModel.results.count) 个候选已筛选"
         }
         return "\(viewModel.results.count) 个真实候选，同车型取优后按总成本升序"
     }
@@ -235,6 +246,173 @@ private struct SearchDiagnosticSummaryView: View {
                 Text(summary.routeEstimateStatus)
                     .font(.caption2)
                     .foregroundStyle(WorkbenchStyle.muted)
+            }
+        }
+    }
+}
+
+private struct RecommendationFilterBar: View {
+    @EnvironmentObject var viewModel: SearchViewModel
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.surface, padding: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Label("筛选", systemImage: "line.3.horizontal.decrease.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+
+                    Text("\(viewModel.filteredResultCount) / \(viewModel.results.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .monospacedDigit()
+
+                    Spacer(minLength: 8)
+
+                    if viewModel.hasActiveRecommendationFilters {
+                        Button {
+                            viewModel.clearRecommendationFilters()
+                        } label: {
+                            Label("清空", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                    }
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .bottom, spacing: 10) {
+                        filterPickers
+
+                        Divider()
+                            .frame(height: 28)
+
+                        filterToggles
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .bottom, spacing: 10) {
+                            filterPickers
+                        }
+                        HStack(spacing: 14) {
+                            filterToggles
+                        }
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private var filterPickers: some View {
+        Group {
+            platformFilter
+            FilterPicker(
+                title: "车型",
+                selection: $viewModel.recommendationFilter.vehicleClass,
+                options: RecommendationVehicleClassFilter.allCases,
+                width: 100
+            )
+            FilterPicker(
+                title: "总成本",
+                selection: $viewModel.recommendationFilter.maxTotalCost,
+                options: RecommendationBudgetFilter.allCases,
+                width: 90
+            )
+            FilterPicker(
+                title: "距离",
+                selection: $viewModel.recommendationFilter.maxDistance,
+                options: RecommendationDistanceFilter.allCases,
+                width: 90
+            )
+        }
+    }
+
+    private var filterToggles: some View {
+        Group {
+            Toggle("费用完整", isOn: $viewModel.recommendationFilter.hideIncompleteFees)
+            Toggle("门店最低", isOn: $viewModel.recommendationFilter.deduplicateByStore)
+            Toggle("车型最低", isOn: $viewModel.recommendationFilter.deduplicateByVehicle)
+        }
+    }
+
+    private var platformFilter: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("平台")
+                .font(.caption2)
+                .foregroundStyle(WorkbenchStyle.muted)
+            Picker("平台", selection: $viewModel.recommendationFilter.platform) {
+                ForEach(RecommendationPlatformFilter.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 150)
+        }
+    }
+}
+
+private protocol RecommendationFilterOption: Identifiable, Hashable {
+    var label: String { get }
+}
+
+extension RecommendationVehicleClassFilter: RecommendationFilterOption {}
+extension RecommendationBudgetFilter: RecommendationFilterOption {}
+extension RecommendationDistanceFilter: RecommendationFilterOption {}
+
+private struct FilterPicker<Option: RecommendationFilterOption>: View where Option.ID == String {
+    let title: String
+    @Binding var selection: Option
+    let options: [Option]
+    let width: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(WorkbenchStyle.muted)
+            Picker(title, selection: $selection) {
+                ForEach(options) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .labelsHidden()
+            .frame(width: width)
+        }
+    }
+}
+
+private struct FilteredResultsEmptyView: View {
+    let onClear: () -> Void
+
+    var body: some View {
+        SurfaceBox(fill: WorkbenchStyle.surface, padding: 18) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .frame(width: 34)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("没有符合筛选的候选")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                    Text("放宽平台、预算、距离或费用完整度后继续查看。")
+                        .font(.caption)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                }
+
+                Spacer(minLength: 12)
+
+                Button {
+                    onClear()
+                } label: {
+                    Label("清空筛选", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
     }
@@ -468,7 +646,7 @@ private struct InlineMetric: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.black.opacity(0.035))
+                .fill(WorkbenchStyle.quietFill)
         )
     }
 }

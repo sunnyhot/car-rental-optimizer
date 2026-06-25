@@ -1,4 +1,5 @@
 import CarRentalDomain
+import CoreLocation
 import Foundation
 import Testing
 @testable import CarRentalOptimizer
@@ -25,6 +26,115 @@ struct LocationInputTests {
         #expect(viewModel.request.originLabel == "北京市朝阳区望京")
         #expect(viewModel.request.origin == GeoPoint(lat: 39.9928, lng: 116.4826))
         #expect(!viewModel.isLocatingOrigin)
+    }
+
+    @Test("CoreLocation unknown errors show retryable location guidance")
+    func coreLocationUnknownErrorsShowRetryableLocationGuidance() async {
+        let provider = FailingCurrentLocationProvider(error: CLError(.locationUnknown))
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: provider,
+            addressSuggestionProvider: StubAddressSuggestionProvider()
+        )
+
+        await viewModel.refreshCurrentLocation()
+
+        #expect(viewModel.originStatus == "暂时没有获取到当前位置，可重试定位或手动输入地址。")
+        #expect(!viewModel.originStatus.contains("kCLErrorDomain"))
+        #expect(!viewModel.isLocatingOrigin)
+    }
+
+    @Test("Initial current location refresh retries a temporary cold-start miss")
+    func initialCurrentLocationRefreshRetriesTemporaryColdStartMiss() async {
+        let provider = FlakyCurrentLocationProvider(results: [
+            .failure(CurrentLocationError.unavailable),
+            .success(ResolvedLocation(
+                label: "北京市通州区京东总部2号楼",
+                point: GeoPoint(lat: 39.7784, lng: 116.5629)
+            )),
+        ])
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: provider,
+            addressSuggestionProvider: StubAddressSuggestionProvider(),
+            initialLocationRetryDelayNanoseconds: 0
+        )
+
+        await viewModel.refreshCurrentLocationIfNeeded()
+
+        #expect(provider.requestCount == 2)
+        #expect(viewModel.request.originLabel == "北京市通州区京东总部2号楼")
+        #expect(viewModel.request.origin == GeoPoint(lat: 39.7784, lng: 116.5629))
+        #expect(viewModel.originStatus == "已定位当前位置。")
+    }
+
+    @Test("Current location selection prefers finer horizontal accuracy")
+    func currentLocationSelectionPrefersFinerHorizontalAccuracy() {
+        let coarse = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 39.9000, longitude: 116.4000),
+            altitude: 0,
+            horizontalAccuracy: 600,
+            verticalAccuracy: 20,
+            timestamp: Date()
+        )
+        let precise = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 39.7784, longitude: 116.5629),
+            altitude: 0,
+            horizontalAccuracy: 25,
+            verticalAccuracy: 20,
+            timestamp: Date().addingTimeInterval(-5)
+        )
+
+        let selected = bestCurrentLocation(from: [coarse, precise])
+
+        #expect(selected?.coordinate.latitude == precise.coordinate.latitude)
+        #expect(selected?.coordinate.longitude == precise.coordinate.longitude)
+    }
+
+    @Test("Current location selection ignores invalid horizontal accuracy")
+    func currentLocationSelectionIgnoresInvalidHorizontalAccuracy() {
+        let invalid = CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: 39.9000, longitude: 116.4000),
+            altitude: 0,
+            horizontalAccuracy: -1,
+            verticalAccuracy: 20,
+            timestamp: Date()
+        )
+
+        #expect(bestCurrentLocation(from: [invalid]) == nil)
+    }
+
+    @Test("Current location startup wait is capped below five seconds")
+    func currentLocationStartupWaitIsCappedBelowFiveSeconds() {
+        #expect(currentLocationWaitTimeoutNanoseconds < 5_000_000_000)
+    }
+
+    @Test("Current location acceptable accuracy is relaxed for faster startup")
+    func currentLocationAcceptableAccuracyIsRelaxedForFasterStartup() {
+        #expect(preferredCurrentLocationAccuracyMeters >= 200)
+    }
+
+    @Test("Apple location provider coalesces concurrent system requests")
+    func appleLocationProviderCoalescesConcurrentSystemRequests() throws {
+        let source = try locationServicesSource()
+
+        #expect(source.contains("activeLocationRequest"))
+        #expect(source.contains("if let activeLocationRequest"))
+    }
+
+    @Test("Apple location timeout waits until authorization has completed")
+    func appleLocationTimeoutWaitsUntilAuthorizationHasCompleted() throws {
+        let source = try locationServicesSource()
+        let requestRange = try #require(source.range(of: "private func requestLocation() async throws -> CLLocation"))
+        let requestBlock = String(source[requestRange.lowerBound...].prefix(1_500))
+
+        #expect(!requestBlock.contains("timeoutTask = Task"))
+        #expect(source.contains("startUpdatingLocation(with manager: CLLocationManager)"))
+        #expect(source.contains("startLocationTimeout()"))
     }
 
     @Test("Address suggestions update as user edits origin")
@@ -131,6 +241,14 @@ struct LocationInputTests {
     }
 }
 
+private struct FailingCurrentLocationProvider: CurrentLocationProviding {
+    let error: Error
+
+    func currentLocation() async throws -> ResolvedLocation {
+        throw error
+    }
+}
+
 private struct StubCurrentLocationProvider: CurrentLocationProviding {
     var location: ResolvedLocation?
 
@@ -139,6 +257,35 @@ private struct StubCurrentLocationProvider: CurrentLocationProviding {
             throw CurrentLocationError.unavailable
         }
         return location
+    }
+}
+
+private func locationServicesSource() throws -> String {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let sourceURL = repositoryRoot
+        .appendingPathComponent("Sources/CarRentalOptimizer/LocationServices.swift")
+    return try String(contentsOf: sourceURL, encoding: .utf8)
+}
+
+@MainActor
+private final class FlakyCurrentLocationProvider: CurrentLocationProviding {
+    private var results: [Result<ResolvedLocation, Error>]
+    private(set) var requestCount = 0
+
+    init(results: [Result<ResolvedLocation, Error>]) {
+        self.results = results
+    }
+
+    func currentLocation() async throws -> ResolvedLocation {
+        requestCount += 1
+        guard !results.isEmpty else {
+            throw CurrentLocationError.unavailable
+        }
+        return try results.removeFirst().get()
     }
 }
 

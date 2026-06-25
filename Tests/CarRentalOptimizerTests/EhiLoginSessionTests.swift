@@ -23,6 +23,46 @@ struct EhiLoginSessionTests {
         #expect(request.httpShouldHandleCookies)
     }
 
+    @Test("Initial login sheet load restores saved session without clearing login cookies")
+    func initialLoginSheetLoadRestoresSavedSessionWithoutClearingLoginCookies() throws {
+        let source = try ehiLoginSheetSource()
+        let marker = "context.coordinator.lastReloadToken = reloadToken"
+        let markerRange = try #require(source.range(of: marker))
+        let initialLoadBlock = String(source[markerRange.upperBound...].prefix(500))
+
+        #expect(initialLoadBlock.contains("resetChallengeData: false"))
+        #expect(initialLoadBlock.contains("restoreSavedSession: true"))
+        #expect(!initialLoadBlock.contains("discardSavedSession: true"))
+    }
+
+    @Test("Captcha validation warning is surfaced without automatic reload")
+    func captchaValidationWarningIsSurfacedWithoutAutomaticReload() throws {
+        let source = try ehiLoginSheetSource()
+
+        #expect(source.contains("showCaptchaWarning"))
+        #expect(!source.contains("recoverFromCaptchaError"))
+        #expect(!source.contains("hasAutoRefreshedCaptchaError"))
+        #expect(!source.contains("EhiCookieVault.discardSavedSession()"))
+    }
+
+    @Test("Login sheet refresh preserves saved session and challenge reset is explicit")
+    func loginSheetRefreshPreservesSavedSessionAndChallengeResetIsExplicit() throws {
+        let source = try ehiLoginSheetSource()
+        let reloadMarker = "if context.coordinator.lastReloadToken != reloadToken"
+        let reloadRange = try #require(source.range(of: reloadMarker))
+        let reloadBlock = String(source[reloadRange.upperBound...].prefix(500))
+
+        #expect(reloadBlock.contains("resetChallengeData: false"))
+        #expect(reloadBlock.contains("restoreSavedSession: true"))
+
+        let resetMarker = "if context.coordinator.lastResetToken != resetToken"
+        let resetRange = try #require(source.range(of: resetMarker))
+        let resetBlock = String(source[resetRange.upperBound...].prefix(500))
+
+        #expect(resetBlock.contains("resetChallengeData: true"))
+        #expect(resetBlock.contains("restoreSavedSession: false"))
+    }
+
     @Test("Captcha validation exception is detected from page text")
     func captchaValidationExceptionIsDetectedFromPageText() {
         #expect(EhiLoginSession.containsCaptchaValidationError("验证码校验异常，请刷新页面后重试"))
@@ -117,6 +157,141 @@ struct EhiLoginSessionTests {
         #expect(restored.map(\.name) == ["NEW_TOKEN"])
     }
 
+    @Test("Ehi cookie vault keeps an existing saved session when a login page has no eHi cookies")
+    @MainActor
+    func ehiCookieVaultKeepsExistingSavedSessionWhenCurrentStoreIsEmpty() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ehi-session-\(UUID().uuidString).json")
+        let populatedStore = WKWebsiteDataStore.nonPersistent()
+        let emptyStore = WKWebsiteDataStore.nonPersistent()
+        let ehiCookie = try #require(HTTPCookie(properties: [
+            .domain: ".1hai.cn",
+            .path: "/",
+            .name: "SESSION",
+            .value: "session-value",
+            .secure: "TRUE"
+        ]))
+
+        await setCookie(ehiCookie, in: populatedStore.httpCookieStore)
+        await EhiCookieVault.save(from: populatedStore.httpCookieStore, fileURL: fileURL)
+        await EhiCookieVault.save(from: emptyStore.httpCookieStore, fileURL: fileURL)
+
+        let restoreStore = WKWebsiteDataStore.nonPersistent()
+        await EhiCookieVault.restore(into: restoreStore.httpCookieStore, fileURL: fileURL)
+        let restored = await allCookies(in: restoreStore.httpCookieStore)
+
+        #expect(restored.map(\.name) == ["SESSION"])
+    }
+
+    @Test("Zuche cookie vault keeps CAR Inc session cookies and ignores other platforms")
+    func zucheCookieVaultKeepsCarIncSessionCookiesOnly() throws {
+        let zucheCookie = try #require(HTTPCookie(properties: [
+            .domain: ".zuche.com",
+            .path: "/",
+            .name: "SESSION",
+            .value: "zuche-session",
+            .secure: "TRUE",
+            HTTPCookiePropertyKey("HttpOnly"): "TRUE"
+        ]))
+        let ehiCookie = try #require(HTTPCookie(properties: [
+            .domain: "booking.1hai.cn",
+            .path: "/",
+            .name: "SESSION",
+            .value: "wrong-platform"
+        ]))
+
+        let persisted = ZucheCookieVault.persistableCookies(from: [zucheCookie, ehiCookie])
+        let restored = ZucheCookieVault.restoredCookies(from: persisted)
+
+        #expect(persisted.count == 1)
+        #expect(persisted.first?.name == "SESSION")
+        #expect(persisted.first?.expiresDate == nil)
+        #expect(restored.first?.domain == ".zuche.com")
+        #expect(restored.first?.value == "zuche-session")
+    }
+
+    @Test("Zuche cookie vault keeps an existing saved session when login completion has no CAR Inc cookies")
+    @MainActor
+    func zucheCookieVaultKeepsExistingSavedSessionWhenCurrentStoreIsEmpty() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zuche-session-\(UUID().uuidString).json")
+        let populatedStore = WKWebsiteDataStore.nonPersistent()
+        let emptyStore = WKWebsiteDataStore.nonPersistent()
+        let zucheCookie = try #require(HTTPCookie(properties: [
+            .domain: ".zuche.com",
+            .path: "/",
+            .name: "SESSION",
+            .value: "zuche-session",
+            .secure: "TRUE"
+        ]))
+
+        await setCookie(zucheCookie, in: populatedStore.httpCookieStore)
+        await ZucheCookieVault.save(from: populatedStore.httpCookieStore, fileURL: fileURL)
+        await ZucheCookieVault.save(from: emptyStore.httpCookieStore, fileURL: fileURL)
+
+        let restoreStore = WKWebsiteDataStore.nonPersistent()
+        await ZucheCookieVault.restore(into: restoreStore.httpCookieStore, fileURL: fileURL)
+        let restored = await allCookies(in: restoreStore.httpCookieStore)
+
+        #expect(restored.map(\.name) == ["SESSION"])
+    }
+
+    @Test("CAR Inc login sheet restores and saves the local session vault")
+    func carIncLoginSheetRestoresAndSavesLocalSessionVault() throws {
+        let source = try platformLoginSheetSource()
+
+        #expect(source.contains("await ZucheCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)"))
+        #expect(source.contains("await ZucheCookieVault.restore(into: webView.configuration.websiteDataStore.httpCookieStore)"))
+    }
+
+    @Test("CAR Inc login sheet opens the official desktop login page by default")
+    func carIncLoginSheetOpensOfficialDesktopLoginPageByDefault() throws {
+        let source = try platformLoginSheetSource()
+
+        #expect(officialPlatformLoginURL(for: .carInc) == "https://passport.zuche.com/memberManage/xtoploginMember.do?act=loginSys")
+        #expect(source.contains("officialPlatformLoginURL(for: platform, zucheLoginMode: .official)"))
+        #expect(source.contains("platformLoginUserAgent(for: platform, zucheLoginMode: zucheLoginMode)"))
+        #expect(ZucheLoginSession.desktopUserAgent.contains("Macintosh; Intel Mac OS X"))
+        #expect(!ZucheLoginSession.desktopUserAgent.contains("Mobile/15E148"))
+    }
+
+    @Test("CAR Inc login mode chooses the matching official URL and user agent")
+    func carIncLoginModeChoosesMatchingOfficialURLAndUserAgent() {
+        #expect(ZucheLoginMode.official.url.absoluteString == "https://passport.zuche.com/memberManage/xtoploginMember.do?act=loginSys")
+        #expect(ZucheLoginMode.sms.url.absoluteString == "https://m.zuche.com/html5/version652/user/login.html")
+        #expect(ZucheLoginMode.password.url.absoluteString == "https://m.zuche.com/html5/newversion/user/login.html")
+        #expect(ZucheLoginMode.official.userAgent == ZucheLoginSession.desktopUserAgent)
+        #expect(ZucheLoginMode.sms.userAgent == ZucheLoginSession.mobileUserAgent)
+        #expect(ZucheLoginMode.password.userAgent == ZucheLoginSession.mobileUserAgent)
+        #expect(ZucheLoginSession.mobileUserAgent.contains("Mobile/15E148"))
+        #expect(ZucheLoginSession.mobileUserAgent.contains("Version/16.0"))
+        #expect(ZucheLoginSession.mobileUserAgent.contains("Safari/604.1"))
+    }
+
+    @Test("CAR Inc login sheet offers official, SMS, and password login modes")
+    func carIncLoginSheetOffersOfficialSMSAndPasswordLoginModes() throws {
+        let source = try platformLoginSheetSource()
+        let sessionSource = try zucheLoginSessionSource()
+
+        #expect(sessionSource.contains("officialLoginURL"))
+        #expect(sessionSource.contains("smsLoginURL"))
+        #expect(sessionSource.contains("passwordLoginURL"))
+        #expect(sessionSource.contains("\"官网登录\""))
+        #expect(sessionSource.contains("\"短信登录\""))
+        #expect(sessionSource.contains("\"密码登录\""))
+        #expect(source.contains("ZucheLoginMode"))
+        #expect(source.contains("神州登录方式"))
+        #expect(source.contains("officialPlatformLoginURL(for: platform, zucheLoginMode: zucheLoginMode)"))
+    }
+
+    @Test("CAR Inc SMS login page is left on the unmodified official submit flow")
+    func carIncSMSLoginPageIsLeftOnUnmodifiedOfficialSubmitFlow() throws {
+        let source = try platformLoginSheetSource()
+
+        #expect(!source.contains("ZucheLoginSession.makeCompatibilityScript()"))
+        #expect(!source.contains("configuration.userContentController.addUserScript"))
+    }
+
     @Test("Captcha recovery removes persisted eHi cookies")
     func captchaRecoveryRemovesPersistedEhiCookies() throws {
         let fileURL = FileManager.default.temporaryDirectory
@@ -169,4 +344,37 @@ private func setCookie(_ cookie: HTTPCookie, in store: WKHTTPCookieStore) async 
             continuation.resume()
         }
     }
+}
+
+private func ehiLoginSheetSource() throws -> String {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let sourceURL = repositoryRoot
+        .appendingPathComponent("Sources/CarRentalOptimizer/EhiLoginSheet.swift")
+    return try String(contentsOf: sourceURL, encoding: .utf8)
+}
+
+private func platformLoginSheetSource() throws -> String {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let sourceURL = repositoryRoot
+        .appendingPathComponent("Sources/CarRentalOptimizer/PlatformLoginSheet.swift")
+    return try String(contentsOf: sourceURL, encoding: .utf8)
+}
+
+private func zucheLoginSessionSource() throws -> String {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let sourceURL = repositoryRoot
+        .appendingPathComponent("Sources/CarRentalOptimizer/ZucheLoginSession.swift")
+    return try String(contentsOf: sourceURL, encoding: .utf8)
 }
