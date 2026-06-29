@@ -12,90 +12,87 @@ struct EhiLoginSheet: View {
     let onCompleted: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "person.badge.key.fill")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(WorkbenchStyle.accent)
-                    .frame(width: 34, height: 34)
+        WorkbenchSheetShell(
+            title: pageTitle.isEmpty ? "一嗨登录" : pageTitle,
+            subtitle: currentURL,
+            icon: "person.badge.key.fill",
+            tone: .active
+        ) {
+            VStack(spacing: 0) {
+                loginActionBar
+                captchaWarningView
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(pageTitle.isEmpty ? "一嗨登录" : pageTitle)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                    Text(currentURL)
-                        .font(.caption2)
-                        .foregroundStyle(WorkbenchStyle.muted)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                Button {
-                    captchaWarning = nil
-                    reloadToken += 1
-                } label: {
-                    Label("刷新登录页", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-
-                Button("取消") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Button("登录完成，重新比较") {
-                    Task { @MainActor in
-                        await EhiCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)
-                        EhiLoginSession.notifyDidChange()
-                        dismiss()
-                        onCompleted()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(WorkbenchStyle.accent)
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(WorkbenchStyle.surface)
-            .subtleDividerOverlay()
-
-            if let captchaWarning {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(WorkbenchStyle.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(captchaWarning)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(WorkbenchStyle.ink)
-                        Text("已停止自动刷新登录页，避免打断验证码输入。先点「刷新登录页」重新获取验证码，仍异常再重置验证状态。")
-                            .font(.caption2)
-                            .foregroundStyle(WorkbenchStyle.muted)
-                    }
-                    Spacer(minLength: 12)
-                    Button("重置验证状态") {
-                        self.captchaWarning = nil
-                        resetToken += 1
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(WorkbenchStyle.orange.opacity(0.10))
-                .subtleDividerOverlay()
-            }
-
-            EhiLoginWebView(
-                pageTitle: $pageTitle,
-                currentURL: $currentURL,
-                captchaWarning: $captchaWarning,
-                reloadToken: reloadToken,
-                resetToken: resetToken
-            )
+                EhiLoginWebView(
+                    pageTitle: $pageTitle,
+                    currentURL: $currentURL,
+                    captchaWarning: $captchaWarning,
+                    reloadToken: reloadToken,
+                    resetToken: resetToken
+                )
                 .frame(minWidth: 760, minHeight: 620)
+            }
         }
         .frame(minWidth: 760, minHeight: 680)
+    }
+
+    private var loginActionBar: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Spacer()
+
+            Button {
+                captchaWarning = nil
+                reloadToken += 1
+            } label: {
+                Label("刷新登录页", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+
+            Button("取消") {
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
+
+            Button("登录完成，重新比较") {
+                Task { @MainActor in
+                    await EhiCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)
+                    EhiLoginSession.notifyDidChange()
+                    dismiss()
+                    onCompleted()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(WorkbenchStyle.commandBlue)
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(WorkbenchStyle.elevatedSurface)
+        .subtleDividerOverlay()
+    }
+
+    @ViewBuilder
+    private var captchaWarningView: some View {
+        if let captchaWarning {
+            HStack(alignment: .top, spacing: 10) {
+                ActionStatusRow(
+                    icon: "exclamationmark.triangle.fill",
+                    title: captchaWarning,
+                    message: "已停止自动刷新登录页，避免打断验证码输入。先点「刷新登录页」重新获取验证码，仍异常再重置验证状态。",
+                    tone: .warning
+                )
+                .layoutPriority(1)
+
+                Button("重置验证状态") {
+                    self.captchaWarning = nil
+                    resetToken += 1
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(WorkbenchStyle.amberAlert.opacity(0.10))
+            .subtleDividerOverlay()
+        }
     }
 }
 

@@ -17,30 +17,37 @@ struct CreateMonitorSheet: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(recommendation == nil ? "新建价格监控" : "监控这个方案")
-                .font(.title3.weight(.semibold))
+        WorkbenchSheetShell(
+            title: recommendation == nil ? "新建价格监控" : "监控这个方案",
+            subtitle: recommendation == nil ? "手动配置巡查条件" : "保存当前报价并持续巡查",
+            icon: "bell.badge",
+            tone: .active
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                summary
+                controls
 
-            summary
-            controls
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(WorkbenchStyle.red)
-            }
-
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                Button("保存监控") {
-                    Task { await save() }
+                if let errorMessage {
+                    ActionStatusRow(
+                        icon: "exclamationmark.triangle.fill",
+                        title: "保存失败",
+                        message: errorMessage,
+                        tone: .critical
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(WorkbenchStyle.accent)
+
+                HStack {
+                    Spacer()
+                    Button("取消") { dismiss() }
+                    Button("保存监控") {
+                        Task { await save() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(WorkbenchStyle.commandBlue)
+                }
             }
+            .padding(20)
         }
-        .padding(20)
         .frame(width: 460)
         .onAppear {
             name = recommendation.map { "\($0.listing.vehicleName) \(request.pickupAt)" } ?? "租车价格监控"
@@ -49,7 +56,7 @@ struct CreateMonitorSheet: View {
     }
 
     private var summary: some View {
-        SurfaceBox {
+        WorkbenchCard(fill: WorkbenchStyle.elevatedSurface, padding: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 MonitorSheetFactLine(icon: "calendar", text: "\(request.pickupAt) 至 \(request.returnAt)")
                 MonitorSheetFactLine(icon: "mappin.circle.fill", text: request.originLabel)

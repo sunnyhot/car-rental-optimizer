@@ -21,95 +21,91 @@ struct PlatformLoginSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "person.badge.key.fill")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(WorkbenchStyle.accent)
-                    .frame(width: 34, height: 34)
+        WorkbenchSheetShell(
+            title: pageTitle.isEmpty ? "\(platform.label)登录" : pageTitle,
+            subtitle: currentURL,
+            icon: "person.badge.key.fill",
+            tone: .active
+        ) {
+            VStack(spacing: 0) {
+                platformActionBar
+                platformInfoRow
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(pageTitle.isEmpty ? "\(platform.label)登录" : pageTitle)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                    Text(currentURL)
-                        .font(.caption2)
-                        .foregroundStyle(WorkbenchStyle.muted)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                if platform == .carInc {
-                    Picker("神州登录方式", selection: $zucheLoginMode) {
-                        ForEach(ZucheLoginMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 226)
-                    .help("默认使用神州官网登录；如果官网登录异常，可切换到移动端短信或密码登录页。")
-                }
-
-                Button {
-                    reloadToken += 1
-                } label: {
-                    Label("刷新登录页", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-
-                Button("取消") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Button("登录完成，重新比较") {
-                    Task { @MainActor in
-                        if platform == .carInc {
-                            await ZucheCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)
-                        }
-                        dismiss()
-                        onCompleted()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(WorkbenchStyle.accent)
-                .keyboardShortcut(.defaultAction)
+                PlatformLoginWebView(
+                    platform: platform,
+                    pageTitle: $pageTitle,
+                    currentURL: $currentURL,
+                    zucheLoginMode: zucheLoginMode,
+                    reloadToken: reloadToken
+                )
+                .frame(minWidth: 760, minHeight: 620)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(WorkbenchStyle.surface)
-            .subtleDividerOverlay()
-
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "yensign.circle.fill")
-                    .foregroundStyle(WorkbenchStyle.accent)
-                Text("神州基础服务费来自官方确认页费用接口；登录后点击完成，程序会重新比较并补全这部分费用。")
-                    .font(.caption)
-                    .foregroundStyle(WorkbenchStyle.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .background(WorkbenchStyle.accentSoft.opacity(0.7))
-            .subtleDividerOverlay()
-
-            PlatformLoginWebView(
-                platform: platform,
-                pageTitle: $pageTitle,
-                currentURL: $currentURL,
-                zucheLoginMode: zucheLoginMode,
-                reloadToken: reloadToken
-            )
-            .frame(minWidth: 760, minHeight: 620)
         }
         .frame(minWidth: 760, minHeight: 680)
         .onChange(of: zucheLoginMode) { _, _ in
             currentURL = officialPlatformLoginURL(for: platform, zucheLoginMode: zucheLoginMode)
             reloadToken += 1
         }
+    }
+
+    private var platformActionBar: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if platform == .carInc {
+                Picker("神州登录方式", selection: $zucheLoginMode) {
+                    ForEach(ZucheLoginMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 226)
+                .help("默认使用神州官网登录；如果官网登录异常，可切换到移动端短信或密码登录页。")
+            }
+
+            Spacer()
+
+            Button {
+                reloadToken += 1
+            } label: {
+                Label("刷新登录页", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+
+            Button("取消") {
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
+
+            Button("登录完成，重新比较") {
+                Task { @MainActor in
+                    if platform == .carInc {
+                        await ZucheCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)
+                    }
+                    dismiss()
+                    onCompleted()
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(WorkbenchStyle.commandBlue)
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(WorkbenchStyle.elevatedSurface)
+        .subtleDividerOverlay()
+    }
+
+    private var platformInfoRow: some View {
+        ActionStatusRow(
+            icon: "yensign.circle.fill",
+            title: "费用补全",
+            message: "神州基础服务费来自官方确认页费用接口；登录后点击完成，程序会重新比较并补全这部分费用。",
+            tone: .active
+        )
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(WorkbenchStyle.commandBlue.opacity(0.08))
+        .subtleDividerOverlay()
     }
 }
 

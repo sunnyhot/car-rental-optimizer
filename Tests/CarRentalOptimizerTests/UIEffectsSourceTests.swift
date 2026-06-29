@@ -61,4 +61,19 @@ struct UIEffectsSourceTests {
         #expect(source.contains("ActionStatusRow("))
         #expect(source.contains("WorkbenchCard("))
     }
+
+    @Test("Sheets use shared workbench chrome")
+    func sheetsUseSharedWorkbenchChrome() throws {
+        let createMonitor = try String(contentsOfFile: "Sources/CarRentalOptimizer/CreateMonitorSheet.swift", encoding: .utf8)
+        let ehi = try String(contentsOfFile: "Sources/CarRentalOptimizer/EhiLoginSheet.swift", encoding: .utf8)
+        let platform = try String(contentsOfFile: "Sources/CarRentalOptimizer/PlatformLoginSheet.swift", encoding: .utf8)
+
+        #expect(createMonitor.contains("WorkbenchSheetShell("))
+        #expect(createMonitor.contains("WorkbenchCard("))
+        #expect(createMonitor.contains("ActionStatusRow("))
+        #expect(ehi.contains("WorkbenchSheetShell("))
+        #expect(ehi.contains("ActionStatusRow("))
+        #expect(platform.contains("WorkbenchSheetShell("))
+        #expect(platform.contains("ActionStatusRow("))
+    }
 }
