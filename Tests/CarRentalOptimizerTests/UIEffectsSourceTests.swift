@@ -14,4 +14,16 @@ struct UIEffectsSourceTests {
         #expect(source.contains("tone: .success"))
         #expect(source.contains("tone: .warning"))
     }
+
+    @Test("Search panel uses command console components")
+    func searchPanelUsesCommandConsoleComponents() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/SearchPanelView.swift", encoding: .utf8)
+
+        #expect(source.contains("QueryConsoleSection"))
+        #expect(source.contains("PlatformSignalToggleButton"))
+        #expect(source.contains("CompareCommandButton"))
+        #expect(source.contains("ActionStatusRow("))
+        #expect(source.contains("StatusLightRail(isActive: viewModel.isSearching"))
+        #expect(source.contains("WorkbenchCard("))
+    }
 }

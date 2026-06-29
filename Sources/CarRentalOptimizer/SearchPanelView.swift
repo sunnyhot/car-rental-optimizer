@@ -38,9 +38,13 @@ struct SearchPanelView: View {
                     .fill(WorkbenchStyle.line)
                     .frame(height: 1)
 
+                StatusLightRail(isActive: viewModel.isSearching, tone: viewModel.hasBlockingPreflightIssues ? .warning : .active)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+
                 compareButton
                     .padding(16)
-                    .background(WorkbenchStyle.panel)
+                    .background(WorkbenchStyle.panelSurface)
             }
             .onChange(of: pickupDate) { _, newValue in
                 dismissOriginInput()
@@ -75,7 +79,7 @@ struct SearchPanelView: View {
 
     private var searchControls: some View {
         VStack(alignment: .leading, spacing: 14) {
-            QuerySection(icon: "mappin.and.ellipse", title: "行程") {
+            QueryConsoleSection(icon: "mappin.and.ellipse", title: "行程") {
                 OriginLocationField(
                     originInputTask: $originInputTask,
                     dismissRequest: originInputDismissRequest
@@ -89,7 +93,7 @@ struct SearchPanelView: View {
                 }
             }
 
-            QuerySection(icon: "car", title: "车辆与范围") {
+            QueryConsoleSection(icon: "car", title: "车辆与范围") {
                 FieldView(label: "车型") {
                     TextField("瑞虎8 / SUV / 留空查最近门店", text: $viewModel.request.vehicleQuery)
                         .textFieldStyle(.roundedBorder)
@@ -119,7 +123,7 @@ struct SearchPanelView: View {
                 }
             }
 
-            QuerySection(icon: "arrow.triangle.2.circlepath", title: "取还规则") {
+            QueryConsoleSection(icon: "arrow.triangle.2.circlepath", title: "取还规则") {
                 FieldView(label: "还车方式") {
                     Picker("", selection: $viewModel.request.returnMode) {
                         ForEach(ReturnMode.allCases, id: \.self) { mode in
@@ -131,10 +135,10 @@ struct SearchPanelView: View {
                 }
             }
 
-            QuerySection(icon: "link", title: "平台") {
+            QueryConsoleSection(icon: "link", title: "平台") {
                 HStack(spacing: 8) {
                     ForEach(PlatformId.allCases, id: \.self) { platform in
-                        PlatformToggleButton(
+                        PlatformSignalToggleButton(
                             platform: platform,
                             isSelected: viewModel.request.platforms.contains(platform)
                         ) {
@@ -160,29 +164,13 @@ struct SearchPanelView: View {
     }
 
     private var compareButton: some View {
-        Button {
+        CompareCommandButton(
+            isSearching: viewModel.isSearching,
+            isDisabled: viewModel.isSearching || viewModel.hasBlockingPreflightIssues
+        ) {
             dismissOriginInput()
             Task { await viewModel.runSearch() }
-        } label: {
-            HStack(spacing: 8) {
-                Spacer()
-                if viewModel.isSearching {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("查询中...")
-                } else {
-                    Image(systemName: "magnifyingglass")
-                    Text("开始比较")
-                }
-                Spacer()
-            }
-            .font(.headline.weight(.semibold))
-            .frame(minHeight: 34)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .tint(WorkbenchStyle.accent)
-        .disabled(viewModel.isSearching || viewModel.hasBlockingPreflightIssues)
     }
 
     private func dismissOriginInput() {
@@ -208,22 +196,12 @@ private struct PreflightIssueList: View {
         SurfaceBox(fill: WorkbenchStyle.surface, padding: 10) {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(issues) { issue in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: issue.severity == .blocking ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(issue.severity == .blocking ? WorkbenchStyle.red : WorkbenchStyle.orange)
-                            .frame(width: 16)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(issue.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(WorkbenchStyle.ink)
-                            Text(issue.message)
-                                .font(.caption2)
-                                .foregroundStyle(WorkbenchStyle.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
+                    ActionStatusRow(
+                        icon: issue.severity == .blocking ? "xmark.octagon.fill" : "exclamationmark.triangle.fill",
+                        title: issue.title,
+                        message: issue.message,
+                        tone: issue.severity == .blocking ? .critical : .warning
+                    )
                 }
             }
         }
@@ -365,13 +343,13 @@ private struct OriginSuggestionDropdown: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(WorkbenchStyle.panel)
+                .fill(WorkbenchStyle.elevatedSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(WorkbenchStyle.commandBlue.opacity(0.24), lineWidth: 1)
+                )
+                .shadow(color: WorkbenchStyle.cardShadow.opacity(0.62), radius: 14, x: 0, y: 8)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(WorkbenchStyle.accent.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.13), radius: 14, x: 0, y: 8)
     }
 
     private func suggestionButton(_ suggestion: AddressSuggestion) -> some View {
@@ -903,37 +881,33 @@ private struct DateRangeDurationBadge: View {
     }
 }
 
-private struct QuerySection<Content: View>: View {
+private struct QueryConsoleSection<Content: View>: View {
     let icon: String
     let title: String
     @ViewBuilder let content: Content
 
     var body: some View {
-        SurfaceBox(padding: 0) {
-            VStack(alignment: .leading, spacing: 12) {
+        WorkbenchCard(fill: WorkbenchStyle.panelSurface, stroke: WorkbenchStyle.hairline, padding: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
-                        .foregroundStyle(WorkbenchStyle.accent)
-                        .frame(width: 17)
+                        .foregroundStyle(WorkbenchStyle.signalTeal)
+                        .frame(width: 18)
                     Text(title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(WorkbenchStyle.ink)
                     Spacer()
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
 
                 VStack(alignment: .leading, spacing: 12) {
                     content
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
             }
         }
     }
 }
 
-private struct PlatformToggleButton: View {
+private struct PlatformSignalToggleButton: View {
     let platform: PlatformId
     let isSelected: Bool
     let action: () -> Void
@@ -948,19 +922,49 @@ private struct PlatformToggleButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
-            .foregroundStyle(isSelected ? WorkbenchStyle.accent : WorkbenchStyle.muted)
+            .foregroundStyle(isSelected ? WorkbenchStyle.commandBlue : WorkbenchStyle.muted)
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isSelected ? WorkbenchStyle.accentSoft : WorkbenchStyle.quietFill)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? WorkbenchStyle.commandBlue.opacity(0.12) : WorkbenchStyle.quietFill)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(isSelected ? WorkbenchStyle.accent.opacity(0.35) : WorkbenchStyle.line)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(isSelected ? WorkbenchStyle.commandBlue.opacity(0.46) : WorkbenchStyle.hairline, lineWidth: 1)
                     )
             )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(platform.label)平台")
         .accessibilityValue(isSelected ? "已选择" : "未选择")
+    }
+}
+
+private struct CompareCommandButton: View {
+    let isSearching: Bool
+    let isDisabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Spacer()
+                if isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("查询中...")
+                } else {
+                    Image(systemName: "magnifyingglass")
+                    Text("开始比较")
+                }
+                Spacer()
+            }
+            .font(.headline.weight(.semibold))
+            .frame(minHeight: 36)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .tint(WorkbenchStyle.commandBlue)
+        .disabled(isDisabled)
+        .animation(WorkbenchStyle.motionFast, value: isSearching)
     }
 }
 
