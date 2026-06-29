@@ -50,4 +50,15 @@ struct UIEffectsSourceTests {
         #expect(source.contains("WorkbenchCard("))
         #expect(source.contains("ActionStatusRow("))
     }
+
+    @Test("Monitor center uses command surfaces")
+    func monitorCenterUsesCommandSurfaces() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/MonitorCenterView.swift", encoding: .utf8)
+
+        #expect(source.contains("MonitorCommandSurface"))
+        #expect(source.contains("MonitorEventPulseRow"))
+        #expect(source.contains("TaskStatusTile("))
+        #expect(source.contains("ActionStatusRow("))
+        #expect(source.contains("WorkbenchCard("))
+    }
 }

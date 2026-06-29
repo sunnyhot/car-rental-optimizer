@@ -217,24 +217,28 @@ private struct MonitorSummaryBox: View {
     }
 
     var body: some View {
-        SurfaceBox(fill: WorkbenchStyle.accentSoft) {
+        WorkbenchCard(
+            fill: WorkbenchStyle.commandBlue.opacity(0.10),
+            stroke: WorkbenchStyle.commandBlue.opacity(0.22),
+            padding: 12
+        ) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                 MetricPill(title: "最近租车价", value: trend.latestPlatformRentalPrice.map(formatMoney) ?? "--")
                 MetricPill(
                     title: "相比上次",
                     value: formatSignedMoney(trend.platformRentalDelta),
-                    color: (trend.platformRentalDelta ?? 0) < 0 ? WorkbenchStyle.green : WorkbenchStyle.muted
+                    color: (trend.platformRentalDelta ?? 0) < 0 ? WorkbenchStyle.routeGreen : WorkbenchStyle.muted
                 )
                 MetricPill(
                     title: "下次巡查",
                     value: monitor.nextCheckAt.map { DateFormatter.localizedString(from: $0, dateStyle: .short, timeStyle: .short) } ?? "--"
                 )
-                MetricPill(title: "历史低点", value: trend.lowestPlatformRentalPrice.map(formatMoney) ?? "--", color: WorkbenchStyle.green)
+                MetricPill(title: "历史低点", value: trend.lowestPlatformRentalPrice.map(formatMoney) ?? "--", color: WorkbenchStyle.routeGreen)
                 MetricPill(title: "历史高点", value: trend.highestPlatformRentalPrice.map(formatMoney) ?? "--")
                 MetricPill(
                     title: "首次至今",
                     value: formatSignedMoney(trend.platformRentalDeltaFromFirst),
-                    color: (trend.platformRentalDeltaFromFirst ?? 0) < 0 ? WorkbenchStyle.green : WorkbenchStyle.muted
+                    color: (trend.platformRentalDeltaFromFirst ?? 0) < 0 ? WorkbenchStyle.routeGreen : WorkbenchStyle.muted
                 )
             }
         }
@@ -250,7 +254,7 @@ private struct MonitorTrendChart: View {
     }
 
     var body: some View {
-        SurfaceBox {
+        MonitorCommandSurface(title: "价格趋势", icon: "chart.xyaxis.line") {
             Chart {
                 ForEach(points) { snapshot in
                     if let price = snapshot.platformRentalPrice {
@@ -272,24 +276,15 @@ private struct MonitorEventList: View {
     let events: [PriceMonitorEvent]
 
     var body: some View {
-        SurfaceBox {
-            VStack(alignment: .leading, spacing: 8) {
-                MonitorSectionTitleRow(icon: "bell.badge", title: "事件")
-                if events.isEmpty {
-                    Text("暂无降价或异常事件。")
-                        .font(.caption)
-                        .foregroundStyle(WorkbenchStyle.muted)
-                } else {
-                    ForEach(events) { event in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: event.kind == .priceDrop ? "arrow.down.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(event.kind == .priceDrop ? WorkbenchStyle.green : WorkbenchStyle.orange)
-                                .frame(width: 16)
-                            Text(event.message)
-                                .font(.caption)
-                                .foregroundStyle(event.kind == .priceDrop ? WorkbenchStyle.green : WorkbenchStyle.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+        MonitorCommandSurface(title: "事件", icon: "bell.badge") {
+            if events.isEmpty {
+                Text("暂无降价或异常事件。")
+                    .font(.caption)
+                    .foregroundStyle(WorkbenchStyle.muted)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                        MonitorEventPulseRow(event: event, index: index)
                     }
                 }
             }
@@ -301,25 +296,26 @@ private struct MonitorSnapshotTable: View {
     let snapshots: [PriceSnapshot]
 
     var body: some View {
-        SurfaceBox {
-            VStack(alignment: .leading, spacing: 8) {
-                MonitorSectionTitleRow(icon: "chart.line.uptrend.xyaxis", title: "历史快照")
-                if snapshots.isEmpty {
-                    Text("等待首次巡查。")
-                        .font(.caption)
-                        .foregroundStyle(WorkbenchStyle.muted)
-                } else {
+        MonitorCommandSurface(title: "历史快照", icon: "chart.line.uptrend.xyaxis") {
+            if snapshots.isEmpty {
+                Text("等待首次巡查。")
+                    .font(.caption)
+                    .foregroundStyle(WorkbenchStyle.muted)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(snapshots.reversed())) { snapshot in
-                        HStack {
-                            Text(DateFormatter.localizedString(from: snapshot.checkedAt, dateStyle: .short, timeStyle: .short))
-                            Spacer()
-                            Text(snapshot.platformRentalPrice.map(formatMoney) ?? snapshot.status.label)
-                            Text(snapshot.status == .successful ? "历史快照，可能已失效" : snapshot.message)
-                                .font(.caption2)
-                                .foregroundStyle(snapshot.status == .successful ? WorkbenchStyle.orange : WorkbenchStyle.muted)
-                                .lineLimit(1)
+                        WorkbenchCard(fill: WorkbenchStyle.panelSurface, stroke: WorkbenchStyle.hairline, padding: 9) {
+                            HStack {
+                                Text(DateFormatter.localizedString(from: snapshot.checkedAt, dateStyle: .short, timeStyle: .short))
+                                Spacer()
+                                Text(snapshot.platformRentalPrice.map(formatMoney) ?? snapshot.status.label)
+                                Text(snapshot.status == .successful ? "历史快照，可能已失效" : snapshot.message)
+                                    .font(.caption2)
+                                    .foregroundStyle(snapshot.status == .successful ? WorkbenchStyle.amberAlert : WorkbenchStyle.muted)
+                                    .lineLimit(1)
+                            }
+                            .font(.caption)
                         }
-                        .font(.caption)
                     }
                 }
             }
@@ -331,16 +327,32 @@ private struct MonitorHealthStrip: View {
     let summary: MonitorHealthSummary
     let backgroundMonitoringEnabled: Bool
 
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 98), spacing: 8)]
+    }
+
     var body: some View {
-        SurfaceBox(fill: WorkbenchStyle.surface, padding: 10) {
-            HStack(spacing: 8) {
-                MetricPill(title: "总数", value: "\(summary.totalCount)")
-                MetricPill(title: "需处理", value: "\(summary.needsAttentionCount)", color: summary.needsAttentionCount > 0 ? WorkbenchStyle.orange : WorkbenchStyle.muted)
-                MetricPill(title: "降价", value: "\(summary.recentPriceDropCount)", color: summary.recentPriceDropCount > 0 ? WorkbenchStyle.green : WorkbenchStyle.muted)
-                MetricPill(title: "今日", value: "\(summary.dueTodayCount)")
+        WorkbenchCard(fill: WorkbenchStyle.panelSurface, padding: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                    TaskStatusTile(title: "总数", value: "\(summary.totalCount)", icon: "number", tone: .idle)
+                    TaskStatusTile(
+                        title: "需处理",
+                        value: "\(summary.needsAttentionCount)",
+                        icon: "exclamationmark.triangle.fill",
+                        tone: summary.needsAttentionCount > 0 ? .warning : .idle
+                    )
+                    TaskStatusTile(
+                        title: "降价",
+                        value: "\(summary.recentPriceDropCount)",
+                        icon: "arrow.down.circle.fill",
+                        tone: summary.recentPriceDropCount > 0 ? .success : .idle
+                    )
+                    TaskStatusTile(title: "今日", value: "\(summary.dueTodayCount)", icon: "calendar.badge.clock", tone: .active)
+                }
                 StatusPill(
                     text: backgroundMonitoringEnabled ? "后台开" : "后台关",
-                    color: backgroundMonitoringEnabled ? WorkbenchStyle.green : WorkbenchStyle.muted,
+                    color: backgroundMonitoringEnabled ? WorkbenchStyle.routeGreen : WorkbenchStyle.muted,
                     systemImage: backgroundMonitoringEnabled ? "checkmark.circle.fill" : "pause.circle"
                 )
             }
@@ -380,6 +392,36 @@ private struct StatusMessageRow: View {
                 Spacer()
             }
         }
+    }
+}
+
+private struct MonitorCommandSurface<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        WorkbenchCard(fill: WorkbenchStyle.elevatedSurface, stroke: WorkbenchStyle.hairline, padding: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                MonitorSectionTitleRow(icon: icon, title: title)
+                content
+            }
+        }
+    }
+}
+
+private struct MonitorEventPulseRow: View {
+    let event: PriceMonitorEvent
+    let index: Int
+
+    var body: some View {
+        ActionStatusRow(
+            icon: event.kind == .priceDrop ? "arrow.down.circle.fill" : "exclamationmark.triangle.fill",
+            title: event.kind == .priceDrop ? "价格下降" : "监控异常",
+            message: event.message,
+            tone: event.kind == .priceDrop ? .success : .warning
+        )
+        .commandCenterTransition(isEnabled: true, index: index)
     }
 }
 
