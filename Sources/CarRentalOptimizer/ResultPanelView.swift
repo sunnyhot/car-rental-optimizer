@@ -15,7 +15,7 @@ struct ResultPanelView: View {
         ) {
             Group {
                 if viewModel.isSearching {
-                    LoadingResultsView(phase: viewModel.searchProgressPhase)
+                    StagedSearchLoadingCard(phase: viewModel.searchProgressPhase)
                 } else if viewModel.results.isEmpty {
                     EmptyResultsView(
                         statuses: viewModel.platformStatuses,
@@ -41,7 +41,7 @@ struct ResultPanelView: View {
                             } else {
                                 LazyVStack(spacing: 10) {
                                     ForEach(Array(displayedResults.enumerated()), id: \.element.id) { index, result in
-                                        ResultRowView(
+                                        ResultSignalCard(
                                             rank: index + 1,
                                             recommendation: result,
                                             isSelected: viewModel.selected?.id == result.id
@@ -50,6 +50,7 @@ struct ResultPanelView: View {
                                             pendingMonitorRecommendation = result
                                         }
                                         .contentShape(Rectangle())
+                                        .commandCenterTransition(isEnabled: true, index: index)
                                         .onTapGesture {
                                             viewModel.selectResult(result.id)
                                         }
@@ -118,14 +119,16 @@ struct ResultPanelView: View {
     }
 }
 
-private struct LoadingResultsView: View {
+private struct StagedSearchLoadingCard: View {
     let phase: SearchProgressPhase
 
     var body: some View {
         VStack(spacing: 16) {
             Spacer()
-            SurfaceBox(fill: WorkbenchStyle.surface, padding: 18) {
+            WorkbenchCard(fill: WorkbenchStyle.panelSurface, stroke: WorkbenchStyle.commandBlue.opacity(0.24), padding: 18) {
                 VStack(spacing: 12) {
+                    StatusLightRail(isActive: true, tone: .active)
+                        .frame(width: 240)
                     ProgressView()
                         .controlSize(.large)
                     Text(phase.title)
@@ -458,21 +461,12 @@ private struct RecoverySuggestionList: View {
                 VStack(alignment: .leading, spacing: 8) {
                     MonitorSectionLikeTitle(icon: "wrench.and.screwdriver.fill", title: "建议操作")
                     ForEach(actions) { action in
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: action.systemImage)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(WorkbenchStyle.accent)
-                                .frame(width: 16)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(action.title)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(WorkbenchStyle.ink)
-                                Text(action.message)
-                                    .font(.caption2)
-                                    .foregroundStyle(WorkbenchStyle.muted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
+                        ActionStatusRow(
+                            icon: action.systemImage,
+                            title: action.title,
+                            message: action.message,
+                            tone: .active
+                        )
                     }
                 }
             }
@@ -497,86 +491,22 @@ private struct MonitorSectionLikeTitle: View {
     }
 }
 
-private struct ResultRowView: View {
+private struct ResultSignalCard: View {
     let rank: Int
     let recommendation: Recommendation
     let isSelected: Bool
     let onMonitor: () -> Void
 
     var body: some View {
-        SurfaceBox(
-            fill: isSelected ? WorkbenchStyle.accentSoft.opacity(0.9) : WorkbenchStyle.surface,
-            stroke: isSelected ? WorkbenchStyle.accent.opacity(0.45) : WorkbenchStyle.line,
+        WorkbenchCard(
+            fill: isSelected ? WorkbenchStyle.commandBlue.opacity(0.11) : WorkbenchStyle.elevatedSurface,
+            stroke: isSelected ? WorkbenchStyle.commandBlue.opacity(0.48) : WorkbenchStyle.hairline,
+            isHighlighted: isSelected,
             padding: 0
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    rankBadge
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Text(recommendation.listing.store.name)
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(WorkbenchStyle.ink)
-                                .lineLimit(1)
-                            StatusPill(
-                                text: recommendation.listing.platform.label,
-                                color: recommendation.listing.platform == .ehi ? WorkbenchStyle.teal : WorkbenchStyle.accent,
-                                systemImage: "building.2.fill"
-                            )
-                            if let comparisonLabel {
-                                StatusPill(
-                                    text: comparisonLabel,
-                                    color: WorkbenchStyle.green,
-                                    systemImage: "arrow.triangle.2.circlepath"
-                                )
-                            }
-                        }
-
-                        Text("\(recommendation.listing.vehicleName) · \(recommendation.match.label)")
-                            .font(.callout)
-                            .foregroundStyle(WorkbenchStyle.muted)
-                            .lineLimit(1)
-
-                        HStack(spacing: 14) {
-                            Label("\(recommendation.listing.store.distanceKm, specifier: "%.1f") km", systemImage: "location.fill")
-                            Label(recommendation.listing.store.hours, systemImage: "clock.fill")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(WorkbenchStyle.muted)
-                        .lineLimit(1)
-                    }
-
-                    Spacer(minLength: 10)
-
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("总成本")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(WorkbenchStyle.muted)
-                        Text(formatMoney(recommendation.bestTotal))
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundStyle(WorkbenchStyle.ink)
-                            .monospacedDigit()
-                        Text(recommendation.bestRouteMode.label)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(WorkbenchStyle.accent)
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    InlineMetric(title: "租车小计", value: formatMoney(recommendation.rentalTotal))
-                    InlineMetric(title: "打车到店", value: formatMoney(recommendation.taxiRoute.cost))
-                    InlineMetric(title: "公交到店", value: formatMoney(recommendation.transitRoute.cost))
-                    InlineMetric(title: "完整度", value: "\(Int((recommendation.listing.dataCompleteness * 100).rounded()))%")
-                    Button {
-                        onMonitor()
-                    } label: {
-                        Label("监控", systemImage: "bell.badge")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityLabel("监控此租车方案")
-                }
+                cardHeader
+                cardMetrics
 
                 Text(rankingReason)
                     .font(.caption2)
@@ -587,7 +517,81 @@ private struct ResultRowView: View {
             }
             .padding(14)
         }
+        .scaleEffect(isSelected ? 1.006 : 1.0)
+        .animation(WorkbenchStyle.motionFast, value: isSelected)
         .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var cardHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
+            rankBadge
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(recommendation.listing.store.name)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                        .lineLimit(1)
+                    StatusPill(
+                        text: recommendation.listing.platform.label,
+                        color: recommendation.listing.platform == .ehi ? WorkbenchStyle.signalTeal : WorkbenchStyle.commandBlue,
+                        systemImage: "building.2.fill"
+                    )
+                    if let comparisonLabel {
+                        StatusPill(
+                            text: comparisonLabel,
+                            color: WorkbenchStyle.routeGreen,
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                }
+
+                Text("\(recommendation.listing.vehicleName) · \(recommendation.match.label)")
+                    .font(.callout)
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .lineLimit(1)
+
+                HStack(spacing: 14) {
+                    Label("\(recommendation.listing.store.distanceKm, specifier: "%.1f") km", systemImage: "location.fill")
+                    Label(recommendation.listing.store.hours, systemImage: "clock.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(WorkbenchStyle.muted)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 10)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("总成本")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.muted)
+                Text(formatMoney(recommendation.bestTotal))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(WorkbenchStyle.ink)
+                    .monospacedDigit()
+                Text(recommendation.bestRouteMode.label)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.commandBlue)
+            }
+        }
+    }
+
+    private var cardMetrics: some View {
+        HStack(spacing: 8) {
+            InlineMetric(title: "租车小计", value: formatMoney(recommendation.rentalTotal))
+            InlineMetric(title: "打车到店", value: formatMoney(recommendation.taxiRoute.cost))
+            InlineMetric(title: "公交到店", value: formatMoney(recommendation.transitRoute.cost))
+            InlineMetric(title: "完整度", value: "\(Int((recommendation.listing.dataCompleteness * 100).rounded()))%")
+            Button {
+                onMonitor()
+            } label: {
+                Label("监控", systemImage: "bell.badge")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("监控此租车方案")
+        }
     }
 
     private var rankingReason: String {
@@ -614,13 +618,13 @@ private struct ResultRowView: View {
         VStack(spacing: 0) {
             Text("\(rank)")
                 .font(.headline.weight(.bold))
-                .foregroundStyle(isSelected ? .white : WorkbenchStyle.accent)
+                .foregroundStyle(isSelected ? .white : WorkbenchStyle.commandBlue)
                 .monospacedDigit()
         }
         .frame(width: 40, height: 40)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? WorkbenchStyle.accent : WorkbenchStyle.accentSoft)
+                .fill(isSelected ? WorkbenchStyle.commandBlue : WorkbenchStyle.commandBlue.opacity(0.13))
         )
     }
 }
