@@ -38,4 +38,16 @@ struct UIEffectsSourceTests {
         #expect(source.contains("ActionStatusRow("))
         #expect(source.contains("WorkbenchCard("))
     }
+
+    @Test("Detail panel uses decision receipt components")
+    func detailPanelUsesDecisionReceiptComponents() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/DetailPanelView.swift", encoding: .utf8)
+
+        #expect(source.contains("DecisionReceiptHeader"))
+        #expect(source.contains("RouteDecisionCard"))
+        #expect(source.contains("ReceiptActionBar"))
+        #expect(source.contains("TaskStatusTile("))
+        #expect(source.contains("WorkbenchCard("))
+        #expect(source.contains("ActionStatusRow("))
+    }
 }

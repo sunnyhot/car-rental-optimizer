@@ -48,7 +48,12 @@ private struct RecommendationDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                TotalReceiptHeader(recommendation: recommendation)
+                DecisionReceiptHeader(recommendation: recommendation)
+
+                HStack(spacing: 8) {
+                    TaskStatusTile(title: "租车小计", value: formatMoney(recommendation.rentalTotal), icon: "car.fill", tone: .active)
+                    TaskStatusTile(title: "到店成本", value: formatMoney(bestRouteCost), icon: recommendation.bestRouteMode == .taxi ? "car.side" : "bus.fill", tone: .success)
+                }
 
                 SurfaceBox {
                     VStack(alignment: .leading, spacing: 10) {
@@ -96,13 +101,13 @@ private struct RecommendationDetailView: View {
                     DetailTitleRow(icon: "map.fill", title: "到店路线")
 
                     HStack(spacing: 10) {
-                        RouteBoxView(
+                        RouteDecisionCard(
                             title: "打车",
                             total: recommendation.taxiTotal,
                             route: recommendation.taxiRoute,
                             isBest: recommendation.bestRouteMode == .taxi
                         )
-                        RouteBoxView(
+                        RouteDecisionCard(
                             title: "公共交通",
                             total: recommendation.transitTotal,
                             route: recommendation.transitRoute,
@@ -115,37 +120,17 @@ private struct RecommendationDetailView: View {
                     WarningBox(warnings: recommendation.warnings)
                 }
 
-                Button {
-                    onMonitor()
-                } label: {
-                    HStack(spacing: 6) {
-                        Spacer()
-                        Text("监控这个方案")
-                        Image(systemName: "bell.badge")
-                    }
-                    .font(.caption.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(WorkbenchStyle.accent)
-
-                if let url = URL(string: recommendation.listing.sourceUrl) {
-                    Link(destination: url) {
-                        HStack(spacing: 6) {
-                            Spacer()
-                            Text("打开原始平台")
-                            Image(systemName: "arrow.up.right.square")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
+                ReceiptActionBar(
+                    sourceURL: URL(string: recommendation.listing.sourceUrl),
+                    onMonitor: onMonitor
+                )
             }
             .padding(16)
         }
+    }
+
+    private var bestRouteCost: Double {
+        recommendation.bestRouteMode == .taxi ? recommendation.taxiRoute.cost : recommendation.transitRoute.cost
     }
 }
 
@@ -247,26 +232,27 @@ private struct QuoteCredibilityDetail: View {
     }
 }
 
-private struct TotalReceiptHeader: View {
+private struct DecisionReceiptHeader: View {
     let recommendation: Recommendation
 
     var body: some View {
-        SurfaceBox(
-            fill: WorkbenchStyle.accentSoft,
-            stroke: WorkbenchStyle.accent.opacity(0.18),
+        WorkbenchCard(
+            fill: WorkbenchStyle.commandBlue.opacity(0.12),
+            stroke: WorkbenchStyle.commandBlue.opacity(0.28),
+            isHighlighted: true,
             padding: 16
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center) {
                     StatusPill(
                         text: recommendation.listing.platform.label,
-                        color: recommendation.listing.platform == .ehi ? WorkbenchStyle.teal : WorkbenchStyle.accent,
+                        color: recommendation.listing.platform == .ehi ? WorkbenchStyle.signalTeal : WorkbenchStyle.commandBlue,
                         systemImage: "building.2.fill"
                     )
                     Spacer()
                     StatusPill(
                         text: recommendation.bestRouteMode.label,
-                        color: WorkbenchStyle.green,
+                        color: WorkbenchStyle.routeGreen,
                         systemImage: recommendation.bestRouteMode == .taxi ? "car.fill" : "bus.fill"
                     )
                 }
@@ -279,6 +265,7 @@ private struct TotalReceiptHeader: View {
                         .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundStyle(WorkbenchStyle.ink)
                         .monospacedDigit()
+                        .contentTransition(.numericText())
                     Text("租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost))")
                         .font(.caption)
                         .foregroundStyle(WorkbenchStyle.muted)
@@ -361,16 +348,17 @@ private struct CostLineView: View {
     }
 }
 
-private struct RouteBoxView: View {
+private struct RouteDecisionCard: View {
     let title: String
     let total: Double
     let route: RouteEstimate
     let isBest: Bool
 
     var body: some View {
-        SurfaceBox(
-            fill: isBest ? WorkbenchStyle.accentSoft : WorkbenchStyle.surface,
-            stroke: isBest ? WorkbenchStyle.accent.opacity(0.35) : WorkbenchStyle.line,
+        WorkbenchCard(
+            fill: isBest ? WorkbenchStyle.routeGreen.opacity(0.10) : WorkbenchStyle.elevatedSurface,
+            stroke: isBest ? WorkbenchStyle.routeGreen.opacity(0.34) : WorkbenchStyle.hairline,
+            isHighlighted: isBest,
             padding: 11
         ) {
             VStack(alignment: .leading, spacing: 7) {
@@ -382,7 +370,7 @@ private struct RouteBoxView: View {
                     if isBest {
                         Text("推荐")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(WorkbenchStyle.accent)
+                            .foregroundStyle(WorkbenchStyle.routeGreen)
                     }
                 }
 
@@ -409,20 +397,49 @@ private struct WarningBox: View {
 
     var body: some View {
         SurfaceBox(fill: WorkbenchStyle.orange.opacity(0.08), stroke: WorkbenchStyle.orange.opacity(0.22)) {
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(WorkbenchStyle.orange)
-                    .frame(width: 18)
+            ActionStatusRow(
+                icon: "exclamationmark.triangle.fill",
+                title: "提醒",
+                message: renderWarnings(warnings),
+                tone: .warning
+            )
+        }
+    }
+}
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("提醒")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                    Text(renderWarnings(warnings))
-                        .font(.caption)
-                        .foregroundStyle(WorkbenchStyle.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+private struct ReceiptActionBar: View {
+    let sourceURL: URL?
+    let onMonitor: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button {
+                onMonitor()
+            } label: {
+                HStack(spacing: 6) {
+                    Spacer()
+                    Text("监控这个方案")
+                    Image(systemName: "bell.badge")
                 }
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(WorkbenchStyle.commandBlue)
+
+            if let sourceURL {
+                Link(destination: sourceURL) {
+                    HStack(spacing: 6) {
+                        Spacer()
+                        Text("打开原始平台")
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
     }
