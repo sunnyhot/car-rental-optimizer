@@ -81,6 +81,41 @@ struct VehicleInsightTests {
         #expect(facts.contains("油箱/电池：未确认"))
         #expect(insight.platformFeatures.map(\.name) == ["倒车雷达", "蓝牙"])
     }
+
+    @Test("Configuration facts include confirmed reference and unknown states")
+    func configurationFactsIncludeConfirmedReferenceAndUnknownStates() {
+        let listing = makeInsightListing(vehicleName: "日产劲客", vehicleClass: "SUV 5座 | 倒车雷达 | 蓝牙")
+        var insight = VehicleInsightLocalInferencer.localInsight(for: listing, now: insightDate("2026-07-02 20:30"))
+        insight.specSheet.features.append(
+            VehicleFeature(name: "倒车影像", sourceName: "车型库", confidence: .medium, appliesTo: .series)
+        )
+
+        let facts = Dictionary(uniqueKeysWithValues: insight.formattedConfigurationFacts.map { ($0.label, $0) })
+
+        #expect(facts["倒车雷达"]?.value == "平台确认")
+        #expect(facts["倒车雷达"]?.scopeLabel == "一嗨平台")
+        #expect(facts["蓝牙"]?.value == "平台确认")
+        #expect(facts["倒车影像"]?.value == "车型库参考")
+        #expect(facts["倒车影像"]?.scopeLabel == "车型库")
+        #expect(facts["360影像"]?.value == "未确认")
+        #expect(facts["天窗"]?.value == "未确认")
+    }
+
+    @Test("Configuration facts expose common items even when platform returns no features")
+    func configurationFactsExposeCommonItemsEvenWhenPlatformReturnsNoFeatures() {
+        let listing = makeInsightListing(vehicleName: "日产劲客", vehicleClass: "SUV 5座")
+        let insight = VehicleInsightLocalInferencer.localInsight(for: listing, now: insightDate("2026-07-02 20:30"))
+
+        let factLabels = insight.formattedConfigurationFacts.map(\.label)
+        let facts = Dictionary(uniqueKeysWithValues: insight.formattedConfigurationFacts.map { ($0.label, $0.value) })
+
+        #expect(factLabels.contains("倒车影像"))
+        #expect(factLabels.contains("360影像"))
+        #expect(factLabels.contains("倒车雷达"))
+        #expect(factLabels.contains("蓝牙"))
+        #expect(facts["倒车影像"] == "未确认")
+        #expect(facts["蓝牙"] == "未确认")
+    }
 }
 
 private func makeInsightListing(

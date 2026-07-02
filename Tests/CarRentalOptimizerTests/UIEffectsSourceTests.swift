@@ -101,15 +101,16 @@ struct UIEffectsSourceTests {
         #expect(source.contains("ActionStatusRow("))
     }
 
-    @Test("Detail panel exposes vehicle insight section with specs and platform features")
-    func detailPanelExposesVehicleInsightSectionWithSpecsAndPlatformFeatures() throws {
+    @Test("Detail panel exposes vehicle insight section with specs and configuration reference")
+    func detailPanelExposesVehicleInsightSectionWithSpecsAndConfigurationReference() throws {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/DetailPanelView.swift", encoding: .utf8)
 
         #expect(source.contains("VehicleInsightSection("))
         #expect(source.contains("viewModel.selectedVehicleInsight"))
         #expect(source.contains("车型介绍"))
         #expect(source.contains("基础参数"))
-        #expect(source.contains("平台配置"))
+        #expect(source.contains("配置参考"))
+        #expect(source.contains("formattedConfigurationFacts"))
         #expect(source.contains("下单前以平台确认页为准"))
     }
 

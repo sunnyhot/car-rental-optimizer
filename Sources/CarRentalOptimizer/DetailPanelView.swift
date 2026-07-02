@@ -183,16 +183,7 @@ private struct VehicleInsightSection: View {
                 VehicleInsightFactGrid(title: "基础参数", facts: insight.formattedBasicSpecs)
 
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("平台配置")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                    if insight.platformFeatures.isEmpty {
-                        Text("配置以平台返回为准")
-                            .font(.caption2)
-                            .foregroundStyle(WorkbenchStyle.muted)
-                    } else {
-                        FlowLikeTagRows(features: insight.platformFeatures)
-                    }
+                    VehicleInsightFactGrid(title: "配置参考", facts: insight.formattedConfigurationFacts)
                     Text("下单前以平台确认页为准")
                         .font(.caption2)
                         .foregroundStyle(WorkbenchStyle.muted)
@@ -233,47 +224,6 @@ private struct VehicleInsightFactGrid: View {
                 }
             }
         }
-    }
-}
-
-private struct FlowLikeTagRows: View {
-    let features: [VehicleFeature]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 6) {
-                    ForEach(row) { feature in
-                        VehicleFeatureTag(feature: feature)
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-    }
-
-    private var rows: [[VehicleFeature]] {
-        stride(from: 0, to: features.count, by: 3).map {
-            Array(features[$0..<min($0 + 3, features.count)])
-        }
-    }
-}
-
-private struct VehicleFeatureTag: View {
-    let feature: VehicleFeature
-
-    var body: some View {
-        Text(feature.name)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(WorkbenchStyle.commandBlue)
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(WorkbenchStyle.commandBlue.opacity(0.10))
-            )
-            .help("\(feature.name) · \(feature.appliesTo.label)")
     }
 }
 

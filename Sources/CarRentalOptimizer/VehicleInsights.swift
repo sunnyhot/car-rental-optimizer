@@ -106,6 +106,22 @@ struct VehicleInsight: Codable, Equatable {
         specSheet.features.filter { $0.appliesTo == .platformListing }
     }
 
+    var formattedConfigurationFacts: [VehicleInsightFact] {
+        VehicleInsight.commonConfigurationFeatureNames.map { name in
+            let matchingFeatures = specSheet.features.filter { $0.name == name }
+            if let platformFeature = matchingFeatures.first(where: { $0.appliesTo == .platformListing }) {
+                return VehicleInsightFact(label: name, value: "平台确认", scopeLabel: platformFeature.sourceName)
+            }
+            if let modelYearFeature = matchingFeatures.first(where: { $0.appliesTo == .modelYear }) {
+                return VehicleInsightFact(label: name, value: "年款参考", scopeLabel: modelYearFeature.sourceName)
+            }
+            if let seriesFeature = matchingFeatures.first(where: { $0.appliesTo == .series }) {
+                return VehicleInsightFact(label: name, value: "车型库参考", scopeLabel: seriesFeature.sourceName)
+            }
+            return VehicleInsightFact(label: name, value: "未确认", scopeLabel: nil)
+        }
+    }
+
     var formattedBasicSpecs: [VehicleInsightFact] {
         var facts: [VehicleInsightFact] = []
         if let length = specSheet.lengthMm, let width = specSheet.widthMm, let height = specSheet.heightMm {
@@ -157,6 +173,22 @@ struct VehicleInsight: Codable, Equatable {
     private func mergedScopeLabel(_ scopes: [VehicleSpecScope]) -> String {
         scopes.contains(.platformListing) ? VehicleSpecScope.platformListing.label : scopes[0].label
     }
+
+    private static let commonConfigurationFeatureNames = [
+        "倒车影像",
+        "360影像",
+        "倒车雷达",
+        "蓝牙",
+        "CarPlay",
+        "手机无线充电",
+        "天窗",
+        "无钥匙进入",
+        "座椅加热",
+        "定速巡航",
+        "自适应巡航",
+        "后排隐私玻璃",
+        "电动尾门"
+    ]
 }
 
 enum VehicleInsightLocalInferencer {
@@ -303,8 +335,11 @@ enum VehicleInsightLocalInferencer {
     private static func platformFeatures(in text: String, sourceName: String) -> [VehicleFeature] {
         let candidates = [
             ("倒车影像", "倒车影像"),
+            ("倒车视频影像", "倒车影像"),
+            ("后视摄像头", "倒车影像"),
             ("360影像", "360影像"),
             ("360度影像", "360影像"),
+            ("全景影像", "360影像"),
             ("手机无线充电", "手机无线充电"),
             ("无线充电", "无线充电"),
             ("天窗", "天窗"),
@@ -312,7 +347,15 @@ enum VehicleInsightLocalInferencer {
             ("电动后尾门", "电动后尾门"),
             ("电动尾门", "电动尾门"),
             ("倒车雷达", "倒车雷达"),
-            ("蓝牙", "蓝牙")
+            ("蓝牙", "蓝牙"),
+            ("CarPlay", "CarPlay"),
+            ("手机互联", "CarPlay"),
+            ("车机互联", "CarPlay"),
+            ("无钥匙进入", "无钥匙进入"),
+            ("座椅加热", "座椅加热"),
+            ("定速巡航", "定速巡航"),
+            ("自适应巡航", "自适应巡航"),
+            ("ACC", "自适应巡航")
         ]
         var names: [String] = []
         for (token, name) in candidates where text.contains(token) {
