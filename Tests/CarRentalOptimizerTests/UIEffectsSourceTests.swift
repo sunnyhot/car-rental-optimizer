@@ -49,6 +49,10 @@ struct UIEffectsSourceTests {
         #expect(source.contains("StatusLightRail(isActive: true"))
         #expect(source.contains("ActionStatusRow("))
         #expect(source.contains("WorkbenchCard("))
+        #expect(source.contains("hasExpandableVehicleMatches"))
+        #expect(source.contains("showsAllVehicleMatches.toggle()"))
+        #expect(source.contains("显示全部匹配"))
+        #expect(source.contains("只看最低价"))
     }
 
     @Test("Result cards expose vehicle name copy action")
@@ -60,6 +64,15 @@ struct UIEffectsSourceTests {
         #expect(source.contains("doc.on.doc"))
         #expect(source.contains("复制车型"))
         #expect(source.contains("已复制车型"))
+    }
+
+    @Test("Result panel exposes compact vehicle insight line")
+    func resultPanelExposesCompactVehicleInsightLine() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/ResultPanelView.swift", encoding: .utf8)
+
+        #expect(source.contains("VehicleInsightLine("))
+        #expect(source.contains("VehicleInsightLocalInferencer.localInsight(for: recommendation.listing)"))
+        #expect(source.contains(".lineLimit(1)"))
     }
 
     @Test("Vehicle placeholder labels are hidden from result and detail surfaces")
@@ -86,6 +99,18 @@ struct UIEffectsSourceTests {
         #expect(source.contains("TaskStatusTile("))
         #expect(source.contains("WorkbenchCard("))
         #expect(source.contains("ActionStatusRow("))
+    }
+
+    @Test("Detail panel exposes vehicle insight section with specs and platform features")
+    func detailPanelExposesVehicleInsightSectionWithSpecsAndPlatformFeatures() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/DetailPanelView.swift", encoding: .utf8)
+
+        #expect(source.contains("VehicleInsightSection("))
+        #expect(source.contains("viewModel.selectedVehicleInsight"))
+        #expect(source.contains("车型介绍"))
+        #expect(source.contains("基础参数"))
+        #expect(source.contains("平台配置"))
+        #expect(source.contains("下单前以平台确认页为准"))
     }
 
     @Test("Monitor center uses command surfaces")

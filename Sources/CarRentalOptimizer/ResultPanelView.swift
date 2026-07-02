@@ -113,6 +113,9 @@ struct ResultPanelView: View {
         if viewModel.isShowingStaleResults {
             return "\(viewModel.results.count) 个上次成功候选，等待本次查询恢复"
         }
+        if let vehicleSummary = viewModel.vehicleMatchDisplaySummary {
+            return vehicleSummary
+        }
         if viewModel.hasActiveRecommendationFilters {
             return "\(viewModel.filteredResultCount)/\(viewModel.results.count) 个候选已筛选"
         }
@@ -272,6 +275,19 @@ private struct RecommendationFilterBar: View {
                         .monospacedDigit()
 
                     Spacer(minLength: 8)
+
+                    if viewModel.hasExpandableVehicleMatches {
+                        Button {
+                            viewModel.showsAllVehicleMatches.toggle()
+                        } label: {
+                            Label(
+                                viewModel.showsAllVehicleMatches ? "只看最低价" : "显示全部匹配",
+                                systemImage: viewModel.showsAllVehicleMatches ? "line.3.horizontal.decrease.circle" : "list.bullet.rectangle"
+                            )
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                    }
 
                     if viewModel.hasActiveRecommendationFilters {
                         Button {
@@ -569,6 +585,8 @@ private struct ResultSignalCard: View {
                     .fixedSize()
                 }
 
+                VehicleInsightLine(insight: VehicleInsightLocalInferencer.localInsight(for: recommendation.listing))
+
                 HStack(spacing: 14) {
                     Label("\(recommendation.listing.store.distanceKm, specifier: "%.1f") km", systemImage: "location.fill")
                     Label(recommendation.listing.store.hours, systemImage: "clock.fill")
@@ -664,6 +682,19 @@ private struct ResultSignalCard: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(isSelected ? WorkbenchStyle.commandBlue : WorkbenchStyle.commandBlue.opacity(0.13))
         )
+    }
+}
+
+private struct VehicleInsightLine: View {
+    let insight: VehicleInsight
+
+    var body: some View {
+        Label(insight.shortSummary, systemImage: "sparkle.magnifyingglass")
+            .font(.caption2)
+            .foregroundStyle(WorkbenchStyle.muted)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(insight.shortSummary)
     }
 }
 

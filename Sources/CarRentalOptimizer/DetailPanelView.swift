@@ -1,4 +1,5 @@
 import CarRentalDomain
+import Foundation
 import SwiftUI
 
 struct DetailPanelView: View {
@@ -10,7 +11,11 @@ struct DetailPanelView: View {
         WorkbenchPanel(title: "推荐明细", subtitle: "成本拆解和路线") {
             Group {
                 if let recommendation = viewModel.selected {
-                    RecommendationDetailView(recommendation: recommendation) {
+                    RecommendationDetailView(
+                        recommendation: recommendation,
+                        vehicleInsight: viewModel.selectedVehicleInsight,
+                        isLoadingVehicleInsight: viewModel.isLoadingSelectedVehicleInsight
+                    ) {
                         pendingMonitorRecommendation = recommendation
                     }
                 } else {
@@ -43,6 +48,8 @@ struct DetailPanelView: View {
 
 private struct RecommendationDetailView: View {
     let recommendation: Recommendation
+    let vehicleInsight: VehicleInsight?
+    let isLoadingVehicleInsight: Bool
     let onMonitor: () -> Void
 
     var body: some View {
@@ -71,6 +78,11 @@ private struct RecommendationDetailView: View {
                         }
                     }
                 }
+
+                VehicleInsightSection(
+                    insight: vehicleInsight ?? VehicleInsightLocalInferencer.localInsight(for: recommendation.listing),
+                    isLoading: isLoadingVehicleInsight
+                )
 
                 if recommendation.comparisonQuotes.count > 1 {
                     PlatformQuoteComparisonView(recommendation: recommendation)
@@ -132,6 +144,144 @@ private struct RecommendationDetailView: View {
     private var bestRouteCost: Double {
         recommendation.bestRouteMode == .taxi ? recommendation.taxiRoute.cost : recommendation.transitRoute.cost
     }
+}
+
+private struct VehicleInsightSection: View {
+    let insight: VehicleInsight
+    let isLoading: Bool
+
+    var body: some View {
+        SurfaceBox {
+            VStack(alignment: .leading, spacing: 11) {
+                DetailTitleRow(
+                    icon: insight.origin == .network ? "network" : "sparkle.magnifyingglass",
+                    title: "车型介绍",
+                    badge: isLoading ? "更新中" : insight.origin.label
+                )
+
+                Text(insight.longSummary)
+                    .font(.caption)
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    Text(insight.sourceName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.commandBlue)
+                    if let fetchedAt = insight.fetchedAt {
+                        Text(vehicleInsightFreshness(fetchedAt))
+                            .font(.caption2)
+                            .foregroundStyle(WorkbenchStyle.muted)
+                    }
+                    if let sourceURL = insight.sourceURL, let url = URL(string: sourceURL), insight.origin == .network {
+                        Link("来源", destination: url)
+                            .font(.caption2.weight(.semibold))
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                VehicleInsightFactGrid(title: "基础参数", facts: insight.formattedBasicSpecs)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("平台配置")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(WorkbenchStyle.ink)
+                    if insight.platformFeatures.isEmpty {
+                        Text("配置以平台返回为准")
+                            .font(.caption2)
+                            .foregroundStyle(WorkbenchStyle.muted)
+                    } else {
+                        FlowLikeTagRows(features: insight.platformFeatures)
+                    }
+                    Text("下单前以平台确认页为准")
+                        .font(.caption2)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                }
+            }
+        }
+    }
+}
+
+private struct VehicleInsightFactGrid: View {
+    let title: String
+    let facts: [VehicleInsightFact]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(WorkbenchStyle.ink)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 7) {
+                ForEach(facts) { fact in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(fact.label)
+                            .font(.caption2)
+                            .foregroundStyle(WorkbenchStyle.muted)
+                        Text(fact.value)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WorkbenchStyle.ink)
+                            .lineLimit(1)
+                        if let scopeLabel = fact.scopeLabel {
+                            Text(scopeLabel)
+                                .font(.caption2)
+                                .foregroundStyle(WorkbenchStyle.muted)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(WorkbenchStyle.quietFill))
+                }
+            }
+        }
+    }
+}
+
+private struct FlowLikeTagRows: View {
+    let features: [VehicleFeature]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 6) {
+                    ForEach(row) { feature in
+                        VehicleFeatureTag(feature: feature)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private var rows: [[VehicleFeature]] {
+        stride(from: 0, to: features.count, by: 3).map {
+            Array(features[$0..<min($0 + 3, features.count)])
+        }
+    }
+}
+
+private struct VehicleFeatureTag: View {
+    let feature: VehicleFeature
+
+    var body: some View {
+        Text(feature.name)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(WorkbenchStyle.commandBlue)
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(WorkbenchStyle.commandBlue.opacity(0.10))
+            )
+            .help("\(feature.name) · \(feature.appliesTo.label)")
+    }
+}
+
+private func vehicleInsightFreshness(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "MM-dd HH:mm"
+    formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+    return formatter.string(from: date)
 }
 
 private struct PlatformQuoteComparisonView: View {
