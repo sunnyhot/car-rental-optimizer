@@ -151,30 +151,58 @@ struct SearchViewModelTests {
         #expect(viewModel.results.isEmpty)
     }
 
-    @Test("Displayed results can be sorted by subtotal distance and completeness")
-    func displayedResultsCanBeSortedBySubtotalDistanceAndCompleteness() {
+    @Test("Displayed results can be sorted by total subtotal distance and completeness")
+    func displayedResultsCanBeSortedByTotalSubtotalDistanceAndCompleteness() {
         let viewModel = SearchViewModel(
             searchProvider: StubRentalSearchProvider(results: []),
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService()
         )
         viewModel.results = [
-            makeTestRecommendation(id: "near-complete", rentalTotal: 520, bestTotal: 550, distanceKm: 1.2, dataCompleteness: 0.98),
-            makeTestRecommendation(id: "cheap-far", rentalTotal: 280, bestTotal: 640, distanceKm: 21.0, dataCompleteness: 0.72),
-            makeTestRecommendation(id: "balanced", rentalTotal: 420, bestTotal: 500, distanceKm: 6.4, dataCompleteness: 0.84),
+            makeTestRecommendation(id: "lowest-rental", rentalTotal: 300, bestTotal: 800, distanceKm: 4.0, dataCompleteness: 0.80),
+            makeTestRecommendation(id: "nearest", rentalTotal: 700, bestTotal: 820, distanceKm: 0.5, dataCompleteness: 0.78),
+            makeTestRecommendation(id: "most-complete", rentalTotal: 650, bestTotal: 760, distanceKm: 3.0, dataCompleteness: 0.99),
+            makeTestRecommendation(id: "lowest-total", rentalTotal: 600, bestTotal: 610, distanceKm: 5.0, dataCompleteness: 0.82),
         ]
 
         viewModel.recommendationSortMode = .bestTotal
-        #expect(viewModel.displayedResults.map(\.id) == ["near-complete", "cheap-far", "balanced"])
+        #expect(viewModel.displayedResults.map(\.id) == ["lowest-total", "most-complete", "lowest-rental", "nearest"])
 
         viewModel.recommendationSortMode = .rentalSubtotal
-        #expect(viewModel.displayedResults.map(\.id) == ["cheap-far", "balanced", "near-complete"])
+        #expect(viewModel.displayedResults.map(\.id) == ["lowest-rental", "lowest-total", "most-complete", "nearest"])
 
         viewModel.recommendationSortMode = .distance
-        #expect(viewModel.displayedResults.map(\.id) == ["near-complete", "balanced", "cheap-far"])
+        #expect(viewModel.displayedResults.map(\.id) == ["nearest", "most-complete", "lowest-rental", "lowest-total"])
 
         viewModel.recommendationSortMode = .dataCompleteness
-        #expect(viewModel.displayedResults.map(\.id) == ["near-complete", "balanced", "cheap-far"])
+        #expect(viewModel.displayedResults.map(\.id) == ["most-complete", "lowest-total", "lowest-rental", "nearest"])
+    }
+
+    @Test("Changing sort mode selects the first displayed result")
+    func changingSortModeSelectsTheFirstDisplayedResult() {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.results = [
+            makeTestRecommendation(id: "lowest-rental", rentalTotal: 300, bestTotal: 800, distanceKm: 4.0, dataCompleteness: 0.80),
+            makeTestRecommendation(id: "nearest", rentalTotal: 700, bestTotal: 820, distanceKm: 0.5, dataCompleteness: 0.78),
+            makeTestRecommendation(id: "most-complete", rentalTotal: 650, bestTotal: 760, distanceKm: 3.0, dataCompleteness: 0.99),
+            makeTestRecommendation(id: "lowest-total", rentalTotal: 600, bestTotal: 610, distanceKm: 5.0, dataCompleteness: 0.82),
+        ]
+
+        viewModel.recommendationSortMode = .rentalSubtotal
+        viewModel.selectResult("nearest")
+
+        viewModel.recommendationSortMode = .bestTotal
+        #expect(viewModel.selected?.id == "lowest-total")
+
+        viewModel.recommendationSortMode = .distance
+        #expect(viewModel.selected?.id == "nearest")
+
+        viewModel.recommendationSortMode = .dataCompleteness
+        #expect(viewModel.selected?.id == "most-complete")
     }
 
     @Test("Displayed results apply platform vehicle class budget distance and fee filters")
@@ -237,6 +265,34 @@ struct SearchViewModelTests {
         #expect(viewModel.displayedResults.map(\.id) == ["unspecified"])
     }
 
+    @Test("Vehicle class budget and distance filters keep real sedans when platform class is incomplete")
+    func vehicleClassBudgetAndDistanceFiltersKeepRealSedansWhenPlatformClassIsIncomplete() {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.results = [
+            makeTestRecommendation(id: "cruze", rentalTotal: 2_848, bestTotal: 2_850, distanceKm: 0.3, dataCompleteness: 0.90, platform: .carInc, vehicleName: "雪佛兰科鲁泽", vehicleClass: "未指定车型", matchKind: .notSpecified),
+            makeTestRecommendation(id: "lavida", rentalTotal: 2_944, bestTotal: 2_946, distanceKm: 0.4, dataCompleteness: 0.90, platform: .carInc, vehicleName: "大众朗逸", vehicleClass: "未指定车型", matchKind: .notSpecified),
+            makeTestRecommendation(id: "generic-sedan", rentalTotal: 2_930, bestTotal: 2_932, distanceKm: 0.5, dataCompleteness: 0.90, platform: .carInc, vehicleName: "未指定车型", vehicleClass: "紧凑型车", matchKind: .notSpecified),
+            makeTestRecommendation(id: "expensive-sedan", rentalTotal: 3_200, bestTotal: 3_202, distanceKm: 0.3, dataCompleteness: 0.90, platform: .carInc, vehicleName: "日产劲客", vehicleClass: "未指定车型", matchKind: .notSpecified),
+            makeTestRecommendation(id: "far-sedan", rentalTotal: 2_860, bestTotal: 2_862, distanceKm: 4.2, dataCompleteness: 0.90, platform: .carInc, vehicleName: "丰田卡罗拉", vehicleClass: "未指定车型", matchKind: .notSpecified),
+            makeTestRecommendation(id: "unknown", rentalTotal: 2_820, bestTotal: 2_822, distanceKm: 0.2, dataCompleteness: 0.88, platform: .carInc, vehicleName: "未指定车型", vehicleClass: "未指定车型", matchKind: .notSpecified),
+        ]
+
+        viewModel.recommendationFilter.vehicleClass = .sedan
+        viewModel.recommendationFilter.maxTotalCost = .upTo3000
+        viewModel.recommendationFilter.maxDistance = .within1
+        #expect(viewModel.displayedResults.map(\.id) == ["cruze", "generic-sedan", "lavida"])
+
+        viewModel.recommendationFilter.vehicleClass = .all
+        #expect(viewModel.displayedResults.map(\.id) == ["unknown", "cruze", "generic-sedan", "lavida"])
+
+        viewModel.recommendationFilter.vehicleClass = .unspecified
+        #expect(viewModel.displayedResults.map(\.id) == ["unknown"])
+    }
+
     @Test("Displayed results can deduplicate by store or vehicle using lowest total")
     func displayedResultsCanDeduplicateByStoreOrVehicleUsingLowestTotal() {
         let viewModel = SearchViewModel(
@@ -252,7 +308,7 @@ struct SearchViewModelTests {
         ]
 
         viewModel.recommendationFilter.deduplicateByStore = true
-        #expect(viewModel.displayedResults.map(\.id) == ["store-a-low", "vehicle-low-cross-platform", "vehicle-high"])
+        #expect(viewModel.displayedResults.map(\.id) == ["vehicle-low-cross-platform", "store-a-low", "vehicle-high"])
 
         viewModel.recommendationFilter.deduplicateByStore = false
         viewModel.recommendationFilter.deduplicateByVehicle = true

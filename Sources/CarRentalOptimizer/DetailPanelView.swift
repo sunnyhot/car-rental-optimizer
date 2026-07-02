@@ -60,14 +60,14 @@ private struct RecommendationDetailView: View {
                         DetailTitleRow(
                             icon: "building.2.fill",
                             title: recommendation.listing.store.name,
-                            badge: recommendation.match.label
+                            badge: recommendation.match.displayLabel
                         )
 
                         VStack(alignment: .leading, spacing: 5) {
                             FactLine(icon: "mappin.circle.fill", text: "\(recommendation.listing.store.city) · \(recommendation.listing.store.address)")
                             FactLine(icon: "location.fill", text: String(format: "距离约 %.1f km", recommendation.listing.store.distanceKm))
                             FactLine(icon: "clock.fill", text: recommendation.listing.store.hours)
-                            FactLine(icon: "car.fill", text: "\(recommendation.listing.vehicleName) · \(recommendation.listing.vehicleClass)")
+                            FactLine(icon: "car.fill", text: recommendation.listing.displayNameWithClass)
                         }
                     }
                 }

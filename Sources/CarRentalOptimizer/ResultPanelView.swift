@@ -1,5 +1,6 @@
 import CarRentalDomain
 import Foundation
+import AppKit
 import SwiftUI
 
 struct ResultPanelView: View {
@@ -496,6 +497,7 @@ private struct ResultSignalCard: View {
     let recommendation: Recommendation
     let isSelected: Bool
     let onMonitor: () -> Void
+    @State private var didCopyVehicleName = false
 
     var body: some View {
         WorkbenchCard(
@@ -546,10 +548,26 @@ private struct ResultSignalCard: View {
                     }
                 }
 
-                Text("\(recommendation.listing.vehicleName) · \(recommendation.match.label)")
-                    .font(.callout)
-                    .foregroundStyle(WorkbenchStyle.muted)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(recommendation.listing.displayName(with: recommendation.match))
+                        .font(.callout)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Button {
+                        copyVehicleName()
+                    } label: {
+                        Image(systemName: didCopyVehicleName ? "checkmark" : "doc.on.doc")
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(didCopyVehicleName ? WorkbenchStyle.green : WorkbenchStyle.commandBlue)
+                    .accessibilityLabel(didCopyVehicleName ? "已复制车型" : "复制车型")
+                    .help(didCopyVehicleName ? "已复制车型" : "复制车型")
+                    .fixedSize()
+                }
 
                 HStack(spacing: 14) {
                     Label("\(recommendation.listing.store.distanceKm, specifier: "%.1f") km", systemImage: "location.fill")
@@ -595,7 +613,27 @@ private struct ResultSignalCard: View {
     }
 
     private var rankingReason: String {
-        "排序依据：总成本 \(formatMoney(recommendation.bestTotal)) = 租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost)) · \(recommendation.match.label)"
+        var reason = "排序依据：总成本 \(formatMoney(recommendation.bestTotal)) = 租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost))"
+        if let matchLabel = recommendation.match.displayLabel {
+            reason += " · \(matchLabel)"
+        }
+        return reason
+    }
+
+    private func copyVehicleName() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(recommendation.listing.vehicleName, forType: .string)
+        withAnimation(WorkbenchStyle.motionFast) {
+            didCopyVehicleName = true
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            await MainActor.run {
+                withAnimation(WorkbenchStyle.motionFast) {
+                    didCopyVehicleName = false
+                }
+            }
+        }
     }
 
     private var bestRouteCost: Double {

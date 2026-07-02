@@ -67,20 +67,25 @@ struct LiveRentalSearchServiceTests {
         #expect(script.contains("label: '默认上下文'"))
         #expect(script.contains("isEnterprise: false"))
         #expect(script.contains("isEnterprise: true"))
-        #expect(script.contains("loginRequired: loginRequiredFromStock401(label)"))
+        #expect(script.contains("stock401Count += quoteResult.stock401Count || 0"))
         #expect(!script.contains("quote401Labels.length === attemptedQuoteCount"))
     }
 
-    @Test("eHi stock 401 stops probing before the official page redirects to login")
-    func ehiStock401StopsProbingBeforeOfficialPageRedirectsToLogin() {
+    @Test("eHi stock 401 only requests login after all stock attempts are rejected")
+    func ehiStock401OnlyRequestsLoginAfterAllStockAttemptsAreRejected() {
         let script = makeEhiSearchScript(json: "{}")
 
-        #expect(script.contains("const loginRequiredFromStock401 = (label) =>"))
-        #expect(script.contains("一嗨库存报价 /Stock/Step2 返回 401"))
+        #expect(script.contains("const stock401SkipMessage = (store, label) =>"))
+        #expect(script.contains("let stockAttemptCount = 0"))
+        #expect(script.contains("let stock401Count = 0"))
+        #expect(script.contains("storeStock401Count += 1"))
+        #expect(script.contains("if (!listings.length && stockAttemptCount > 0 && stock401Count === stockAttemptCount)"))
+        #expect(script.contains("一嗨库存报价 /Stock/Step2 均返回 401"))
         #expect(script.contains("请先登录一嗨后重试"))
         #expect(script.contains("if (code === 401) {"))
-        #expect(script.contains("loginRequired: loginRequiredFromStock401(label)"))
         #expect(script.contains("if (message.includes('401')) {"))
+        #expect(!script.contains("loginRequiredFromStock401"))
+        #expect(!script.contains("return { loginRequired:"))
         #expect(!script.contains("quote401Labels.push(label)"))
     }
 
@@ -256,6 +261,46 @@ struct LiveRentalSearchServiceTests {
         #expect(candidates.map(\.city.id) == ["beijing", "tianjin"])
         #expect(candidates.first?.isCurrentCity == true)
         #expect(candidates.dropFirst().allSatisfy { !$0.isCurrentCity })
+    }
+
+    @Test("CAR Inc vehicle search caps planned cities to avoid platform timeout")
+    func carIncVehicleSearchCapsPlannedCitiesToAvoidPlatformTimeout() {
+        let request = makeSearchRequest(
+            originLabel: "北京市 通州区 京东总部",
+            origin: GeoPoint(lat: 39.90, lng: 116.65),
+            radiusKm: 500
+        )
+        let cities = [
+            ZucheSearchCity(id: "beijing", name: "北京", location: GeoPoint(lat: 39.90, lng: 116.40)),
+            ZucheSearchCity(id: "langfang", name: "廊坊", location: GeoPoint(lat: 39.54, lng: 116.68)),
+            ZucheSearchCity(id: "tianjin", name: "天津", location: GeoPoint(lat: 39.08, lng: 117.20)),
+            ZucheSearchCity(id: "baoding", name: "保定", location: GeoPoint(lat: 38.87, lng: 115.46)),
+            ZucheSearchCity(id: "jinan", name: "济南", location: GeoPoint(lat: 36.65, lng: 117.12)),
+            ZucheSearchCity(id: "qingdao", name: "青岛", location: GeoPoint(lat: 36.07, lng: 120.38)),
+        ]
+
+        let candidates = zucheCandidateCities(from: cities, request: request)
+        let planned = plannedZucheCities(
+            from: candidates,
+            hasVehicleQuery: true,
+            maxVehicleCityCount: 3
+        )
+
+        #expect(candidates.count > planned.count)
+        #expect(planned.map(\.city.id) == ["beijing", "langfang", "tianjin"])
+    }
+
+    @Test("CAR Inc specific vehicle query filters listings before confirmation fee enrichment")
+    func carIncSpecificVehicleQueryFiltersListingsBeforeConfirmationFeeEnrichment() {
+        let listings = [
+            makeListing(id: "tiggo8", storeId: "nearest", vehicleName: "奇瑞瑞虎8", distanceKm: 0.4),
+            makeListing(id: "haval", storeId: "nearest", vehicleName: "哈弗H6", distanceKm: 0.4),
+            makeListing(id: "lavida", storeId: "nearest", vehicleName: "大众朗逸", distanceKm: 0.4),
+        ]
+
+        let filtered = zucheListingsMatchingVehicleQuery(listings, vehicleQuery: "瑞虎8")
+
+        #expect(filtered.map(\.id) == ["tiggo8"])
     }
 
     @Test("CAR Inc store picker uses nearest current store and station-only stores outside current city")

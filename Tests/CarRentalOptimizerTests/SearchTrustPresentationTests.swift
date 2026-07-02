@@ -54,7 +54,9 @@ struct SearchTrustPresentationTests {
 
         #expect(SearchRecoveryAction.actions(for: login).map(\.id) == ["ehi-login", "retry-same-request"])
         #expect(SearchRecoveryAction.actions(for: carIncLogin).map(\.id) == ["carinc-login", "retry-same-request"])
-        #expect(SearchRecoveryAction.actions(for: carIncLogin).first?.title == "登录神州")
+        let carIncAction = SearchRecoveryAction.actions(for: carIncLogin).first
+        #expect(carIncAction?.title == "登录神州")
+        #expect(carIncAction?.message.contains("登录神州官网") == true)
         #expect(SearchRecoveryAction.actions(for: parseFailed).map(\.id) == ["retry-later", "open-platform"])
     }
 

@@ -244,44 +244,32 @@ struct EhiLoginSessionTests {
         #expect(source.contains("await ZucheCookieVault.restore(into: webView.configuration.websiteDataStore.httpCookieStore)"))
     }
 
-    @Test("CAR Inc login sheet opens the official desktop login page by default")
-    func carIncLoginSheetOpensOfficialDesktopLoginPageByDefault() throws {
+    @Test("CAR Inc login sheet opens the official desktop login page")
+    func carIncLoginSheetOpensOfficialDesktopLoginPage() throws {
         let source = try platformLoginSheetSource()
 
         #expect(officialPlatformLoginURL(for: .carInc) == "https://passport.zuche.com/memberManage/xtoploginMember.do?act=loginSys")
-        #expect(source.contains("officialPlatformLoginURL(for: platform, zucheLoginMode: .official)"))
-        #expect(source.contains("platformLoginUserAgent(for: platform, zucheLoginMode: zucheLoginMode)"))
+        #expect(source.contains("_currentURL = State(initialValue: officialPlatformLoginURL(for: platform))"))
+        #expect(source.contains("platformLoginUserAgent(for: platform)"))
+        #expect(ZucheLoginSession.loginURL == ZucheLoginSession.officialLoginURL)
         #expect(ZucheLoginSession.desktopUserAgent.contains("Macintosh; Intel Mac OS X"))
         #expect(!ZucheLoginSession.desktopUserAgent.contains("Mobile/15E148"))
     }
 
-    @Test("CAR Inc login mode chooses the matching official URL and user agent")
-    func carIncLoginModeChoosesMatchingOfficialURLAndUserAgent() {
-        #expect(ZucheLoginMode.official.url.absoluteString == "https://passport.zuche.com/memberManage/xtoploginMember.do?act=loginSys")
-        #expect(ZucheLoginMode.sms.url.absoluteString == "https://m.zuche.com/html5/version652/user/login.html")
-        #expect(ZucheLoginMode.password.url.absoluteString == "https://m.zuche.com/html5/newversion/user/login.html")
-        #expect(ZucheLoginMode.official.userAgent == ZucheLoginSession.desktopUserAgent)
-        #expect(ZucheLoginMode.sms.userAgent == ZucheLoginSession.mobileUserAgent)
-        #expect(ZucheLoginMode.password.userAgent == ZucheLoginSession.mobileUserAgent)
-        #expect(ZucheLoginSession.mobileUserAgent.contains("Mobile/15E148"))
-        #expect(ZucheLoginSession.mobileUserAgent.contains("Version/16.0"))
-        #expect(ZucheLoginSession.mobileUserAgent.contains("Safari/604.1"))
-    }
-
-    @Test("CAR Inc login sheet offers official, SMS, and password login modes")
-    func carIncLoginSheetOffersOfficialSMSAndPasswordLoginModes() throws {
+    @Test("CAR Inc login sheet does not expose mobile H5 login modes")
+    func carIncLoginSheetDoesNotExposeMobileH5LoginModes() throws {
         let source = try platformLoginSheetSource()
         let sessionSource = try zucheLoginSessionSource()
 
         #expect(sessionSource.contains("officialLoginURL"))
-        #expect(sessionSource.contains("smsLoginURL"))
-        #expect(sessionSource.contains("passwordLoginURL"))
-        #expect(sessionSource.contains("\"官网登录\""))
-        #expect(sessionSource.contains("\"短信登录\""))
-        #expect(sessionSource.contains("\"密码登录\""))
-        #expect(source.contains("ZucheLoginMode"))
-        #expect(source.contains("神州登录方式"))
-        #expect(source.contains("officialPlatformLoginURL(for: platform, zucheLoginMode: zucheLoginMode)"))
+        #expect(!sessionSource.contains("smsLoginURL"))
+        #expect(!sessionSource.contains("passwordLoginURL"))
+        #expect(!sessionSource.contains("mobileUserAgent"))
+        #expect(!sessionSource.contains("ZucheLoginMode"))
+        #expect(!source.contains("Picker(\"神州登录方式\""))
+        #expect(!source.contains("短信登录"))
+        #expect(!source.contains("密码登录"))
+        #expect(!source.contains("html5/version652/user/login.html"))
     }
 
     @Test("CAR Inc SMS login page is left on the unmodified official submit flow")

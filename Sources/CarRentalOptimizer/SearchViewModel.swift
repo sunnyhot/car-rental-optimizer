@@ -215,8 +215,18 @@ struct RecommendationFilterState: Equatable {
 final class SearchViewModel: ObservableObject {
     @Published var request = AppDefaults.searchRequest
     @Published var results: [Recommendation] = []
-    @Published var recommendationSortMode: RecommendationSortMode = .bestTotal
-    @Published var recommendationFilter = RecommendationFilterState()
+    @Published var recommendationSortMode: RecommendationSortMode = .bestTotal {
+        didSet {
+            guard recommendationSortMode != oldValue else { return }
+            selectFirstDisplayedResult()
+        }
+    }
+    @Published var recommendationFilter = RecommendationFilterState() {
+        didSet {
+            guard recommendationFilter != oldValue else { return }
+            selectFirstDisplayedResult()
+        }
+    }
     @Published var platformStatuses: [PlatformEvidenceStatus] = AppDefaults.searchRequest.platforms.map {
         PlatformEvidenceStatus(
             platform: $0,
@@ -323,27 +333,27 @@ final class SearchViewModel: ObservableObject {
     private func sortedRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
         switch recommendationSortMode {
         case .bestTotal:
-            return recommendations
+            return recommendations.sorted(by: isLowerCost)
         case .rentalSubtotal:
             return recommendations.sorted {
                 if $0.rentalTotal != $1.rentalTotal {
                     return $0.rentalTotal < $1.rentalTotal
                 }
-                return $0.bestTotal < $1.bestTotal
+                return isLowerCost($0, than: $1)
             }
         case .distance:
             return recommendations.sorted {
                 if $0.listing.store.distanceKm != $1.listing.store.distanceKm {
                     return $0.listing.store.distanceKm < $1.listing.store.distanceKm
                 }
-                return $0.bestTotal < $1.bestTotal
+                return isLowerCost($0, than: $1)
             }
         case .dataCompleteness:
             return recommendations.sorted {
                 if $0.listing.dataCompleteness != $1.listing.dataCompleteness {
                     return $0.listing.dataCompleteness > $1.listing.dataCompleteness
                 }
-                return $0.bestTotal < $1.bestTotal
+                return isLowerCost($0, than: $1)
             }
         }
     }
@@ -434,12 +444,8 @@ final class SearchViewModel: ObservableObject {
         let combined = "\(listing.vehicleClass) \(listing.vehicleName) \(recommendation.match.label)"
         let normalized = combined.lowercased()
 
-        if listing.vehicleName.contains("未指定")
-            || listing.vehicleClass.contains("未指定")
-            || recommendation.match.kind == .notSpecified {
-            return .unspecified
-        }
-
+        // A blank vehicle query or incomplete platform class may say "未指定";
+        // still infer from any real vehicle name/class signal before falling back.
         if normalized.contains("新能源")
             || normalized.contains("纯电")
             || normalized.contains("电动")
@@ -589,7 +595,7 @@ final class SearchViewModel: ObservableObject {
         )
 
         results = recommendations
-        selectedId = recommendations.first?.id ?? ""
+        selectFirstDisplayedResult()
         recordSuccessfulResults(recommendations)
         recordVehicleSuggestions(from: recommendations)
         searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: recommendations)
@@ -603,6 +609,10 @@ final class SearchViewModel: ObservableObject {
 
     func selectResult(_ id: String) {
         selectedId = id
+    }
+
+    private func selectFirstDisplayedResult() {
+        selectedId = displayedResults.first?.id ?? ""
     }
 
     func clearRecommendationFilters() {
@@ -858,7 +868,7 @@ final class SearchViewModel: ObservableObject {
 
     private func recordSuccessfulResults(_ recommendations: [Recommendation]) {
         latestSuccessfulResults = recommendations
-        latestSuccessfulSelectedId = recommendations.first?.id ?? ""
+        latestSuccessfulSelectedId = selectedId
         lastSuccessfulSearchAt = now()
         isShowingStaleResults = false
         retainedResultsNotice = nil
@@ -875,6 +885,7 @@ final class SearchViewModel: ObservableObject {
 
         results = latestSuccessfulResults
         selectedId = latestSuccessfulSelectedId
+        selectFirstDisplayedResult()
         isShowingStaleResults = true
         retainedResultsNotice = RetainedResultsNotice.make(lastSuccessfulSearchAt: lastSuccessfulSearchAt)
     }

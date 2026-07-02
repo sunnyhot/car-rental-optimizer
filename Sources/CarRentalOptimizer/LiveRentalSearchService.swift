@@ -188,6 +188,7 @@ private struct ZucheFeeEnrichment {
     let loginRejected: Bool
 }
 
+let maxZucheVehicleSearchCityCount = 8
 private let maxConcurrentZucheConfirmationRequests = 4
 private let zucheGatewayRequestTimeoutSeconds: TimeInterval = 10
 
@@ -261,6 +262,34 @@ func zucheCandidateCities(from cities: [ZucheSearchCity], request: SearchRequest
             return $0.distanceKm < $1.distanceKm
         }
         return $0.city.name.localizedStandardCompare($1.city.name) == .orderedAscending
+    }
+}
+
+func plannedZucheCities(
+    from candidateCities: [ZucheCandidateCity],
+    hasVehicleQuery: Bool,
+    maxVehicleCityCount: Int = maxZucheVehicleSearchCityCount
+) -> [ZucheCandidateCity] {
+    guard hasVehicleQuery else {
+        return Array(candidateCities.prefix(1))
+    }
+
+    let cityLimit = max(1, maxVehicleCityCount)
+    return Array(candidateCities.prefix(cityLimit))
+}
+
+func zucheListingsMatchingVehicleQuery(_ listings: [RentalListing], vehicleQuery: String) -> [RentalListing] {
+    let query = vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !query.isEmpty else { return listings }
+
+    let isSpecificVehicleQuery = isSpecificVehicleModelQuery(query)
+    return listings.filter { listing in
+        let match = matchVehicle(
+            query: query,
+            vehicleName: listing.vehicleName,
+            vehicleClass: listing.vehicleClass
+        )
+        return isSpecificVehicleQuery ? match.kind == .exact : match.kind != .lowConfidence
     }
 }
 
@@ -397,7 +426,8 @@ private final class ZucheAPIClient {
 
             let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
             let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let plannedCities = hasVehicleQuery ? candidateCities : Array(candidateCities.prefix(1))
+            let plannedCities = plannedZucheCities(from: candidateCities, hasVehicleQuery: hasVehicleQuery)
+            let isCityPlanLimited = hasVehicleQuery && plannedCities.count < candidateCities.count
             var citiesByID: [String: ZucheCity] = [:]
             for city in cities.allCities {
                 citiesByID[city.cityId] = city
@@ -477,12 +507,16 @@ private final class ZucheAPIClient {
                 }
             }
 
-            let rawListings = hasVehicleQuery
+            let queryListings = hasVehicleQuery
                 ? Array(listingsByKey.values)
                 : blankVehicleCandidateListings(from: nearestStoreBatches)
+            let rawListings = zucheListingsMatchingVehicleQuery(queryListings, vehicleQuery: request.vehicleQuery)
             guard !rawListings.isEmpty else {
                 if !queryErrors.isEmpty {
                     return status(.parseFailed, "神州 API 部分查询失败：\(queryErrors.prefix(2).joined(separator: "；"))")
+                }
+                if isCityPlanLimited {
+                    return status(.unavailable, "神州真实接口返回成功，但为避免超时已优先探测最近 \(plannedCities.count) 个城市（共 \(candidateCities.count) 个候选城市），没有找到匹配车型。")
                 }
                 return status(.unavailable, "神州真实接口返回成功，但当前条件没有可订车型。")
             }
@@ -770,7 +804,7 @@ private final class ZucheAPIClient {
             return "已从神州 API 读取 \(listingCount) 个真实候选车型，其中 \(feeEnrichment.confirmedFeeCount) 个已补入确认页基础服务费。"
         }
         if feeEnrichment.attemptedWithCookies && feeEnrichment.loginRejected {
-            return "已从神州 API 读取 \(listingCount) 个真实候选车型；确认页费用接口提示登录已失效，当前仅含车辆租赁费。"
+            return "已从神州 API 读取 \(listingCount) 个真实候选车型；确认页费用接口提示登录未通过，当前仅含车辆租赁费。"
         }
         if feeEnrichment.attemptedWithCookies {
             return "已从神州 API 读取 \(listingCount) 个真实候选车型；确认页暂未返回基础服务费，当前仅含车辆租赁费。"
@@ -1229,17 +1263,16 @@ func makeEhiSearchScript(json: String) -> String {
 
         const listingsByKey = {};
         const storeSkips = [];
-        const loginRequiredFromStock401 = (label) => JSON.stringify({
-          statusKind: 'login-required',
-          message: `一嗨库存报价 /Stock/Step2 返回 401（${label}）；请先登录一嗨后重试。已识别 ${storeCandidates.length} 个门店。`,
-          sourceUrl,
-          listings: []
-        });
+        const stock401SkipMessage = (store, label) => `${store.name} ${label}: 报价接口返回 401，已跳过该候选`;
         let carsSeen = 0;
+        let stockAttemptCount = 0;
+        let stock401Count = 0;
         let selectedBlankStoreId = null;
         const quoteStore = async (store) => {
           const storeSkips = [];
           const storeListings = [];
+          let storeStockAttemptCount = 0;
+          let storeStock401Count = 0;
           const makeStockPayload = (isEnterprise) => ({
             stockType: 1,
             whereFilter: null,
@@ -1276,10 +1309,13 @@ func makeEhiSearchScript(json: String) -> String {
                 storeSkips.push(`${store.name} ${label}: ${verify.message || '取还时间不可用'}`);
                 continue;
               }
+              storeStockAttemptCount += 1;
               const stockResp = await withAPITimeout(http.postEncrypt('/Stock/Step2', '', payload), `${store.name} ${label} 报价接口`);
               const code = stockResp?.code ?? stockResp?.status ?? stockResp?.data?.code ?? stockResp?.data?.status;
               if (code === 401) {
-                return { loginRequired: loginRequiredFromStock401(label), storeListings: [], storeSkips, carsSeen: 0 };
+                storeStock401Count += 1;
+                storeSkips.push(stock401SkipMessage(store, label));
+                continue;
               }
               stockResult = responseBody(stockResp);
               if (!hasResponseBody(stockResult)) {
@@ -1291,13 +1327,15 @@ func makeEhiSearchScript(json: String) -> String {
             } catch (error) {
               const message = String(error && (error.message || error.stack) || error);
               if (message.includes('401')) {
-                return { loginRequired: loginRequiredFromStock401(label), storeListings: [], storeSkips, carsSeen: 0 };
+                storeStock401Count += 1;
+                storeSkips.push(stock401SkipMessage(store, label));
+                continue;
               }
               storeSkips.push(`${store.name} ${label}: ${message}`);
             }
           }
           if (!stockResult) {
-            return { loginRequired: null, storeListings: [], storeSkips, carsSeen: 0 };
+            return { storeListings: [], storeSkips, carsSeen: 0, stockAttemptCount: storeStockAttemptCount, stock401Count: storeStock401Count };
           }
 
           let storeCarsSeen = 0;
@@ -1335,31 +1373,29 @@ func makeEhiSearchScript(json: String) -> String {
             };
             storeListings.push({ key, listing });
           }
-          return { loginRequired: null, storeListings, storeSkips, carsSeen: storeCarsSeen };
+          return { storeListings, storeSkips, carsSeen: storeCarsSeen, stockAttemptCount: storeStockAttemptCount, stock401Count: storeStock401Count };
         };
         const applyQuoteResult = (quoteResult) => {
-          if (quoteResult.loginRequired) return quoteResult.loginRequired;
           storeSkips.push(...quoteResult.storeSkips);
           carsSeen += quoteResult.carsSeen;
+          stockAttemptCount += quoteResult.stockAttemptCount || 0;
+          stock401Count += quoteResult.stock401Count || 0;
           for (const { key, listing } of quoteResult.storeListings) {
             if (!listingsByKey[key] || listingsByKey[key].basePrice > listing.basePrice) listingsByKey[key] = listing;
           }
-          return null;
         };
         const quoteResults = hasVehicleQuery
           ? await mapWithConcurrency(candidates, ehiProbeConcurrency, quoteStore)
           : [];
         if (hasVehicleQuery) {
           for (const quoteResult of quoteResults) {
-            const loginRequired = applyQuoteResult(quoteResult);
-            if (loginRequired) return loginRequired;
+            applyQuoteResult(quoteResult);
           }
         } else {
           for (const store of candidates) {
             if (!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId) break;
             const quoteResult = await quoteStore(store);
-            const loginRequired = applyQuoteResult(quoteResult);
-            if (loginRequired) return loginRequired;
+            applyQuoteResult(quoteResult);
             if (quoteResult.storeListings.length) {
               selectedBlankStoreId = store.id;
               break;
@@ -1367,6 +1403,14 @@ func makeEhiSearchScript(json: String) -> String {
           }
         }
         const listings = Object.values(listingsByKey);
+        if (!listings.length && stockAttemptCount > 0 && stock401Count === stockAttemptCount) {
+          return JSON.stringify({
+            statusKind: 'login-required',
+            message: `一嗨库存报价 /Stock/Step2 均返回 401；请先登录一嗨后重试。已识别 ${storeCandidates.length} 个门店。`,
+            sourceUrl,
+            listings: []
+          });
+        }
         if (!listings.length && carsSeen > 0) {
           return JSON.stringify({
             statusKind: 'parse-failed',
