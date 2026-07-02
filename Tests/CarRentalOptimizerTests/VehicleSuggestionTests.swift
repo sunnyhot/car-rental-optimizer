@@ -63,6 +63,25 @@ struct VehicleSuggestionTests {
         #expect(!store.learnedSuggestions.contains { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
     }
 
+    @Test("Recording search result variants collapses platform qualifiers into one model")
+    func recordingSearchResultVariantsCollapsesPlatformQualifiersIntoOneModel() {
+        let store = VehicleSuggestionStore(
+            learned: [],
+            recent: [],
+            builtIns: [],
+            fileURL: temporaryURL()
+        )
+
+        store.recordSearchResults(["比亚迪宋 Pro 新能源", "比亚迪宋 Pro 京牌"], now: date("2026-07-02 12:00"))
+
+        let suggestions = store.suggestions(matching: "比亚迪宋 pro")
+
+        #expect(store.learnedSuggestions.count == 1)
+        #expect(store.learnedSuggestions.first?.name == "比亚迪宋 Pro")
+        #expect(store.learnedSuggestions.first?.count == 2)
+        #expect(suggestions.map(\.name) == ["比亚迪宋 Pro"])
+    }
+
     @Test("Recording selection promotes item to recent and caps recent history")
     func recordingSelectionPromotesItemToRecentAndCapsRecentHistory() {
         let store = VehicleSuggestionStore(

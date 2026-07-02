@@ -49,7 +49,7 @@ struct VehicleSuggestion: Identifiable, Codable, Equatable {
         learnedAt: Date? = nil,
         count: Int = 0
     ) {
-        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.name = canonicalVehicleSuggestionName(name)
         self.source = source
         self.aliases = aliases
         self.lastUsedAt = lastUsedAt
@@ -60,6 +60,23 @@ struct VehicleSuggestion: Identifiable, Codable, Equatable {
     static func isPlaceholderName(_ name: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty || trimmed == "未指定车型"
+    }
+
+    var canonicalizedForSuggestions: VehicleSuggestion {
+        let canonicalName = canonicalVehicleSuggestionName(name)
+        guard canonicalName != name else { return self }
+        var canonicalAliases = aliases
+        if !canonicalAliases.contains(name) {
+            canonicalAliases.append(name)
+        }
+        return VehicleSuggestion(
+            name: canonicalName,
+            source: source,
+            aliases: canonicalAliases,
+            lastUsedAt: lastUsedAt,
+            learnedAt: learnedAt,
+            count: count
+        )
     }
 }
 
@@ -75,7 +92,8 @@ struct VehicleSuggestionEngine {
         let candidates = recent + learned + builtIns
         var bestByID: [String: VehicleSuggestion] = [:]
 
-        for candidate in candidates where !VehicleSuggestion.isPlaceholderName(candidate.name) {
+        for rawCandidate in candidates where !VehicleSuggestion.isPlaceholderName(rawCandidate.name) {
+            let candidate = rawCandidate.canonicalizedForSuggestions
             guard normalizedQuery.isEmpty || matches(candidate, query: normalizedQuery) else { continue }
             if let existing = bestByID[candidate.id] {
                 bestByID[candidate.id] = stronger(candidate, than: existing)
@@ -199,17 +217,18 @@ final class VehicleSuggestionStore {
     func recordSearchResults(_ names: [String], now: Date = Date()) {
         var byID: [String: VehicleSuggestion] = [:]
         for suggestion in learnedSuggestions {
-            byID[suggestion.id] = suggestion
+            let canonicalSuggestion = suggestion.canonicalizedForSuggestions
+            byID[canonicalSuggestion.id] = canonicalSuggestion
         }
         for rawName in names {
             let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !VehicleSuggestion.isPlaceholderName(name) else { continue }
-            let key = normalizedVehicleSuggestionKey(name)
-            var suggestion = byID[key] ?? VehicleSuggestion(name: name, source: .learned)
+            let incomingSuggestion = VehicleSuggestion(name: name, source: .learned, aliases: name == canonicalVehicleSuggestionName(name) ? [] : [name])
+            var suggestion = byID[incomingSuggestion.id] ?? incomingSuggestion
             suggestion.source = .learned
             suggestion.learnedAt = now
             suggestion.count += 1
-            byID[key] = suggestion
+            byID[incomingSuggestion.id] = suggestion
         }
         learnedSuggestions = byID.values.sorted {
             if $0.count != $1.count { return $0.count > $1.count }
@@ -222,13 +241,14 @@ final class VehicleSuggestionStore {
 
     func recordSelection(_ suggestion: VehicleSuggestion, now: Date = Date()) {
         guard !VehicleSuggestion.isPlaceholderName(suggestion.name) else { return }
+        let canonicalSuggestion = suggestion.canonicalizedForSuggestions
         let selected = VehicleSuggestion(
-            name: suggestion.name,
+            name: canonicalSuggestion.name,
             source: .recent,
-            aliases: suggestion.aliases,
+            aliases: canonicalSuggestion.aliases,
             lastUsedAt: now,
-            learnedAt: suggestion.learnedAt,
-            count: suggestion.count + 1
+            learnedAt: canonicalSuggestion.learnedAt,
+            count: canonicalSuggestion.count + 1
         )
         recentSuggestions.removeAll { $0.id == selected.id }
         recentSuggestions.insert(selected, at: 0)
@@ -262,7 +282,7 @@ final class VehicleSuggestionStore {
 }
 
 func normalizedVehicleSuggestionKey(_ value: String) -> String {
-    value
+    canonicalVehicleSuggestionName(value)
         .lowercased()
         .replacingOccurrences(of: " ", with: "")
         .replacingOccurrences(of: "-", with: "")
@@ -270,4 +290,28 @@ func normalizedVehicleSuggestionKey(_ value: String) -> String {
         .replacingOccurrences(of: "_", with: "")
         .replacingOccurrences(of: "/", with: "")
         .replacingOccurrences(of: "　", with: "")
+}
+
+func canonicalVehicleSuggestionName(_ value: String) -> String {
+    var result = value
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+
+    let qualifierPatterns = [
+        #"(?i)(?:\s|　)*(?:新能源|京牌|沪牌|粤牌|浙牌|苏牌|津牌|冀牌|豫牌|鲁牌|川牌|渝牌|绿牌|蓝牌|油牌|电车|油车)$"#
+    ]
+
+    var stripped = true
+    while stripped {
+        stripped = false
+        for pattern in qualifierPatterns {
+            guard let range = result.range(of: pattern, options: .regularExpression) else { continue }
+            let candidate = result[..<range.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !candidate.isEmpty else { continue }
+            result = candidate
+            stripped = true
+        }
+    }
+
+    return result
 }
