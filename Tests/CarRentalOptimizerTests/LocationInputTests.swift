@@ -313,6 +313,33 @@ struct LocationInputTests {
         #expect(!isKnownCityLevelOrigin("北京市丰台区北京南站"))
         #expect(!isKnownCityLevelOrigin("京东总部"))
     }
+
+    @Test("Rail station search expands city input")
+    func railStationSearchExpandsCityInput() {
+        #expect(railStationSearchQueries(for: "德州") == ["德州 高铁站", "德州 火车站", "德州站", "德州"])
+        #expect(railStationSearchQueries(for: "德州站") == ["德州站"])
+    }
+
+    @Test("Rail station text filtering accepts railway stations and rejects airports")
+    func railStationTextFilteringAcceptsStationsAndRejectsAirports() {
+        #expect(isRailStationCandidateText("德州东站 德州市"))
+        #expect(isRailStationCandidateText("苏州北站 高铁站"))
+        #expect(isRailStationCandidateText("济南火车站"))
+        #expect(!isRailStationCandidateText("德州万达广场"))
+        #expect(isRejectedRailStationCandidateText("德州机场"))
+        #expect(isRejectedRailStationCandidateText("火车站机场大巴候车点"))
+    }
+
+    @Test("Rail station ranking keeps recommended stations first and deduplicates names")
+    func railStationRankingKeepsRecommendedStationsFirstAndDeduplicatesNames() {
+        let ranked = rankedUniqueRailStationSuggestions([
+            RailStationSuggestion(id: "address", title: "德州站", subtitle: "德州市", point: GeoPoint(lat: 37.451, lng: 116.304), kind: .station, fallbackNote: nil),
+            RailStationSuggestion(id: "east", title: "德州东站", subtitle: "德州市", point: GeoPoint(lat: 37.443, lng: 116.374), kind: .recommended, fallbackNote: nil),
+            RailStationSuggestion(id: "east-duplicate", title: "德州东站", subtitle: "德州市德城区", point: GeoPoint(lat: 37.443, lng: 116.374), kind: .station, fallbackNote: nil),
+        ])
+
+        #expect(ranked.map(\.id) == ["east", "address"])
+    }
 }
 
 private struct FailingCurrentLocationProvider: CurrentLocationProviding {
