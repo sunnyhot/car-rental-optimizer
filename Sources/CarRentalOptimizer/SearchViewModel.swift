@@ -230,7 +230,7 @@ final class SearchViewModel: ObservableObject {
     @Published var isLocatingOrigin = false
     @Published var isLoadingOriginSuggestions = false
     @Published var isOriginSuggestionPanelVisible = false
-    @Published var originSuggestions: [AddressSuggestion] = []
+    @Published var originSuggestions: [OriginSuggestion] = []
     @Published var originStatus = "正在获取当前位置。"
     @Published var status = "待查询：静默 API 准备就绪。"
     @Published var searchProgressPhase: SearchProgressPhase = .idle
@@ -245,11 +245,13 @@ final class SearchViewModel: ObservableObject {
     private let mapService: MapService
     private let currentLocationProvider: CurrentLocationProviding
     private let addressSuggestionProvider: AddressSuggestionProviding
+    private let railStationSuggestionProvider: RailStationSuggestionProviding
     private let initialLocationRetryDelayNanoseconds: UInt64
     private let now: () -> Date
     private var hasRequestedInitialLocation = false
     private var originSuggestionRequestID = 0
     private var resolvedOriginLabel: String?
+    private var requiresOriginCandidateSelection = false
     private var latestSuccessfulResults: [Recommendation] = []
     private var latestSuccessfulSelectedId = ""
     private var latestEvidenceRequest: SearchRequest?
@@ -261,6 +263,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = AppleMapService()
         self.currentLocationProvider = AppleCurrentLocationProvider()
         self.addressSuggestionProvider = AppleAddressSuggestionProvider()
+        self.railStationSuggestionProvider = AppleRailStationSuggestionProvider()
         self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -272,6 +275,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = EstimatedMapService()
         self.currentLocationProvider = UnavailableCurrentLocationProvider()
         self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
+        self.railStationSuggestionProvider = EmptyRailStationSuggestionProvider()
         self.initialLocationRetryDelayNanoseconds = 0
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -283,6 +287,7 @@ final class SearchViewModel: ObservableObject {
         mapService: MapService,
         currentLocationProvider: CurrentLocationProviding = UnavailableCurrentLocationProvider(),
         addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider(),
+        railStationSuggestionProvider: RailStationSuggestionProviding = EmptyRailStationSuggestionProvider(),
         initialLocationRetryDelayNanoseconds: UInt64 = defaultInitialLocationRetryDelayNanoseconds,
         now: @escaping () -> Date = Date.init
     ) {
@@ -291,6 +296,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = mapService
         self.currentLocationProvider = currentLocationProvider
         self.addressSuggestionProvider = addressSuggestionProvider
+        self.railStationSuggestionProvider = railStationSuggestionProvider
         self.initialLocationRetryDelayNanoseconds = initialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = now
@@ -760,6 +766,7 @@ final class SearchViewModel: ObservableObject {
             request.originLabel = location.label
             request.origin = location.point
             resolvedOriginLabel = location.label
+            requiresOriginCandidateSelection = false
             originSuggestions = []
             originStatus = "已定位当前位置。"
             refreshPreflightIssues()
@@ -774,6 +781,7 @@ final class SearchViewModel: ObservableObject {
     func updateOriginInput(_ value: String) async {
         request.originLabel = value
         resolvedOriginLabel = nil
+        requiresOriginCandidateSelection = false
         refreshPreflightIssues()
         originSuggestionRequestID += 1
         let requestID = originSuggestionRequestID
@@ -783,39 +791,63 @@ final class SearchViewModel: ObservableObject {
             originSuggestions = []
             isLoadingOriginSuggestions = false
             isOriginSuggestionPanelVisible = false
-            originStatus = "输入地址后会联想候选位置。"
+            originStatus = "输入地址、城市或车站后会联想候选位置。"
             return
         }
 
         originSuggestions = []
+        requiresOriginCandidateSelection = isKnownCityLevelOrigin(trimmed)
         isLoadingOriginSuggestions = true
         isOriginSuggestionPanelVisible = true
+        refreshPreflightIssues()
 
-        do {
-            let suggestions = try await addressSuggestionProvider.suggestions(for: trimmed, near: request.origin)
-            guard requestID == originSuggestionRequestID else { return }
-            isLoadingOriginSuggestions = false
-            originSuggestions = suggestions
-            isOriginSuggestionPanelVisible = !suggestions.isEmpty
-            originStatus = originSuggestions.isEmpty ? "没有找到匹配地址，可继续输入。" : "选择一个候选位置。"
-        } catch {
-            guard requestID == originSuggestionRequestID else { return }
-            isLoadingOriginSuggestions = false
-            originSuggestions = []
-            isOriginSuggestionPanelVisible = false
-            originStatus = "地址联想失败：\(error.localizedDescription)"
+        let railResult = await loadRailStationSuggestions(for: trimmed)
+        let addressResult = await loadAddressSuggestions(for: trimmed)
+        guard requestID == originSuggestionRequestID else { return }
+
+        isLoadingOriginSuggestions = false
+        let railSuggestions = (try? railResult.get()) ?? []
+        let addressSuggestions = (try? addressResult.get()) ?? []
+        originSuggestions = mergeOriginSuggestions(railStations: railSuggestions, addresses: addressSuggestions)
+        requiresOriginCandidateSelection = isKnownCityLevelOrigin(trimmed) || !railSuggestions.isEmpty
+        refreshPreflightIssues()
+
+        isOriginSuggestionPanelVisible = !originSuggestions.isEmpty
+        if !originSuggestions.isEmpty {
+            originStatus = "选择一个候选位置。"
+        } else if railResult.isFailure && addressResult.isFailure {
+            originStatus = "位置联想失败，请输入更具体的车站或地址。"
+        } else {
+            originStatus = "没有找到匹配位置，可继续输入。"
         }
     }
 
-    func selectOriginSuggestion(_ suggestion: AddressSuggestion) async {
+    private func loadRailStationSuggestions(for query: String) async -> Result<[RailStationSuggestion], Error> {
+        do {
+            return .success(try await railStationSuggestionProvider.stationSuggestions(for: query, near: request.origin))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func loadAddressSuggestions(for query: String) async -> Result<[AddressSuggestion], Error> {
+        do {
+            return .success(try await addressSuggestionProvider.suggestions(for: query, near: request.origin))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    func selectOriginSuggestion(_ suggestion: OriginSuggestion) async {
         originSuggestionRequestID += 1
         request.originLabel = suggestion.displayName
         request.origin = suggestion.point
         resolvedOriginLabel = request.originLabel
+        requiresOriginCandidateSelection = false
         originSuggestions = []
         isLoadingOriginSuggestions = false
         isOriginSuggestionPanelVisible = false
-        originStatus = "已选择候选位置。"
+        originStatus = suggestion.fallbackNote ?? "已选择候选位置。"
         refreshPreflightIssues()
     }
 
@@ -859,6 +891,15 @@ private enum CurrentLocationRefreshOutcome {
 
     var shouldRetry: Bool {
         self == .retryableFailure
+    }
+}
+
+private extension Result {
+    var isFailure: Bool {
+        if case .failure = self {
+            return true
+        }
+        return false
     }
 }
 

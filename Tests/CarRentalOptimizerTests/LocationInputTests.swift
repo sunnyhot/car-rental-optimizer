@@ -137,31 +137,45 @@ struct LocationInputTests {
         #expect(source.contains("startLocationTimeout()"))
     }
 
-    @Test("Address suggestions update as user edits origin")
-    func addressSuggestionsUpdateAsUserEditsOrigin() async {
-        let suggestions = [
-            AddressSuggestion(id: "1", title: "北京南站", subtitle: "北京市丰台区", point: GeoPoint(lat: 39.8652, lng: 116.3786)),
-            AddressSuggestion(id: "2", title: "北京西站", subtitle: "北京市丰台区", point: GeoPoint(lat: 39.8948, lng: 116.3213)),
-        ]
-        let suggestionProvider = StubAddressSuggestionProvider(suggestions: suggestions)
+    @Test("Origin suggestions prioritize rail stations and selection updates request origin")
+    func originSuggestionsPrioritizeRailStationsAndSelectionUpdatesRequestOrigin() async {
+        let station = RailStationSuggestion(
+            id: "dezhou-east",
+            title: "德州东站",
+            subtitle: "德州市",
+            point: GeoPoint(lat: 37.443, lng: 116.374),
+            kind: .recommended,
+            fallbackNote: nil
+        )
+        let address = AddressSuggestion(
+            id: "wanda",
+            title: "德州万达广场",
+            subtitle: "德州市德城区",
+            point: GeoPoint(lat: 37.458, lng: 116.307)
+        )
+        let stationProvider = StubRailStationSuggestionProvider(suggestions: [station])
+        let addressProvider = StubAddressSuggestionProvider(suggestions: [address])
         let viewModel = SearchViewModel(
             searchProvider: StubRentalSearchProvider(results: []),
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService(),
             currentLocationProvider: StubCurrentLocationProvider(),
-            addressSuggestionProvider: suggestionProvider
+            addressSuggestionProvider: addressProvider,
+            railStationSuggestionProvider: stationProvider
         )
 
-        await viewModel.updateOriginInput("北京站")
+        await viewModel.updateOriginInput("德州")
 
-        #expect(suggestionProvider.queries == ["北京站"])
-        #expect(viewModel.originSuggestions == suggestions)
+        #expect(stationProvider.queries == ["德州"])
+        #expect(addressProvider.queries == ["德州"])
+        #expect(viewModel.originSuggestions.map(\.title) == ["德州东站", "德州万达广场"])
+        #expect(viewModel.originSuggestions.map(\.kind) == [.railStation, .address])
         #expect(viewModel.isOriginSuggestionPanelVisible)
 
-        await viewModel.selectOriginSuggestion(suggestions[0])
+        await viewModel.selectOriginSuggestion(viewModel.originSuggestions[0])
 
-        #expect(viewModel.request.originLabel == "北京南站，北京市丰台区")
-        #expect(viewModel.request.origin == GeoPoint(lat: 39.8652, lng: 116.3786))
+        #expect(viewModel.request.originLabel == "德州东站，德州市")
+        #expect(viewModel.request.origin == GeoPoint(lat: 37.443, lng: 116.374))
         #expect(viewModel.originSuggestions.isEmpty)
         #expect(!viewModel.isOriginSuggestionPanelVisible)
     }
@@ -216,7 +230,7 @@ struct LocationInputTests {
         )
 
         await viewModel.updateOriginInput("京东总部")
-        await viewModel.selectOriginSuggestion(englishSuggestion)
+        await viewModel.selectOriginSuggestion(viewModel.originSuggestions[0])
 
         #expect(viewModel.request.originLabel == "京东集团全球总部2号园区，北京通州 北京经济技术开发区")
     }
@@ -400,6 +414,21 @@ private final class StubAddressSuggestionProvider: AddressSuggestionProviding {
     }
 
     func suggestions(for query: String, near origin: GeoPoint?) async throws -> [AddressSuggestion] {
+        queries.append(query)
+        return suggestions
+    }
+}
+
+@MainActor
+private final class StubRailStationSuggestionProvider: RailStationSuggestionProviding {
+    let suggestions: [RailStationSuggestion]
+    private(set) var queries: [String] = []
+
+    init(suggestions: [RailStationSuggestion] = []) {
+        self.suggestions = suggestions
+    }
+
+    func stationSuggestions(for query: String, near origin: GeoPoint?) async throws -> [RailStationSuggestion] {
         queries.append(query)
         return suggestions
     }

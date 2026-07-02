@@ -306,8 +306,8 @@ private struct OriginLocationField: View {
 
 private struct OriginSuggestionDropdown: View {
     let isLoading: Bool
-    let suggestions: [AddressSuggestion]
-    let onSelect: (AddressSuggestion) -> Void
+    let suggestions: [OriginSuggestion]
+    let onSelect: (OriginSuggestion) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -352,7 +352,7 @@ private struct OriginSuggestionDropdown: View {
         )
     }
 
-    private func suggestionButton(_ suggestion: AddressSuggestion) -> some View {
+    private func suggestionButton(_ suggestion: OriginSuggestion) -> some View {
         Button {
             onSelect(suggestion)
         } label: {
