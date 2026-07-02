@@ -48,6 +48,53 @@ struct VehicleInsightNetworkTests {
         #expect(insight?.longSummary.contains("当前租赁车辆配置以平台返回为准") == true)
     }
 
+    @Test("Sohu model library enriches specs and configuration references")
+    func sohuModelLibraryEnrichesSpecsAndConfigurationReferences() async {
+        let listing = makeNetworkListing(vehicleName: "大众朗逸", vehicleClass: "三厢 5座")
+        let client = StubVehicleInsightHTTPClient(responses: [
+            sohuAssociateURL("大众朗逸"): """
+            [
+              {
+                "id": 2251,
+                "content": "上汽大众朗逸",
+                "type": 2,
+                "model_info": {
+                  "model_id": 2251,
+                  "sale_status": 1
+                }
+              }
+            ]
+            """,
+            "https://db.auto.sohu.com/model_2251": sohuModelHTML(
+                modelName: "大众朗逸",
+                length: 4678,
+                width: 1806,
+                height: 1474,
+                wheelbase: 2688,
+                fuelConsumption: "5.54L/100km",
+                featureItems: ["无钥匙进入系统", "电动天窗", "倒车影像"]
+            )
+        ])
+        let provider = VehicleInsightNetworkProvider(httpClient: client)
+
+        let insight = await provider.networkInsight(for: listing, now: networkDate("2026-07-02 21:09"))
+        let configFacts = Dictionary(uniqueKeysWithValues: (insight?.formattedConfigurationFacts ?? []).map { ($0.label, $0) })
+
+        #expect(insight?.origin == .network)
+        #expect(insight?.sourceName == "搜狐车型库")
+        #expect(insight?.sourceURL == "https://db.auto.sohu.com/model_2251")
+        #expect(insight?.specSheet.lengthMm?.value == 4678)
+        #expect(insight?.specSheet.widthMm?.value == 1806)
+        #expect(insight?.specSheet.heightMm?.value == 1474)
+        #expect(insight?.specSheet.wheelbaseMm?.value == 2688)
+        #expect(insight?.specSheet.fuelConsumption?.value == "5.54L/100km")
+        #expect(insight?.specSheet.features.contains(VehicleFeature(name: "倒车影像", sourceName: "搜狐车型库", confidence: .medium, appliesTo: .series)) == true)
+        #expect(configFacts["倒车影像"]?.value == "车型库参考")
+        #expect(configFacts["倒车影像"]?.scopeLabel == "搜狐车型库")
+        #expect(configFacts["天窗"]?.value == "车型库参考")
+        #expect(configFacts["无钥匙进入"]?.value == "车型库参考")
+    }
+
     @Test("Wikidata alias search enriches when Wikipedia summary is unavailable")
     func wikidataAliasSearchEnrichesWhenWikipediaSummaryIsUnavailable() async {
         let listing = makeNetworkListing(vehicleName: "日产劲客", vehicleClass: "SUV 5座")
@@ -140,6 +187,14 @@ private func wikidataSearchURL(_ query: String) -> String {
     return components.url!.absoluteString
 }
 
+private func sohuAssociateURL(_ query: String) -> String {
+    var components = URLComponents(string: "https://portal.auto.sohu.com/aggr/search/associate")!
+    components.queryItems = [
+        URLQueryItem(name: "keyword", value: query)
+    ]
+    return components.url!.absoluteString
+}
+
 private func wikidataEntityURL(_ id: String) -> String {
     "https://www.wikidata.org/wiki/Special:EntityData/\(id).json"
 }
@@ -217,6 +272,61 @@ private func wikidataQuantityClaim(_ value: Int) -> String {
         }
       }
     }
+    """
+}
+
+private func sohuModelHTML(
+    modelName: String,
+    length: Int,
+    width: Int,
+    height: Int,
+    wheelbase: Int,
+    fuelConsumption: String,
+    featureItems: [String]
+) -> String {
+    let features = featureItems.map { "<li class=\"car-trim-item--addon-item\">· \($0)</li>" }.joined()
+    return """
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>【\(modelName)参数配置】\(modelName)参配_搜狐汽车</title>
+        <script type="application/ld+json">
+          {"@graph":[{"@type":"Car","name":"\(modelName)","@id":"https://db.auto.sohu.com/model_2251"}]}
+        </script>
+      </head>
+      <body>
+        <div class="model-main-params-item marginBottom">
+          <h3 class="model-main-params-item--title">
+            参配概述 <span class="model-main-params-size--unit">4门/5座 <span>单位mm</span></span>
+          </h3>
+          <div class="model-main-params-size--bg">
+            <div class="model-main-params-size--param wheelbase">
+              <div class="model-main-params-size--n">轴距</div>
+              <div class="model-main-params-size--v">\(wheelbase)</div>
+            </div>
+            <div class="model-main-params-size--param height">
+              <div class="model-main-params-size--n">高度</div>
+              <div class="model-main-params-size--v">\(height)</div>
+            </div>
+            <div class="model-main-params-size--param length">
+              <div class="model-main-params-size--n">长度</div>
+              <div class="model-main-params-size--v">\(length)</div>
+            </div>
+            <div class="model-main-params-size--param width">
+              <div class="model-main-params-size--n">宽度</div>
+              <div class="model-main-params-size--v">\(width)</div>
+            </div>
+          </div>
+        </div>
+        <li class="model-main-params-item--li">
+          <p class="model-main-params-item--name">油耗</p>
+          <p class="model-main-params-item--value">\(fuelConsumption)</p>
+        </li>
+        <ul class="car-trim-item--addon-list">
+          \(features)
+        </ul>
+      </body>
+    </html>
     """
 }
 

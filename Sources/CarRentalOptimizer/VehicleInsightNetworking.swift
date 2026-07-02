@@ -28,11 +28,176 @@ struct VehicleInsightNetworkProvider {
         let query = VehicleInsightLocalInferencer.normalizedQuery(for: listing)
         guard !query.isEmpty else { return nil }
 
+        if let modelLibraryInsight = await sohuModelLibraryInsight(for: query, local: local, now: now) {
+            return modelLibraryInsight
+        }
+
         if let summaryInsight = await wikipediaInsight(for: query, local: local, now: now) {
             return summaryInsight
         }
 
         return await wikidataInsight(for: query, local: local, now: now)
+    }
+
+    private func sohuModelLibraryInsight(for query: String, local: VehicleInsight, now: Date) async -> VehicleInsight? {
+        guard let model = await sohuModelResult(for: query),
+              acceptsNetworkTitle(model.content, for: query),
+              let modelURL = URL(string: "https://db.auto.sohu.com/model_\(model.modelID)"),
+              let html = try? await htmlString(from: modelURL)
+        else { return nil }
+
+        let sourceName = "搜狐车型库"
+        let sourceURL = modelURL.absoluteString
+        let parsedSheet = sohuSpecSheet(from: html, sourceName: sourceName, sourceURL: sourceURL)
+        guard parsedSheet.hasReferenceData else { return nil }
+
+        var enriched = local
+        enriched.origin = .network
+        enriched.sourceName = sourceName
+        enriched.sourceURL = sourceURL
+        enriched.fetchedAt = now
+        enriched.confidence = .medium
+        enriched.seriesName = sohuModelName(from: html) ?? model.content
+        enriched.modelYear = nil
+        enriched.modelYearConfidence = .low
+        enriched.specSheet.lengthMm = parsedSheet.lengthMm ?? enriched.specSheet.lengthMm
+        enriched.specSheet.widthMm = parsedSheet.widthMm ?? enriched.specSheet.widthMm
+        enriched.specSheet.heightMm = parsedSheet.heightMm ?? enriched.specSheet.heightMm
+        enriched.specSheet.wheelbaseMm = parsedSheet.wheelbaseMm ?? enriched.specSheet.wheelbaseMm
+        enriched.specSheet.fuelConsumption = parsedSheet.fuelConsumption ?? enriched.specSheet.fuelConsumption
+        if enriched.specSheet.seats == nil {
+            enriched.specSheet.seats = parsedSheet.seats
+        }
+        enriched.specSheet.features = mergedFeatures(enriched.specSheet.features, with: parsedSheet.features)
+        enriched.longSummary = "车系介绍：资料来自搜狐车型库的车系参配概述，提供车系级尺寸与部分配置参考。当前租赁车辆配置以平台返回为准：\(local.configurationSummary ?? "配置以平台返回为准")。下单前以平台确认页为准。"
+        enriched.shortSummary = local.shortSummary
+        return enriched
+    }
+
+    private func sohuModelResult(for query: String) async -> SohuModelSearchResult? {
+        guard let url = sohuAssociateURL(for: query),
+              let results = try? await sohuAssociateResults(from: url)
+        else { return nil }
+        return results.first { result in
+            result.type == nil || result.type == 2
+        }
+    }
+
+    private func sohuAssociateResults(from url: URL) async throws -> [SohuModelSearchResult] {
+        let (data, response) = try await httpClient.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode([SohuModelSearchResult].self, from: data)
+    }
+
+    private func sohuAssociateURL(for query: String) -> URL? {
+        var components = URLComponents(string: "https://portal.auto.sohu.com/aggr/search/associate")
+        components?.queryItems = [
+            URLQueryItem(name: "keyword", value: query)
+        ]
+        return components?.url
+    }
+
+    private func htmlString(from url: URL) async throws -> String {
+        let (data, response) = try await httpClient.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        return html
+    }
+
+    private func sohuSpecSheet(from html: String, sourceName: String, sourceURL: String?) -> VehicleSpecSheet {
+        var sheet = VehicleSpecSheet()
+        sheet.lengthMm = sohuDimension(in: html, cssClass: "length").map {
+            VehicleSpecValue(value: $0, sourceName: sourceName, sourceURL: sourceURL, confidence: .medium, appliesTo: .series)
+        }
+        sheet.widthMm = sohuDimension(in: html, cssClass: "width").map {
+            VehicleSpecValue(value: $0, sourceName: sourceName, sourceURL: sourceURL, confidence: .medium, appliesTo: .series)
+        }
+        sheet.heightMm = sohuDimension(in: html, cssClass: "height").map {
+            VehicleSpecValue(value: $0, sourceName: sourceName, sourceURL: sourceURL, confidence: .medium, appliesTo: .series)
+        }
+        sheet.wheelbaseMm = sohuDimension(in: html, cssClass: "wheelbase").map {
+            VehicleSpecValue(value: $0, sourceName: sourceName, sourceURL: sourceURL, confidence: .medium, appliesTo: .series)
+        }
+        sheet.seats = sohuSeats(in: html).map {
+            VehicleSpecValue(value: $0, sourceName: sourceName, sourceURL: sourceURL, confidence: .medium, appliesTo: .series)
+        }
+        sheet.fuelConsumption = sohuFuelConsumption(in: html).map {
+            VehicleSpecValue(value: $0, sourceName: sourceName, sourceURL: sourceURL, confidence: .medium, appliesTo: .series)
+        }
+        sheet.features = sohuFeatures(in: html, sourceName: sourceName)
+        return sheet
+    }
+
+    private func sohuDimension(in html: String, cssClass: String) -> Int? {
+        firstCapture(
+            in: html,
+            pattern: #"model-main-params-size--param\s+\#(cssClass)[\s\S]*?model-main-params-size--v">\s*(\d+)\s*<"#
+        ).flatMap(Int.init)
+    }
+
+    private func sohuSeats(in html: String) -> Int? {
+        firstCapture(in: html, pattern: #"参配概述[\s\S]*?(\d+)\s*座"#).flatMap(Int.init)
+    }
+
+    private func sohuFuelConsumption(in html: String) -> String? {
+        firstCapture(
+            in: html,
+            pattern: #"<p class="model-main-params-item--name">\s*油耗\s*</p>\s*<p class="model-main-params-item--value">\s*([^<]+)\s*</p>"#
+        )?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sohuModelName(from html: String) -> String? {
+        firstCapture(in: html, pattern: #""name"\s*:\s*"([^"]+)""#)
+    }
+
+    private func sohuFeatures(in html: String, sourceName: String) -> [VehicleFeature] {
+        let candidates = [
+            (["倒车影像", "倒车视频影像", "后视摄像头"], "倒车影像"),
+            (["360影像", "360度影像", "360度全景影像", "全景影像"], "360影像"),
+            (["倒车雷达", "驻车雷达"], "倒车雷达"),
+            (["蓝牙", "蓝牙/车载电话"], "蓝牙"),
+            (["CarPlay", "手机互联", "车机互联"], "CarPlay"),
+            (["手机无线充电", "无线充电"], "手机无线充电"),
+            (["电动天窗", "全景天窗", "天窗"], "天窗"),
+            (["无钥匙进入", "无钥匙进入系统"], "无钥匙进入"),
+            (["座椅加热"], "座椅加热"),
+            (["定速巡航"], "定速巡航"),
+            (["自适应巡航", "ACC"], "自适应巡航"),
+            (["后排隐私玻璃"], "后排隐私玻璃"),
+            (["电动尾门", "电动后尾门"], "电动尾门")
+        ]
+        var names: [String] = []
+        for (tokens, name) in candidates where tokens.contains(where: { html.localizedCaseInsensitiveContains($0) }) {
+            if !names.contains(name) {
+                names.append(name)
+            }
+        }
+        return names.map {
+            VehicleFeature(name: $0, sourceName: sourceName, confidence: .medium, appliesTo: .series)
+        }
+    }
+
+    private func firstCapture(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: text)
+        else { return nil }
+        return String(text[range])
+    }
+
+    private func mergedFeatures(_ base: [VehicleFeature], with additions: [VehicleFeature]) -> [VehicleFeature] {
+        var result = base
+        for feature in additions where !result.contains(where: { $0.name == feature.name && $0.appliesTo == feature.appliesTo }) {
+            result.append(feature)
+        }
+        return result
     }
 
     private func wikipediaInsight(for query: String, local: VehicleInsight, now: Date) async -> VehicleInsight? {
@@ -248,6 +413,44 @@ private struct WikipediaSummaryResponse: Decodable {
         case title
         case extract
         case contentURLs = "content_urls"
+    }
+}
+
+private struct SohuModelSearchResult: Decodable {
+    struct ModelInfo: Decodable {
+        var modelID: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case modelID = "model_id"
+        }
+    }
+
+    var id: Int
+    var content: String
+    var type: Int?
+    var modelInfo: ModelInfo?
+
+    var modelID: Int {
+        modelInfo?.modelID ?? id
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case content
+        case type
+        case modelInfo = "model_info"
+    }
+}
+
+private extension VehicleSpecSheet {
+    var hasReferenceData: Bool {
+        lengthMm != nil ||
+            widthMm != nil ||
+            heightMm != nil ||
+            wheelbaseMm != nil ||
+            fuelConsumption != nil ||
+            seats != nil ||
+            !features.isEmpty
     }
 }
 

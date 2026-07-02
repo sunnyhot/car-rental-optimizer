@@ -8,10 +8,12 @@ final class VehicleInsightStore {
     private struct CacheEntry: Codable {
         var insight: VehicleInsight
         var savedAt: Date
+        var schemaVersion: Int?
     }
 
     private static let directoryName = "CarRentalOptimizer"
     private static let fileName = "vehicle-insights.json"
+    private static let cacheSchemaVersion = 2
     static let cacheTTL: TimeInterval = 30 * 24 * 60 * 60
 
     static var defaultFileURL: URL {
@@ -39,13 +41,18 @@ final class VehicleInsightStore {
     func cachedInsight(forKey key: String, now: Date = Date()) -> VehicleInsight? {
         let normalized = Self.normalizedCacheKey(key)
         guard let entry = entries[normalized],
+              entry.schemaVersion == Self.cacheSchemaVersion,
               now.timeIntervalSince(entry.savedAt) <= Self.cacheTTL
         else { return nil }
         return entry.insight
     }
 
     func save(_ insight: VehicleInsight, forKey key: String, now: Date = Date()) {
-        entries[Self.normalizedCacheKey(key)] = CacheEntry(insight: insight, savedAt: now)
+        entries[Self.normalizedCacheKey(key)] = CacheEntry(
+            insight: insight,
+            savedAt: now,
+            schemaVersion: Self.cacheSchemaVersion
+        )
         saveBestEffort()
     }
 

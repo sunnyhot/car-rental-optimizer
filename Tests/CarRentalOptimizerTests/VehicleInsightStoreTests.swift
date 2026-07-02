@@ -31,6 +31,44 @@ struct VehicleInsightStoreTests {
         #expect(cached == nil)
     }
 
+    @Test("Older cache schema returns nil")
+    func olderCacheSchemaReturnsNil() throws {
+        let fileURL = temporaryInsightStoreURL()
+        let oldCacheJSON = """
+        {
+          "entries" : {
+            "大众朗逸" : {
+              "insight" : {
+                "vehicleName" : "大众朗逸",
+                "seriesName" : "大众朗逸",
+                "specSheet" : {
+                  "features" : []
+                },
+                "configurationSummary" : null,
+                "modelYear" : null,
+                "modelYearConfidence" : "low",
+                "trimConfidence" : "low",
+                "shortSummary" : "旧缓存",
+                "longSummary" : "旧缓存里只有 Wikipedia 简介。",
+                "sourceName" : "Wikipedia",
+                "sourceURL" : "https://zh.wikipedia.org/wiki/大众朗逸",
+                "fetchedAt" : "2026-07-02T12:00:00Z",
+                "confidence" : "medium",
+                "origin" : "network"
+              },
+              "savedAt" : "2026-07-02T12:00:00Z"
+            }
+          }
+        }
+        """
+        try oldCacheJSON.data(using: .utf8)?.write(to: fileURL)
+
+        let cached = VehicleInsightStore(fileURL: fileURL)
+            .cachedInsight(forKey: "大众朗逸", now: cacheDate("2026-07-03 12:00"))
+
+        #expect(cached == nil)
+    }
+
     @Test("Save best effort does not throw for unwritable file")
     func saveBestEffortDoesNotThrowForUnwritableFile() {
         let directoryURL = FileManager.default.temporaryDirectory
