@@ -354,6 +354,42 @@ struct LocationInputTests {
 
         #expect(ranked.map(\.id) == ["east", "address"])
     }
+
+    @Test("City level origin requires selecting a concrete candidate before search")
+    func cityLevelOriginRequiresSelectingConcreteCandidateBeforeSearch() async {
+        let searchProvider = RecordingRentalSearchProvider()
+        let stationProvider = StubRailStationSuggestionProvider(suggestions: [
+            RailStationSuggestion(
+                id: "dezhou-east",
+                title: "德州东站",
+                subtitle: "德州市",
+                point: GeoPoint(lat: 37.443, lng: 116.374),
+                kind: .recommended,
+                fallbackNote: nil
+            ),
+        ])
+        let viewModel = SearchViewModel(
+            searchProvider: searchProvider,
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: StubCurrentLocationProvider(),
+            addressSuggestionProvider: StubAddressSuggestionProvider(),
+            railStationSuggestionProvider: stationProvider
+        )
+
+        await viewModel.updateOriginInput("德州")
+        await viewModel.runSearch()
+
+        #expect(searchProvider.requests.isEmpty)
+        #expect(viewModel.searchProgressPhase == .failed)
+        #expect(viewModel.preflightIssues.contains { $0.id == "origin-selection-required" && $0.severity == .blocking })
+
+        await viewModel.selectOriginSuggestion(viewModel.originSuggestions[0])
+        await viewModel.runSearch()
+
+        #expect(searchProvider.requests.count == 1)
+        #expect(searchProvider.requests[0].originLabel == "德州东站，德州市")
+    }
 }
 
 private struct FailingCurrentLocationProvider: CurrentLocationProviding {
@@ -439,6 +475,16 @@ private struct StubRentalSearchProvider: RentalSearchProviding {
 
     func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
         results
+    }
+}
+
+@MainActor
+private final class RecordingRentalSearchProvider: RentalSearchProviding {
+    private(set) var requests: [SearchRequest] = []
+
+    func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
+        requests.append(request)
+        return []
     }
 }
 

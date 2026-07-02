@@ -505,7 +505,16 @@ final class SearchViewModel: ObservableObject {
     }
 
     func refreshPreflightIssues() {
-        preflightIssues = validateSearchPreflight(request).issues
+        var issues = validateSearchPreflight(request).issues
+        if requiresOriginCandidateSelection {
+            issues.append(SearchPreflightIssue(
+                id: "origin-selection-required",
+                severity: .blocking,
+                title: "请选择到达车站",
+                message: "已识别到城市或车站联想，请先选择推荐车站或更具体地址，再开始比较。"
+            ))
+        }
+        preflightIssues = issues
     }
 
     func runSearch() async {
@@ -853,6 +862,11 @@ final class SearchViewModel: ObservableObject {
 
     func dismissOriginSuggestions() {
         originSuggestionRequestID += 1
+        if requiresOriginCandidateSelection && !originSuggestions.isEmpty {
+            isLoadingOriginSuggestions = false
+            isOriginSuggestionPanelVisible = true
+            return
+        }
         originSuggestions = []
         isLoadingOriginSuggestions = false
         isOriginSuggestionPanelVisible = false
