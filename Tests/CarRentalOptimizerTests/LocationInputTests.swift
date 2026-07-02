@@ -239,6 +239,80 @@ struct LocationInputTests {
         #expect(viewModel.originSuggestions.isEmpty)
         #expect(suggestionProvider.queries.isEmpty)
     }
+
+    @Test("Rail station suggestions are merged before address suggestions")
+    func railStationSuggestionsAreMergedBeforeAddressSuggestions() {
+        let stations = [
+            RailStationSuggestion(
+                id: "dezhou-east",
+                title: "德州东站",
+                subtitle: "德州市",
+                point: GeoPoint(lat: 37.443, lng: 116.374),
+                kind: .recommended,
+                fallbackNote: nil
+            ),
+            RailStationSuggestion(
+                id: "dezhou",
+                title: "德州站",
+                subtitle: "德州市",
+                point: GeoPoint(lat: 37.451, lng: 116.304),
+                kind: .station,
+                fallbackNote: nil
+            ),
+        ]
+        let addresses = [
+            AddressSuggestion(
+                id: "wanda",
+                title: "德州万达广场",
+                subtitle: "德州市德城区",
+                point: GeoPoint(lat: 37.458, lng: 116.307)
+            ),
+        ]
+
+        let merged = mergeOriginSuggestions(railStations: stations, addresses: addresses)
+
+        #expect(merged.map(\.title) == ["德州东站", "德州站", "德州万达广场"])
+        #expect(merged.map(\.kind) == [.railStation, .railStation, .address])
+        #expect(merged[0].displayName == "德州东站，德州市")
+    }
+
+    @Test("Duplicate station and address suggestions keep the rail station candidate")
+    func duplicateStationAndAddressSuggestionsKeepRailStationCandidate() {
+        let point = GeoPoint(lat: 37.443, lng: 116.374)
+        let merged = mergeOriginSuggestions(
+            railStations: [
+                RailStationSuggestion(
+                    id: "rail-dezhou-east",
+                    title: "德州东站",
+                    subtitle: "德州市",
+                    point: point,
+                    kind: .recommended,
+                    fallbackNote: nil
+                ),
+            ],
+            addresses: [
+                AddressSuggestion(
+                    id: "address-dezhou-east",
+                    title: "德州东站",
+                    subtitle: "德州市",
+                    point: point
+                ),
+            ]
+        )
+
+        #expect(merged.count == 1)
+        #expect(merged[0].kind == .railStation)
+        #expect(merged[0].id == "rail-dezhou-east")
+    }
+
+    @Test("Known city level origin detection is conservative")
+    func knownCityLevelOriginDetectionIsConservative() {
+        #expect(isKnownCityLevelOrigin("北京"))
+        #expect(isKnownCityLevelOrigin("上海市"))
+        #expect(!isKnownCityLevelOrigin("北京南站"))
+        #expect(!isKnownCityLevelOrigin("北京市丰台区北京南站"))
+        #expect(!isKnownCityLevelOrigin("京东总部"))
+    }
 }
 
 private struct FailingCurrentLocationProvider: CurrentLocationProviding {
