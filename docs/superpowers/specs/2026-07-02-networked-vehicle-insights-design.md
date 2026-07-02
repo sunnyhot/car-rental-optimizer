@@ -22,6 +22,8 @@ The feature must never block or degrade rental search. If network lookup fails, 
 - Detail panel:
   - Add a `车型介绍` section.
   - Show a longer introduction, source label, and source freshness.
+  - Add a `基础参数` section for dimensions, wheelbase, tank or battery capacity, fuel economy or range when available.
+  - Add a `平台配置` section for rental-listing features such as reversing camera, 360 camera, sunroof, wireless charging, privacy glass, and vehicle-age labels.
   - Distinguish `联网简介` from `本地推断` so users know whether the text came from a network source.
   - Distinguish `车系介绍` from `平台配置`. Network text explains the model family; platform-returned fields explain the rentable vehicle's visible configuration.
   - If the model year cannot be confirmed, show `年款未确认` rather than guessing.
@@ -44,6 +46,7 @@ Introduce a vehicle insight model:
 - `VehicleInsight`
   - `vehicleName: String`
   - `seriesName: String`
+  - `specSheet: VehicleSpecSheet`
   - `configurationSummary: String?`
   - `modelYear: String?`
   - `modelYearConfidence: VehicleInsightConfidence`
@@ -62,8 +65,58 @@ Introduce a vehicle insight model:
   - `.high`
   - `.medium`
   - `.low`
+- `VehicleSpecSheet`
+  - `lengthMm: VehicleSpecValue<Int>?`
+  - `widthMm: VehicleSpecValue<Int>?`
+  - `heightMm: VehicleSpecValue<Int>?`
+  - `wheelbaseMm: VehicleSpecValue<Int>?`
+  - `fuelTankLiters: VehicleSpecValue<Double>?`
+  - `batteryKWh: VehicleSpecValue<Double>?`
+  - `rangeKm: VehicleSpecValue<Int>?`
+  - `fuelConsumption: VehicleSpecValue<String>?`
+  - `seats: VehicleSpecValue<Int>?`
+  - `bodyStyle: VehicleSpecValue<String>?`
+  - `features: [VehicleFeature]`
+- `VehicleSpecValue<Value>`
+  - `value: Value`
+  - `sourceName: String`
+  - `sourceURL: String?`
+  - `confidence: VehicleInsightConfidence`
+  - `appliesTo: VehicleSpecScope`
+- `VehicleSpecScope`
+  - `.series`
+  - `.modelYear`
+  - `.platformListing`
+- `VehicleFeature`
+  - `name: String`
+  - `sourceName: String`
+  - `confidence: VehicleInsightConfidence`
+  - `appliesTo: VehicleSpecScope`
 
 Local inference consumes `RentalListing.vehicleName` and `RentalListing.vehicleClass`. It should extract signals such as pure electric, plug-in hybrid, SUV, sedan, MPV, seat count, battery size, and displacement when present.
+
+## Basic Specs And Feature Rules
+
+The detail panel should distinguish physical vehicle parameters from rentable-listing equipment.
+
+Basic parameters:
+
+- Show dimensions as `长宽高` when length, width, and height are all available; otherwise show available fields independently.
+- Show `轴距`, `座位数`, `油箱`, `电池容量`, `续航`, `油耗`, and `车身形式` when available.
+- Wikipedia/Wikidata values may populate model-family or year款 parameters, but each value must keep its scope label.
+- If a network source gives a family-level dimension and the platform listing does not confirm the exact year款, mark the value as `车系参数` instead of `当前车辆`.
+
+Platform-listing features:
+
+- Treat feature tags returned by rental platforms as current-listing equipment with high confidence.
+- Supported first-version feature extraction should include `倒车影像`, `360影像`, `天窗`, `无线充电`, `后排隐私玻璃`, `电动尾门`, `蓝牙`, and `车龄`.
+- Network sources may mention features for a trim, but those should not be displayed as current-listing equipment unless platform text also confirms them.
+- If the user needs to make a booking decision based on a feature, the detail section should include muted copy such as `下单前以平台确认页为准`.
+
+Missing values:
+
+- Do not show empty rows for every unknown field.
+- For important fields in detail view, show compact unknown states: `轴距：未确认`, `油箱/电池：未确认`, or `配置以平台返回为准`.
 
 ## Model Year And Trim Confidence
 
@@ -105,6 +158,7 @@ Network lookup:
 - Try Chinese and English title/search variants when possible.
 - Only accept network summaries when the matched title/entity contains strong model-name overlap.
 - Treat network summaries as `seriesName` evidence unless the source explicitly names a year款 or trim.
+- Parse structured network claims into `VehicleSpecSheet` only when units and source field meaning are clear. Reject ambiguous values rather than guessing.
 - If confidence is low, keep local inference rather than showing an unrelated encyclopedia result.
 
 ## UI Integration
@@ -118,7 +172,9 @@ Result card:
 Detail panel:
 
 - Add `VehicleInsightSection` near the vehicle/store facts.
-- Show title, long summary, source badge, and source link if available.
+- Show title, long summary, source badge, source link if available, `基础参数`, and `平台配置`.
+- Use a dense table or metric-grid layout for `基础参数`; keep individual labels short enough for the current right panel.
+- Show feature tags for `平台配置`, grouped separately from network parameters.
 - Use existing workbench cards and status styling. Do not introduce a modal.
 
 State ownership:
@@ -140,6 +196,9 @@ Add tests for:
 
 - Local inference from `纯电 51kWh | 三厢 5座`.
 - Year and trim confidence from platform text such as `车龄1年内`, `2024款`, `360影像`, and `天窗`.
+- Basic spec extraction for dimensions, wheelbase, fuel tank, battery capacity, seats, range, and body style.
+- Feature extraction for reversing camera, 360 camera, sunroof, wireless charging, privacy glass, electric tailgate, Bluetooth, and vehicle-age tags.
+- Network family-level specs displaying as `series` scope rather than `platformListing`.
 - Network model-family hits not claiming a concrete year款 or trim.
 - Local inference from SUV, MPV, plug-in hybrid, and fuel/displacement strings.
 - Cache hit, stale cache miss, and best-effort save behavior.
