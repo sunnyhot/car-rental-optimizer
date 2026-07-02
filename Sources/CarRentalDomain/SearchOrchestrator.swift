@@ -76,21 +76,7 @@ public func rankRentalListings(
     if !hasVehicleQuery {
         return mergeBlankVehicleRecommendations(ranked)
     }
-    guard isSpecificVehicleQuery else {
-        return ranked
-    }
-    return dedupeVehicleRecommendations(ranked, specificVehicleKey: vehicleQuery)
-}
-
-private func dedupeVehicleRecommendations(
-    _ recommendations: [Recommendation],
-    specificVehicleKey: String? = nil
-) -> [Recommendation] {
-    var seen = Set<String>()
-    return recommendations.filter { recommendation in
-        let key = specificVehicleKey.map(normalizedVehicleKey) ?? normalizedVehicleKey(recommendation.listing.vehicleName)
-        return seen.insert(key).inserted
-    }
+    return ranked
 }
 
 private func mergeBlankVehicleRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {

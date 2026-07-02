@@ -306,7 +306,7 @@ final class SearchOrchestratorTests: XCTestCase {
         XCTAssertTrue(results.allSatisfy { $0.listing.vehicleName.contains("瑞虎8") })
     }
 
-    func testSpecificVehicleQueryKeepsBestExactVehicleOnly() async {
+    func testSpecificVehicleQueryKeepsAllExactMatchesSortedByCost() async {
         let expensiveLavida = RentalListing(
             id: "expensive-lavida",
             platform: .carInc,
@@ -358,8 +358,7 @@ final class SearchOrchestratorTests: XCTestCase {
             mapService: mapService
         )
 
-        XCTAssertEqual(results.count, 1)
-        XCTAssertEqual(results[0].listing.id, "cheaper-lavida")
+        XCTAssertEqual(results.map(\.listing.id), ["cheaper-lavida", "expensive-lavida"])
     }
 
     func testGenericSuvQueryKeepsSuvAlternatives() async {
