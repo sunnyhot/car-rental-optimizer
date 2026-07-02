@@ -14,7 +14,22 @@ struct VehicleInsightNetworkTests {
                 extract: "大众朗逸是上汽大众生产的一款紧凑型轿车，主要面向中国市场。",
                 pageURL: "https://zh.wikipedia.org/wiki/%E5%A4%A7%E4%BC%97%E6%9C%97%E9%80%B8"
             ),
-            "https://query.wikidata.org/sparql?format=json&query=SELECT%20%3Flength%20%3Fwidth%20%3Fheight%20%3Fwheelbase%20WHERE%20%7B%20%7D": wikidataSpecJSON(length: 4670, width: 1806, height: 1474, wheelbase: 2688)
+            wikidataSearchURL("大众朗逸"): wikidataSearchJSON(
+                id: "Q1",
+                label: "大众朗逸",
+                description: "紧凑型轿车",
+                aliases: ["大众 朗逸"],
+                matchText: "大众朗逸"
+            ),
+            wikidataEntityURL("Q1"): wikidataEntityJSON(
+                id: "Q1",
+                label: "大众朗逸",
+                description: "紧凑型轿车",
+                length: 4670,
+                width: 1806,
+                height: 1474,
+                wheelbase: 2688
+            )
         ])
         let provider = VehicleInsightNetworkProvider(httpClient: client)
 
@@ -31,6 +46,42 @@ struct VehicleInsightNetworkTests {
         #expect(insight?.specSheet.features.map(\.name) == ["蓝牙"])
         #expect(insight?.longSummary.contains("车系介绍：大众朗逸是上汽大众生产的一款紧凑型轿车") == true)
         #expect(insight?.longSummary.contains("当前租赁车辆配置以平台返回为准") == true)
+    }
+
+    @Test("Wikidata alias search enriches when Wikipedia summary is unavailable")
+    func wikidataAliasSearchEnrichesWhenWikipediaSummaryIsUnavailable() async {
+        let listing = makeNetworkListing(vehicleName: "日产劲客", vehicleClass: "SUV 5座")
+        let client = StubVehicleInsightHTTPClient(responses: [
+            wikidataSearchURL("日产劲客"): wikidataSearchJSON(
+                id: "Q26186522",
+                label: "Nissan Kicks",
+                description: "subcompact crossover SUV",
+                aliases: ["日产劲客", "劲客"],
+                matchText: "日产劲客"
+            ),
+            wikidataEntityURL("Q26186522"): wikidataEntityJSON(
+                id: "Q26186522",
+                label: "日产劲客",
+                description: "车型",
+                length: 4295,
+                width: 1760,
+                height: 1590,
+                wheelbase: 2610
+            )
+        ])
+        let provider = VehicleInsightNetworkProvider(httpClient: client)
+
+        let insight = await provider.networkInsight(for: listing, now: networkDate("2026-07-02 20:30"))
+
+        #expect(insight?.origin == .network)
+        #expect(insight?.sourceName == "Wikidata")
+        #expect(insight?.seriesName == "日产劲客")
+        #expect(insight?.specSheet.lengthMm?.value == 4295)
+        #expect(insight?.specSheet.widthMm?.value == 1760)
+        #expect(insight?.specSheet.heightMm?.value == 1590)
+        #expect(insight?.specSheet.wheelbaseMm?.value == 2610)
+        #expect(insight?.specSheet.seats?.value == 5)
+        #expect(insight?.longSummary.contains("车系介绍：日产劲客") == true)
     }
 
     @Test("Irrelevant Wikipedia title is rejected")
@@ -77,19 +128,93 @@ private func wikipediaSummaryJSON(title: String, extract: String, pageURL: Strin
     """
 }
 
-private func wikidataSpecJSON(length: Int, width: Int, height: Int, wheelbase: Int) -> String {
+private func wikidataSearchURL(_ query: String) -> String {
+    var components = URLComponents(string: "https://www.wikidata.org/w/api.php")!
+    components.queryItems = [
+        URLQueryItem(name: "action", value: "wbsearchentities"),
+        URLQueryItem(name: "search", value: query),
+        URLQueryItem(name: "language", value: "zh"),
+        URLQueryItem(name: "format", value: "json"),
+        URLQueryItem(name: "limit", value: "3")
+    ]
+    return components.url!.absoluteString
+}
+
+private func wikidataEntityURL(_ id: String) -> String {
+    "https://www.wikidata.org/wiki/Special:EntityData/\(id).json"
+}
+
+private func wikidataSearchJSON(
+    id: String,
+    label: String,
+    description: String,
+    aliases: [String],
+    matchText: String
+) -> String {
+    let aliasJSON = aliases.map { "\"\($0)\"" }.joined(separator: ", ")
+    return """
+    {
+      "search": [
+        {
+          "id": "\(id)",
+          "label": "\(label)",
+          "description": "\(description)",
+          "aliases": [\(aliasJSON)],
+          "match": {
+            "type": "alias",
+            "language": "zh",
+            "text": "\(matchText)"
+          }
+        }
+      ],
+      "success": 1
+    }
+    """
+}
+
+private func wikidataEntityJSON(
+    id: String,
+    label: String,
+    description: String,
+    length: Int,
+    width: Int,
+    height: Int,
+    wheelbase: Int
+) -> String {
     """
     {
-      "head": { "vars": ["length", "width", "height", "wheelbase"] },
-      "results": {
-        "bindings": [
-          {
-            "length": { "type": "literal", "value": "\(length)" },
-            "width": { "type": "literal", "value": "\(width)" },
-            "height": { "type": "literal", "value": "\(height)" },
-            "wheelbase": { "type": "literal", "value": "\(wheelbase)" }
+      "entities": {
+        "\(id)": {
+          "labels": {
+            "zh-hans": { "language": "zh-hans", "value": "\(label)" },
+            "en": { "language": "en", "value": "\(label)" }
+          },
+          "descriptions": {
+            "zh-hans": { "language": "zh-hans", "value": "\(description)" },
+            "en": { "language": "en", "value": "\(description)" }
+          },
+          "claims": {
+            "P2043": [\(wikidataQuantityClaim(length))],
+            "P2049": [\(wikidataQuantityClaim(width))],
+            "P2048": [\(wikidataQuantityClaim(height))],
+            "P3039": [\(wikidataQuantityClaim(wheelbase))]
           }
-        ]
+        }
+      }
+    }
+    """
+}
+
+private func wikidataQuantityClaim(_ value: Int) -> String {
+    """
+    {
+      "mainsnak": {
+        "datavalue": {
+          "value": {
+            "amount": "+\(value)",
+            "unit": "http://www.wikidata.org/entity/Q174789"
+          }
+        }
       }
     }
     """
