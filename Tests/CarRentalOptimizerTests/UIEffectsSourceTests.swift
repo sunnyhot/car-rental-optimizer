@@ -25,6 +25,8 @@ struct UIEffectsSourceTests {
         #expect(source.contains("ActionStatusRow("))
         #expect(source.contains("StatusLightRail(isActive: viewModel.isSearching"))
         #expect(source.contains("WorkbenchCard("))
+        #expect(source.contains("VehicleSuggestionField("))
+        #expect(source.contains("VehicleSuggestionDropdown("))
     }
 
     @Test("Result panel uses signal cards and staged loading")
