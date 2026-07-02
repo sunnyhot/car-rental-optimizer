@@ -349,6 +349,66 @@ struct SearchViewModelTests {
         #expect(viewModel.platformStatus(for: .ehi).kind == .ready)
         #expect(viewModel.platformStatus(for: .carInc).kind == .ready)
     }
+
+    @Test("Vehicle suggestions refresh and selection update request")
+    func vehicleSuggestionsRefreshAndSelectionUpdateRequest() {
+        let store = VehicleSuggestionStore(
+            learned: [
+                VehicleSuggestion(name: "尚界 H5", source: .learned, aliases: ["h5"], learnedAt: vehicleSuggestionDate("2026-07-02 10:00"), count: 1)
+            ],
+            recent: [],
+            builtIns: [],
+            fileURL: temporaryVehicleSuggestionURL()
+        )
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            vehicleSuggestionStore: store
+        )
+
+        viewModel.refreshVehicleSuggestions(for: "h5")
+        #expect(viewModel.vehicleSuggestions.map(\.name) == ["尚界 H5"])
+        #expect(viewModel.isVehicleSuggestionPanelVisible)
+
+        let suggestion = viewModel.vehicleSuggestions[0]
+        viewModel.selectVehicleSuggestion(suggestion)
+
+        #expect(viewModel.request.vehicleQuery == "尚界 H5")
+        #expect(viewModel.vehicleSuggestions.isEmpty)
+        #expect(!viewModel.isVehicleSuggestionPanelVisible)
+    }
+
+    @Test("Successful blank vehicle search records returned vehicle names")
+    func successfulBlankVehicleSearchRecordsReturnedVehicleNames() async {
+        let store = VehicleSuggestionStore(
+            learned: [],
+            recent: [],
+            builtIns: [],
+            fileURL: temporaryVehicleSuggestionURL()
+        )
+        let provider = StubRentalSearchProvider(results: [
+            PlatformEvidenceResult(
+                platform: .carInc,
+                status: PlatformEvidenceStatus(platform: .carInc, kind: .ready, message: "ok", sourceUrl: "https://www.zuche.com/"),
+                listings: [
+                    makeVehicleSuggestionListing(vehicleName: "尚界 H5"),
+                    makeVehicleSuggestionListing(vehicleName: "未指定车型")
+                ]
+            )
+        ])
+        let viewModel = SearchViewModel(
+            searchProvider: provider,
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            vehicleSuggestionStore: store
+        )
+        viewModel.request.vehicleQuery = ""
+
+        await viewModel.runSearch()
+
+        #expect(store.learnedSuggestions.map(\.name) == ["尚界 H5"])
+    }
 }
 
 @MainActor
@@ -429,6 +489,43 @@ private func makeTestListing(
         dataCompleteness: 0.88,
         warnings: warnings
     )
+}
+
+private func makeVehicleSuggestionListing(vehicleName: String) -> RentalListing {
+    RentalListing(
+        id: "listing-\(vehicleName)",
+        platform: .carInc,
+        store: Store(
+            id: "store",
+            platform: .carInc,
+            name: "北京通州店",
+            city: "北京",
+            address: "北京通州",
+            location: AppDefaults.searchRequest.origin,
+            distanceKm: 0.5,
+            hours: "08:00-21:00"
+        ),
+        vehicleName: vehicleName,
+        vehicleClass: "",
+        basePrice: 100,
+        platformFees: 0,
+        insuranceFees: 0,
+        oneWayFee: 0,
+        sourceUrl: "https://www.zuche.com/",
+        dataCompleteness: 0.8
+    )
+}
+
+private func temporaryVehicleSuggestionURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("vehicle-suggestions-\(UUID().uuidString).json")
+}
+
+private func vehicleSuggestionDate(_ value: String) -> Date {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm"
+    formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+    return formatter.date(from: value)!
 }
 
 private func makeTestRecommendation(

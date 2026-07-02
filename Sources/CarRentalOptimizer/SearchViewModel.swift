@@ -231,6 +231,8 @@ final class SearchViewModel: ObservableObject {
     @Published var isLoadingOriginSuggestions = false
     @Published var isOriginSuggestionPanelVisible = false
     @Published var originSuggestions: [AddressSuggestion] = []
+    @Published var vehicleSuggestions: [VehicleSuggestion] = []
+    @Published var isVehicleSuggestionPanelVisible = false
     @Published var originStatus = "正在获取当前位置。"
     @Published var status = "待查询：静默 API 准备就绪。"
     @Published var searchProgressPhase: SearchProgressPhase = .idle
@@ -245,6 +247,7 @@ final class SearchViewModel: ObservableObject {
     private let mapService: MapService
     private let currentLocationProvider: CurrentLocationProviding
     private let addressSuggestionProvider: AddressSuggestionProviding
+    private let vehicleSuggestionStore: VehicleSuggestionStore
     private let initialLocationRetryDelayNanoseconds: UInt64
     private let now: () -> Date
     private var hasRequestedInitialLocation = false
@@ -261,6 +264,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = AppleMapService()
         self.currentLocationProvider = AppleCurrentLocationProvider()
         self.addressSuggestionProvider = AppleAddressSuggestionProvider()
+        self.vehicleSuggestionStore = VehicleSuggestionStore()
         self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -272,6 +276,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = EstimatedMapService()
         self.currentLocationProvider = UnavailableCurrentLocationProvider()
         self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
+        self.vehicleSuggestionStore = VehicleSuggestionStore()
         self.initialLocationRetryDelayNanoseconds = 0
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -283,6 +288,7 @@ final class SearchViewModel: ObservableObject {
         mapService: MapService,
         currentLocationProvider: CurrentLocationProviding = UnavailableCurrentLocationProvider(),
         addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider(),
+        vehicleSuggestionStore: VehicleSuggestionStore = VehicleSuggestionStore(),
         initialLocationRetryDelayNanoseconds: UInt64 = defaultInitialLocationRetryDelayNanoseconds,
         now: @escaping () -> Date = Date.init
     ) {
@@ -291,6 +297,7 @@ final class SearchViewModel: ObservableObject {
         self.mapService = mapService
         self.currentLocationProvider = currentLocationProvider
         self.addressSuggestionProvider = addressSuggestionProvider
+        self.vehicleSuggestionStore = vehicleSuggestionStore
         self.initialLocationRetryDelayNanoseconds = initialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = now
@@ -584,6 +591,7 @@ final class SearchViewModel: ObservableObject {
         results = recommendations
         selectedId = recommendations.first?.id ?? ""
         recordSuccessfulResults(recommendations)
+        recordVehicleSuggestions(from: recommendations)
         searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: recommendations)
         status = formatSearchCompletionStatus(request: liveRequest, resultCount: recommendations.count)
         searchProgressPhase = .completed
@@ -824,6 +832,28 @@ final class SearchViewModel: ObservableObject {
         originSuggestions = []
         isLoadingOriginSuggestions = false
         isOriginSuggestionPanelVisible = false
+    }
+
+    func refreshVehicleSuggestions(for query: String) {
+        vehicleSuggestions = vehicleSuggestionStore.suggestions(matching: query, limit: 6)
+        isVehicleSuggestionPanelVisible = !vehicleSuggestions.isEmpty
+    }
+
+    func selectVehicleSuggestion(_ suggestion: VehicleSuggestion) {
+        vehicleSuggestionStore.recordSelection(suggestion, now: now())
+        request.vehicleQuery = suggestion.name
+        dismissVehicleSuggestions()
+        refreshPreflightIssues()
+    }
+
+    func dismissVehicleSuggestions() {
+        vehicleSuggestions = []
+        isVehicleSuggestionPanelVisible = false
+    }
+
+    func recordVehicleSuggestions(from recommendations: [Recommendation]) {
+        let names = recommendations.map(\.listing.vehicleName)
+        vehicleSuggestionStore.recordSearchResults(names, now: now())
     }
 
     private func recordSuccessfulResults(_ recommendations: [Recommendation]) {
