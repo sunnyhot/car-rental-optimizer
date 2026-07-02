@@ -137,31 +137,45 @@ struct LocationInputTests {
         #expect(source.contains("startLocationTimeout()"))
     }
 
-    @Test("Address suggestions update as user edits origin")
-    func addressSuggestionsUpdateAsUserEditsOrigin() async {
-        let suggestions = [
-            AddressSuggestion(id: "1", title: "北京南站", subtitle: "北京市丰台区", point: GeoPoint(lat: 39.8652, lng: 116.3786)),
-            AddressSuggestion(id: "2", title: "北京西站", subtitle: "北京市丰台区", point: GeoPoint(lat: 39.8948, lng: 116.3213)),
-        ]
-        let suggestionProvider = StubAddressSuggestionProvider(suggestions: suggestions)
+    @Test("Origin suggestions prioritize rail stations and selection updates request origin")
+    func originSuggestionsPrioritizeRailStationsAndSelectionUpdatesRequestOrigin() async {
+        let station = RailStationSuggestion(
+            id: "dezhou-east",
+            title: "德州东站",
+            subtitle: "德州市",
+            point: GeoPoint(lat: 37.443, lng: 116.374),
+            kind: .recommended,
+            fallbackNote: nil
+        )
+        let address = AddressSuggestion(
+            id: "wanda",
+            title: "德州万达广场",
+            subtitle: "德州市德城区",
+            point: GeoPoint(lat: 37.458, lng: 116.307)
+        )
+        let stationProvider = StubRailStationSuggestionProvider(suggestions: [station])
+        let addressProvider = StubAddressSuggestionProvider(suggestions: [address])
         let viewModel = SearchViewModel(
             searchProvider: StubRentalSearchProvider(results: []),
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService(),
             currentLocationProvider: StubCurrentLocationProvider(),
-            addressSuggestionProvider: suggestionProvider
+            addressSuggestionProvider: addressProvider,
+            railStationSuggestionProvider: stationProvider
         )
 
-        await viewModel.updateOriginInput("北京站")
+        await viewModel.updateOriginInput("德州")
 
-        #expect(suggestionProvider.queries == ["北京站"])
-        #expect(viewModel.originSuggestions == suggestions)
+        #expect(stationProvider.queries == ["德州"])
+        #expect(addressProvider.queries == ["德州"])
+        #expect(viewModel.originSuggestions.map(\.title) == ["德州东站", "德州万达广场"])
+        #expect(viewModel.originSuggestions.map(\.kind) == [.railStation, .address])
         #expect(viewModel.isOriginSuggestionPanelVisible)
 
-        await viewModel.selectOriginSuggestion(suggestions[0])
+        await viewModel.selectOriginSuggestion(viewModel.originSuggestions[0])
 
-        #expect(viewModel.request.originLabel == "北京南站，北京市丰台区")
-        #expect(viewModel.request.origin == GeoPoint(lat: 39.8652, lng: 116.3786))
+        #expect(viewModel.request.originLabel == "德州东站，德州市")
+        #expect(viewModel.request.origin == GeoPoint(lat: 37.443, lng: 116.374))
         #expect(viewModel.originSuggestions.isEmpty)
         #expect(!viewModel.isOriginSuggestionPanelVisible)
     }
@@ -216,7 +230,7 @@ struct LocationInputTests {
         )
 
         await viewModel.updateOriginInput("京东总部")
-        await viewModel.selectOriginSuggestion(englishSuggestion)
+        await viewModel.selectOriginSuggestion(viewModel.originSuggestions[0])
 
         #expect(viewModel.request.originLabel == "京东集团全球总部2号园区，北京通州 北京经济技术开发区")
     }
@@ -238,6 +252,236 @@ struct LocationInputTests {
 
         #expect(viewModel.originSuggestions.isEmpty)
         #expect(suggestionProvider.queries.isEmpty)
+    }
+
+    @Test("Rail station suggestions are merged before address suggestions")
+    func railStationSuggestionsAreMergedBeforeAddressSuggestions() {
+        let stations = [
+            RailStationSuggestion(
+                id: "dezhou-east",
+                title: "德州东站",
+                subtitle: "德州市",
+                point: GeoPoint(lat: 37.443, lng: 116.374),
+                kind: .recommended,
+                fallbackNote: nil
+            ),
+            RailStationSuggestion(
+                id: "dezhou",
+                title: "德州站",
+                subtitle: "德州市",
+                point: GeoPoint(lat: 37.451, lng: 116.304),
+                kind: .station,
+                fallbackNote: nil
+            ),
+        ]
+        let addresses = [
+            AddressSuggestion(
+                id: "wanda",
+                title: "德州万达广场",
+                subtitle: "德州市德城区",
+                point: GeoPoint(lat: 37.458, lng: 116.307)
+            ),
+        ]
+
+        let merged = mergeOriginSuggestions(railStations: stations, addresses: addresses)
+
+        #expect(merged.map(\.title) == ["德州东站", "德州站", "德州万达广场"])
+        #expect(merged.map(\.kind) == [.railStation, .railStation, .address])
+        #expect(merged[0].displayName == "德州东站，德州市")
+    }
+
+    @Test("Duplicate station and address suggestions keep the rail station candidate")
+    func duplicateStationAndAddressSuggestionsKeepRailStationCandidate() {
+        let point = GeoPoint(lat: 37.443, lng: 116.374)
+        let merged = mergeOriginSuggestions(
+            railStations: [
+                RailStationSuggestion(
+                    id: "rail-dezhou-east",
+                    title: "德州东站",
+                    subtitle: "德州市",
+                    point: point,
+                    kind: .recommended,
+                    fallbackNote: nil
+                ),
+            ],
+            addresses: [
+                AddressSuggestion(
+                    id: "address-dezhou-east",
+                    title: "德州东站",
+                    subtitle: "德州市",
+                    point: point
+                ),
+            ]
+        )
+
+        #expect(merged.count == 1)
+        #expect(merged[0].kind == .railStation)
+        #expect(merged[0].id == "rail-dezhou-east")
+    }
+
+    @Test("Known city level origin detection is conservative")
+    func knownCityLevelOriginDetectionIsConservative() {
+        #expect(isKnownCityLevelOrigin("北京"))
+        #expect(isKnownCityLevelOrigin("上海市"))
+        #expect(!isKnownCityLevelOrigin("北京南站"))
+        #expect(!isKnownCityLevelOrigin("北京市丰台区北京南站"))
+        #expect(!isKnownCityLevelOrigin("京东总部"))
+    }
+
+    @Test("Rail station search expands city input")
+    func railStationSearchExpandsCityInput() {
+        #expect(railStationSearchQueries(for: "德州") == ["德州 高铁站", "德州 火车站", "德州站", "德州"])
+        #expect(railStationSearchQueries(for: "德州站") == ["德州站"])
+    }
+
+    @Test("Rail station text filtering accepts railway stations and rejects airports")
+    func railStationTextFilteringAcceptsStationsAndRejectsAirports() {
+        #expect(isRailStationCandidateText("德州东站 德州市"))
+        #expect(isRailStationCandidateText("苏州北站 高铁站"))
+        #expect(isRailStationCandidateText("济南火车站"))
+        #expect(!isRailStationCandidateText("德州万达广场"))
+        #expect(isRejectedRailStationCandidateText("德州机场"))
+        #expect(isRejectedRailStationCandidateText("火车站机场大巴候车点"))
+    }
+
+    @Test("Rail station ranking keeps recommended stations first and deduplicates names")
+    func railStationRankingKeepsRecommendedStationsFirstAndDeduplicatesNames() {
+        let ranked = rankedUniqueRailStationSuggestions([
+            RailStationSuggestion(id: "address", title: "德州站", subtitle: "德州市", point: GeoPoint(lat: 37.451, lng: 116.304), kind: .station, fallbackNote: nil),
+            RailStationSuggestion(id: "east", title: "德州东站", subtitle: "德州市", point: GeoPoint(lat: 37.443, lng: 116.374), kind: .recommended, fallbackNote: nil),
+            RailStationSuggestion(id: "east-duplicate", title: "德州东站", subtitle: "德州市德城区", point: GeoPoint(lat: 37.443, lng: 116.374), kind: .station, fallbackNote: nil),
+        ])
+
+        #expect(ranked.map(\.id) == ["east", "address"])
+    }
+
+    @Test("City level origin requires selecting a concrete candidate before search")
+    func cityLevelOriginRequiresSelectingConcreteCandidateBeforeSearch() async {
+        let searchProvider = RecordingRentalSearchProvider()
+        let stationProvider = StubRailStationSuggestionProvider(suggestions: [
+            RailStationSuggestion(
+                id: "dezhou-east",
+                title: "德州东站",
+                subtitle: "德州市",
+                point: GeoPoint(lat: 37.443, lng: 116.374),
+                kind: .recommended,
+                fallbackNote: nil
+            ),
+        ])
+        let viewModel = SearchViewModel(
+            searchProvider: searchProvider,
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: StubCurrentLocationProvider(),
+            addressSuggestionProvider: StubAddressSuggestionProvider(),
+            railStationSuggestionProvider: stationProvider
+        )
+
+        await viewModel.updateOriginInput("德州")
+        await viewModel.runSearch()
+
+        #expect(searchProvider.requests.isEmpty)
+        #expect(viewModel.searchProgressPhase == .failed)
+        #expect(viewModel.preflightIssues.contains { $0.id == "origin-selection-required" && $0.severity == .blocking })
+
+        await viewModel.selectOriginSuggestion(viewModel.originSuggestions[0])
+        await viewModel.runSearch()
+
+        #expect(searchProvider.requests.count == 1)
+        #expect(searchProvider.requests[0].originLabel == "德州东站，德州市")
+    }
+
+    @Test("Nearest station fallback is visible and only applied after selection")
+    func nearestStationFallbackIsVisibleAndOnlyAppliedAfterSelection() async {
+        let fallback = RailStationSuggestion(
+            id: "nearest-jinan-west",
+            title: "济南西站",
+            subtitle: "济南市槐荫区",
+            point: GeoPoint(lat: 36.668, lng: 116.892),
+            kind: .nearestFallback,
+            fallbackNote: "未找到市内车站，已使用附近车站。"
+        )
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: StubCurrentLocationProvider(),
+            addressSuggestionProvider: StubAddressSuggestionProvider(),
+            railStationSuggestionProvider: StubRailStationSuggestionProvider(suggestions: [fallback])
+        )
+
+        await viewModel.updateOriginInput("齐河")
+
+        #expect(viewModel.request.originLabel == "齐河")
+        #expect(viewModel.originSuggestions[0].kind == .nearestRailStationFallback)
+        #expect(viewModel.originSuggestions[0].fallbackNote == "未找到市内车站，已使用附近车站。")
+
+        await viewModel.selectOriginSuggestion(viewModel.originSuggestions[0])
+
+        #expect(viewModel.request.originLabel == "济南西站，济南市槐荫区")
+        #expect(viewModel.request.origin == GeoPoint(lat: 36.668, lng: 116.892))
+        #expect(viewModel.originStatus == "未找到市内车站，已使用附近车站。")
+    }
+
+    @Test("Rail station lookup failure preserves address suggestions")
+    func railStationLookupFailurePreservesAddressSuggestions() async {
+        let address = AddressSuggestion(
+            id: "jd",
+            title: "京东总部",
+            subtitle: "北京市通州区",
+            point: GeoPoint(lat: 39.7784, lng: 116.5629)
+        )
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: StubCurrentLocationProvider(),
+            addressSuggestionProvider: StubAddressSuggestionProvider(suggestions: [address]),
+            railStationSuggestionProvider: FailingRailStationSuggestionProvider()
+        )
+
+        await viewModel.updateOriginInput("京东总部")
+
+        #expect(viewModel.originSuggestions.map(\.title) == ["京东总部"])
+        #expect(viewModel.originSuggestions.allSatisfy { $0.kind == .address })
+        #expect(viewModel.originStatus == "选择一个候选位置。")
+    }
+
+    @Test("Dismissed origin suggestions ignore stale rail station lookup")
+    func dismissedOriginSuggestionsIgnoreStaleRailStationLookup() async {
+        let stationProvider = DelayedRailStationSuggestionProvider()
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            currentLocationProvider: StubCurrentLocationProvider(),
+            addressSuggestionProvider: StubAddressSuggestionProvider(),
+            railStationSuggestionProvider: stationProvider
+        )
+
+        let lookupTask = Task {
+            await viewModel.updateOriginInput("德州")
+        }
+        while stationProvider.continuation == nil {
+            await Task.yield()
+        }
+
+        viewModel.dismissOriginSuggestions()
+        stationProvider.resume(with: [
+            RailStationSuggestion(
+                id: "dezhou-east",
+                title: "德州东站",
+                subtitle: "德州市",
+                point: GeoPoint(lat: 37.443, lng: 116.374),
+                kind: .recommended,
+                fallbackNote: nil
+            ),
+        ])
+        await lookupTask.value
+
+        #expect(viewModel.originSuggestions.isEmpty)
+        #expect(!viewModel.isLoadingOriginSuggestions)
+        #expect(!viewModel.isOriginSuggestionPanelVisible)
     }
 }
 
@@ -304,11 +548,42 @@ private final class StubAddressSuggestionProvider: AddressSuggestionProviding {
     }
 }
 
+@MainActor
+private final class StubRailStationSuggestionProvider: RailStationSuggestionProviding {
+    let suggestions: [RailStationSuggestion]
+    private(set) var queries: [String] = []
+
+    init(suggestions: [RailStationSuggestion] = []) {
+        self.suggestions = suggestions
+    }
+
+    func stationSuggestions(for query: String, near origin: GeoPoint?) async throws -> [RailStationSuggestion] {
+        queries.append(query)
+        return suggestions
+    }
+}
+
+private struct FailingRailStationSuggestionProvider: RailStationSuggestionProviding {
+    func stationSuggestions(for query: String, near origin: GeoPoint?) async throws -> [RailStationSuggestion] {
+        throw AddressGeocodingError.notFound
+    }
+}
+
 private struct StubRentalSearchProvider: RentalSearchProviding {
     let results: [PlatformEvidenceResult]
 
     func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
         results
+    }
+}
+
+@MainActor
+private final class RecordingRentalSearchProvider: RentalSearchProviding {
+    private(set) var requests: [SearchRequest] = []
+
+    func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
+        requests.append(request)
+        return []
     }
 }
 
@@ -323,6 +598,22 @@ private final class DelayedAddressSuggestionProvider: AddressSuggestionProviding
     }
 
     func resume(with suggestions: [AddressSuggestion]) {
+        continuation?.resume(returning: suggestions)
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class DelayedRailStationSuggestionProvider: RailStationSuggestionProviding {
+    private(set) var continuation: CheckedContinuation<[RailStationSuggestion], Error>?
+
+    func stationSuggestions(for query: String, near origin: GeoPoint?) async throws -> [RailStationSuggestion] {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume(with suggestions: [RailStationSuggestion]) {
         continuation?.resume(returning: suggestions)
         continuation = nil
     }

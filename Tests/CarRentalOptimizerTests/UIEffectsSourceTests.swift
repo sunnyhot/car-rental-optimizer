@@ -27,6 +27,16 @@ struct UIEffectsSourceTests {
         #expect(source.contains("WorkbenchCard("))
     }
 
+    @Test("Origin suggestion dropdown distinguishes stations from addresses")
+    func originSuggestionDropdownDistinguishesStationsFromAddresses() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/SearchPanelView.swift", encoding: .utf8)
+
+        #expect(source.contains("OriginSuggestionDropdown"))
+        #expect(source.contains("suggestion.kind.systemImage"))
+        #expect(source.contains("suggestion.kind.label"))
+        #expect(source.contains("suggestion.fallbackNote"))
+    }
+
     @Test("Result panel uses signal cards and staged loading")
     func resultPanelUsesSignalCardsAndStagedLoading() throws {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/ResultPanelView.swift", encoding: .utf8)
