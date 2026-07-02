@@ -48,6 +48,7 @@ struct SearchPanelView: View {
             }
             .onChange(of: pickupDate) { _, newValue in
                 dismissOriginInput()
+                viewModel.dismissVehicleSuggestions()
                 if returnDate < newValue {
                     returnDate = newValue
                 }
@@ -55,6 +56,7 @@ struct SearchPanelView: View {
             }
             .onChange(of: returnDate) { _, _ in
                 dismissOriginInput()
+                viewModel.dismissVehicleSuggestions()
                 viewModel.applyDates(pickup: pickupDate, returnDate: returnDate)
             }
             .onChange(of: viewModel.request) { _, _ in
@@ -94,11 +96,7 @@ struct SearchPanelView: View {
             }
 
             QueryConsoleSection(icon: "car", title: "车辆与范围") {
-                FieldView(label: "车型") {
-                    TextField("瑞虎8 / SUV / 留空查最近门店", text: $viewModel.request.vehicleQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.large)
-                }
+                VehicleSuggestionField()
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -169,6 +167,7 @@ struct SearchPanelView: View {
             isDisabled: viewModel.isSearching || viewModel.hasBlockingPreflightIssues
         ) {
             dismissOriginInput()
+            viewModel.dismissVehicleSuggestions()
             Task { await viewModel.runSearch() }
         }
     }
@@ -177,6 +176,7 @@ struct SearchPanelView: View {
         originInputTask?.cancel()
         originInputDismissRequest += 1
         viewModel.dismissOriginSuggestions()
+        viewModel.dismissVehicleSuggestions()
     }
 
     private func showLogin(for platform: PlatformId) {
@@ -301,6 +301,121 @@ private struct OriginLocationField: View {
         isEditingOrigin = false
         isOriginFieldFocused = false
         viewModel.dismissOriginSuggestions()
+    }
+}
+
+private struct VehicleSuggestionField: View {
+    @EnvironmentObject var viewModel: SearchViewModel
+    @FocusState private var isVehicleFieldFocused: Bool
+    @State private var isEditingVehicle = false
+
+    private var shouldShowSuggestionPanel: Bool {
+        isEditingVehicle
+            && isVehicleFieldFocused
+            && viewModel.isVehicleSuggestionPanelVisible
+            && !viewModel.vehicleSuggestions.isEmpty
+    }
+
+    var body: some View {
+        FieldView(label: "车型") {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField(
+                    "瑞虎8 / SUV / 留空查最近门店",
+                    text: Binding(
+                        get: { viewModel.request.vehicleQuery },
+                        set: { value in
+                            isEditingVehicle = true
+                            viewModel.request.vehicleQuery = value
+                            viewModel.refreshVehicleSuggestions(for: value)
+                        }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
+                .focused($isVehicleFieldFocused)
+                .onSubmit {
+                    closeSuggestions()
+                }
+                .onChange(of: isVehicleFieldFocused) { _, focused in
+                    if focused {
+                        isEditingVehicle = true
+                        viewModel.refreshVehicleSuggestions(for: viewModel.request.vehicleQuery)
+                    } else {
+                        closeSuggestions()
+                    }
+                }
+
+                if shouldShowSuggestionPanel {
+                    VehicleSuggestionDropdown(suggestions: viewModel.vehicleSuggestions) { suggestion in
+                        viewModel.selectVehicleSuggestion(suggestion)
+                        closeSuggestions()
+                    }
+                }
+            }
+        }
+    }
+
+    private func closeSuggestions() {
+        isEditingVehicle = false
+        isVehicleFieldFocused = false
+        viewModel.dismissVehicleSuggestions()
+    }
+}
+
+private struct VehicleSuggestionDropdown: View {
+    let suggestions: [VehicleSuggestion]
+    let onSelect: (VehicleSuggestion) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(suggestions) { suggestion in
+                suggestionButton(suggestion)
+
+                if suggestion.id != suggestions.last?.id {
+                    Divider()
+                        .padding(.leading, 35)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(WorkbenchStyle.elevatedSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(WorkbenchStyle.commandBlue.opacity(0.24), lineWidth: 1)
+                )
+                .shadow(color: WorkbenchStyle.cardShadow.opacity(0.62), radius: 14, x: 0, y: 8)
+        )
+    }
+
+    private func suggestionButton(_ suggestion: VehicleSuggestion) -> some View {
+        Button {
+            onSelect(suggestion)
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "car.fill")
+                    .foregroundStyle(WorkbenchStyle.accent)
+                    .frame(width: 18)
+
+                Text(suggestion.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.ink)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text(suggestion.sourceLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(WorkbenchStyle.muted)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color.black.opacity(0.001))
     }
 }
 

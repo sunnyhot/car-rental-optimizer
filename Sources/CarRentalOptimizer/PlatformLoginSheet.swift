@@ -7,7 +7,6 @@ struct PlatformLoginSheet: View {
     @State private var pageTitle: String
     @State private var currentURL: String
     @State private var reloadToken = 0
-    @State private var zucheLoginMode: ZucheLoginMode
 
     let platform: PlatformId
     let onCompleted: () -> Void
@@ -16,8 +15,7 @@ struct PlatformLoginSheet: View {
         self.platform = platform
         self.onCompleted = onCompleted
         _pageTitle = State(initialValue: "\(platform.label)登录")
-        _currentURL = State(initialValue: officialPlatformLoginURL(for: platform, zucheLoginMode: .official))
-        _zucheLoginMode = State(initialValue: .official)
+        _currentURL = State(initialValue: officialPlatformLoginURL(for: platform))
     }
 
     var body: some View {
@@ -35,33 +33,16 @@ struct PlatformLoginSheet: View {
                     platform: platform,
                     pageTitle: $pageTitle,
                     currentURL: $currentURL,
-                    zucheLoginMode: zucheLoginMode,
                     reloadToken: reloadToken
                 )
                 .frame(minWidth: 760, minHeight: 620)
             }
         }
         .frame(minWidth: 760, minHeight: 680)
-        .onChange(of: zucheLoginMode) { _, _ in
-            currentURL = officialPlatformLoginURL(for: platform, zucheLoginMode: zucheLoginMode)
-            reloadToken += 1
-        }
     }
 
     private var platformActionBar: some View {
         HStack(alignment: .center, spacing: 10) {
-            if platform == .carInc {
-                Picker("神州登录方式", selection: $zucheLoginMode) {
-                    ForEach(ZucheLoginMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 226)
-                .help("默认使用神州官网登录；如果官网登录异常，可切换到移动端短信或密码登录页。")
-            }
-
             Spacer()
 
             Button {
@@ -99,7 +80,7 @@ struct PlatformLoginSheet: View {
         ActionStatusRow(
             icon: "yensign.circle.fill",
             title: "费用补全",
-            message: "神州基础服务费来自官方确认页费用接口；登录后点击完成，程序会重新比较并补全这部分费用。",
+            message: "神州基础服务费来自官方确认页费用接口；登录官网后点击完成，程序会重新比较并尝试补全这部分费用。",
             tone: .active
         )
         .padding(.horizontal, 18)
@@ -113,15 +94,13 @@ private struct PlatformLoginWebView: NSViewRepresentable {
     let platform: PlatformId
     @Binding var pageTitle: String
     @Binding var currentURL: String
-    let zucheLoginMode: ZucheLoginMode
     let reloadToken: Int
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             platform: platform,
             pageTitle: $pageTitle,
-            currentURL: $currentURL,
-            zucheLoginMode: zucheLoginMode
+            currentURL: $currentURL
         )
     }
 
@@ -130,7 +109,7 @@ private struct PlatformLoginWebView: NSViewRepresentable {
         configuration.websiteDataStore = .default()
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
-        webView.customUserAgent = platformLoginUserAgent(for: platform, zucheLoginMode: zucheLoginMode)
+        webView.customUserAgent = platformLoginUserAgent(for: platform)
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
         context.coordinator.lastReloadToken = reloadToken
@@ -141,9 +120,8 @@ private struct PlatformLoginWebView: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.pageTitle = $pageTitle
         context.coordinator.currentURL = $currentURL
-        context.coordinator.zucheLoginMode = zucheLoginMode
         context.coordinator.webView = nsView
-        nsView.customUserAgent = platformLoginUserAgent(for: platform, zucheLoginMode: zucheLoginMode)
+        nsView.customUserAgent = platformLoginUserAgent(for: platform)
         if context.coordinator.lastReloadToken != reloadToken {
             context.coordinator.lastReloadToken = reloadToken
             context.coordinator.loadLoginPage(in: nsView)
@@ -159,20 +137,17 @@ private struct PlatformLoginWebView: NSViewRepresentable {
         let platform: PlatformId
         var pageTitle: Binding<String>
         var currentURL: Binding<String>
-        var zucheLoginMode: ZucheLoginMode
         var lastReloadToken = 0
         weak var webView: WKWebView?
 
         init(
             platform: PlatformId,
             pageTitle: Binding<String>,
-            currentURL: Binding<String>,
-            zucheLoginMode: ZucheLoginMode
+            currentURL: Binding<String>
         ) {
             self.platform = platform
             self.pageTitle = pageTitle
             self.currentURL = currentURL
-            self.zucheLoginMode = zucheLoginMode
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -185,7 +160,7 @@ private struct PlatformLoginWebView: NSViewRepresentable {
 
         func loadLoginPage(in webView: WKWebView) {
             Task { @MainActor in
-                let loginURL = officialPlatformLoginURL(for: platform, zucheLoginMode: zucheLoginMode)
+                let loginURL = officialPlatformLoginURL(for: platform)
                 pageTitle.wrappedValue = "\(platform.label)登录"
                 currentURL.wrappedValue = loginURL
                 webView.stopLoading()
@@ -200,36 +175,25 @@ private struct PlatformLoginWebView: NSViewRepresentable {
 
         private func update(from webView: WKWebView) {
             pageTitle.wrappedValue = webView.title ?? "\(platform.label)登录"
-            currentURL.wrappedValue = webView.url?.absoluteString ?? officialPlatformLoginURL(
-                for: platform,
-                zucheLoginMode: zucheLoginMode
-            )
+            currentURL.wrappedValue = webView.url?.absoluteString ?? officialPlatformLoginURL(for: platform)
         }
     }
 }
 
 func officialPlatformLoginURL(for platform: PlatformId) -> String {
-    officialPlatformLoginURL(for: platform, zucheLoginMode: .official)
-}
-
-func officialPlatformLoginURL(for platform: PlatformId, zucheLoginMode: ZucheLoginMode) -> String {
     switch platform {
     case .ehi:
         return EhiLoginSession.loginURL.absoluteString
     case .carInc:
-        return zucheLoginMode.url.absoluteString
+        return ZucheLoginSession.loginURL.absoluteString
     }
 }
 
 func platformLoginUserAgent(for platform: PlatformId) -> String {
-    platformLoginUserAgent(for: platform, zucheLoginMode: .official)
-}
-
-func platformLoginUserAgent(for platform: PlatformId, zucheLoginMode: ZucheLoginMode) -> String {
     switch platform {
     case .ehi:
         return "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
     case .carInc:
-        return zucheLoginMode.userAgent
+        return ZucheLoginSession.desktopUserAgent
     }
 }

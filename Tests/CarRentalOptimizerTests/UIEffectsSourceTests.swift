@@ -25,6 +25,8 @@ struct UIEffectsSourceTests {
         #expect(source.contains("ActionStatusRow("))
         #expect(source.contains("StatusLightRail(isActive: viewModel.isSearching"))
         #expect(source.contains("WorkbenchCard("))
+        #expect(source.contains("VehicleSuggestionField("))
+        #expect(source.contains("VehicleSuggestionDropdown("))
     }
 
     @Test("Origin suggestion dropdown distinguishes stations from addresses")
@@ -47,6 +49,31 @@ struct UIEffectsSourceTests {
         #expect(source.contains("StatusLightRail(isActive: true"))
         #expect(source.contains("ActionStatusRow("))
         #expect(source.contains("WorkbenchCard("))
+    }
+
+    @Test("Result cards expose vehicle name copy action")
+    func resultCardsExposeVehicleNameCopyAction() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/ResultPanelView.swift", encoding: .utf8)
+
+        #expect(source.contains("copyVehicleName()"))
+        #expect(source.contains("NSPasteboard.general"))
+        #expect(source.contains("doc.on.doc"))
+        #expect(source.contains("复制车型"))
+        #expect(source.contains("已复制车型"))
+    }
+
+    @Test("Vehicle placeholder labels are hidden from result and detail surfaces")
+    func vehiclePlaceholderLabelsAreHiddenFromResultAndDetailSurfaces() throws {
+        let presentation = try String(contentsOfFile: "Sources/CarRentalOptimizer/VehiclePresentation.swift", encoding: .utf8)
+        let resultPanel = try String(contentsOfFile: "Sources/CarRentalOptimizer/ResultPanelView.swift", encoding: .utf8)
+        let detailPanel = try String(contentsOfFile: "Sources/CarRentalOptimizer/DetailPanelView.swift", encoding: .utf8)
+
+        #expect(presentation.contains("kind != .notSpecified"))
+        #expect(presentation.contains("trimmed != \"未指定车型\""))
+        #expect(resultPanel.contains("displayName(with: recommendation.match)"))
+        #expect(resultPanel.contains("recommendation.match.displayLabel"))
+        #expect(detailPanel.contains("badge: recommendation.match.displayLabel"))
+        #expect(detailPanel.contains("recommendation.listing.displayNameWithClass"))
     }
 
     @Test("Detail panel uses decision receipt components")

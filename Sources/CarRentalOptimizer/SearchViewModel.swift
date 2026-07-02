@@ -215,8 +215,18 @@ struct RecommendationFilterState: Equatable {
 final class SearchViewModel: ObservableObject {
     @Published var request = AppDefaults.searchRequest
     @Published var results: [Recommendation] = []
-    @Published var recommendationSortMode: RecommendationSortMode = .bestTotal
-    @Published var recommendationFilter = RecommendationFilterState()
+    @Published var recommendationSortMode: RecommendationSortMode = .bestTotal {
+        didSet {
+            guard recommendationSortMode != oldValue else { return }
+            selectFirstDisplayedResult()
+        }
+    }
+    @Published var recommendationFilter = RecommendationFilterState() {
+        didSet {
+            guard recommendationFilter != oldValue else { return }
+            selectFirstDisplayedResult()
+        }
+    }
     @Published var platformStatuses: [PlatformEvidenceStatus] = AppDefaults.searchRequest.platforms.map {
         PlatformEvidenceStatus(
             platform: $0,
@@ -231,6 +241,8 @@ final class SearchViewModel: ObservableObject {
     @Published var isLoadingOriginSuggestions = false
     @Published var isOriginSuggestionPanelVisible = false
     @Published var originSuggestions: [OriginSuggestion] = []
+    @Published var vehicleSuggestions: [VehicleSuggestion] = []
+    @Published var isVehicleSuggestionPanelVisible = false
     @Published var originStatus = "正在获取当前位置。"
     @Published var status = "待查询：静默 API 准备就绪。"
     @Published var searchProgressPhase: SearchProgressPhase = .idle
@@ -246,6 +258,7 @@ final class SearchViewModel: ObservableObject {
     private let currentLocationProvider: CurrentLocationProviding
     private let addressSuggestionProvider: AddressSuggestionProviding
     private let railStationSuggestionProvider: RailStationSuggestionProviding
+    private let vehicleSuggestionStore: VehicleSuggestionStore
     private let initialLocationRetryDelayNanoseconds: UInt64
     private let now: () -> Date
     private var hasRequestedInitialLocation = false
@@ -264,6 +277,7 @@ final class SearchViewModel: ObservableObject {
         self.currentLocationProvider = AppleCurrentLocationProvider()
         self.addressSuggestionProvider = AppleAddressSuggestionProvider()
         self.railStationSuggestionProvider = AppleRailStationSuggestionProvider()
+        self.vehicleSuggestionStore = VehicleSuggestionStore()
         self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -276,6 +290,7 @@ final class SearchViewModel: ObservableObject {
         self.currentLocationProvider = UnavailableCurrentLocationProvider()
         self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
         self.railStationSuggestionProvider = EmptyRailStationSuggestionProvider()
+        self.vehicleSuggestionStore = VehicleSuggestionStore()
         self.initialLocationRetryDelayNanoseconds = 0
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -288,6 +303,7 @@ final class SearchViewModel: ObservableObject {
         currentLocationProvider: CurrentLocationProviding = UnavailableCurrentLocationProvider(),
         addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider(),
         railStationSuggestionProvider: RailStationSuggestionProviding = EmptyRailStationSuggestionProvider(),
+        vehicleSuggestionStore: VehicleSuggestionStore = VehicleSuggestionStore(),
         initialLocationRetryDelayNanoseconds: UInt64 = defaultInitialLocationRetryDelayNanoseconds,
         now: @escaping () -> Date = Date.init
     ) {
@@ -297,6 +313,7 @@ final class SearchViewModel: ObservableObject {
         self.currentLocationProvider = currentLocationProvider
         self.addressSuggestionProvider = addressSuggestionProvider
         self.railStationSuggestionProvider = railStationSuggestionProvider
+        self.vehicleSuggestionStore = vehicleSuggestionStore
         self.initialLocationRetryDelayNanoseconds = initialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = now
@@ -322,27 +339,27 @@ final class SearchViewModel: ObservableObject {
     private func sortedRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
         switch recommendationSortMode {
         case .bestTotal:
-            return recommendations
+            return recommendations.sorted(by: isLowerCost)
         case .rentalSubtotal:
             return recommendations.sorted {
                 if $0.rentalTotal != $1.rentalTotal {
                     return $0.rentalTotal < $1.rentalTotal
                 }
-                return $0.bestTotal < $1.bestTotal
+                return isLowerCost($0, than: $1)
             }
         case .distance:
             return recommendations.sorted {
                 if $0.listing.store.distanceKm != $1.listing.store.distanceKm {
                     return $0.listing.store.distanceKm < $1.listing.store.distanceKm
                 }
-                return $0.bestTotal < $1.bestTotal
+                return isLowerCost($0, than: $1)
             }
         case .dataCompleteness:
             return recommendations.sorted {
                 if $0.listing.dataCompleteness != $1.listing.dataCompleteness {
                     return $0.listing.dataCompleteness > $1.listing.dataCompleteness
                 }
-                return $0.bestTotal < $1.bestTotal
+                return isLowerCost($0, than: $1)
             }
         }
     }
@@ -433,12 +450,8 @@ final class SearchViewModel: ObservableObject {
         let combined = "\(listing.vehicleClass) \(listing.vehicleName) \(recommendation.match.label)"
         let normalized = combined.lowercased()
 
-        if listing.vehicleName.contains("未指定")
-            || listing.vehicleClass.contains("未指定")
-            || recommendation.match.kind == .notSpecified {
-            return .unspecified
-        }
-
+        // A blank vehicle query or incomplete platform class may say "未指定";
+        // still infer from any real vehicle name/class signal before falling back.
         if normalized.contains("新能源")
             || normalized.contains("纯电")
             || normalized.contains("电动")
@@ -597,8 +610,9 @@ final class SearchViewModel: ObservableObject {
         )
 
         results = recommendations
-        selectedId = recommendations.first?.id ?? ""
+        selectFirstDisplayedResult()
         recordSuccessfulResults(recommendations)
+        recordVehicleSuggestions(from: recommendations)
         searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: recommendations)
         status = formatSearchCompletionStatus(request: liveRequest, resultCount: recommendations.count)
         searchProgressPhase = .completed
@@ -610,6 +624,10 @@ final class SearchViewModel: ObservableObject {
 
     func selectResult(_ id: String) {
         selectedId = id
+    }
+
+    private func selectFirstDisplayedResult() {
+        selectedId = displayedResults.first?.id ?? ""
     }
 
     func clearRecommendationFilters() {
@@ -872,9 +890,31 @@ final class SearchViewModel: ObservableObject {
         isOriginSuggestionPanelVisible = false
     }
 
+    func refreshVehicleSuggestions(for query: String) {
+        vehicleSuggestions = vehicleSuggestionStore.suggestions(matching: query, limit: 6)
+        isVehicleSuggestionPanelVisible = !vehicleSuggestions.isEmpty
+    }
+
+    func selectVehicleSuggestion(_ suggestion: VehicleSuggestion) {
+        vehicleSuggestionStore.recordSelection(suggestion, now: now())
+        request.vehicleQuery = suggestion.name
+        dismissVehicleSuggestions()
+        refreshPreflightIssues()
+    }
+
+    func dismissVehicleSuggestions() {
+        vehicleSuggestions = []
+        isVehicleSuggestionPanelVisible = false
+    }
+
+    func recordVehicleSuggestions(from recommendations: [Recommendation]) {
+        let names = recommendations.map(\.listing.vehicleName)
+        vehicleSuggestionStore.recordSearchResults(names, now: now())
+    }
+
     private func recordSuccessfulResults(_ recommendations: [Recommendation]) {
         latestSuccessfulResults = recommendations
-        latestSuccessfulSelectedId = recommendations.first?.id ?? ""
+        latestSuccessfulSelectedId = selectedId
         lastSuccessfulSearchAt = now()
         isShowingStaleResults = false
         retainedResultsNotice = nil
@@ -891,6 +931,7 @@ final class SearchViewModel: ObservableObject {
 
         results = latestSuccessfulResults
         selectedId = latestSuccessfulSelectedId
+        selectFirstDisplayedResult()
         isShowingStaleResults = true
         retainedResultsNotice = RetainedResultsNotice.make(lastSuccessfulSearchAt: lastSuccessfulSearchAt)
     }
