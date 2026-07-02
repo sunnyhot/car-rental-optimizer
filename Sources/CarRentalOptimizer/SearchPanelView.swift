@@ -357,19 +357,32 @@ private struct OriginSuggestionDropdown: View {
             onSelect(suggestion)
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "mappin.circle.fill")
-                    .foregroundStyle(WorkbenchStyle.accent)
+                Image(systemName: suggestion.kind.systemImage)
+                    .foregroundStyle(suggestion.kind == .address ? WorkbenchStyle.accent : WorkbenchStyle.teal)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(suggestion.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(suggestion.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(WorkbenchStyle.ink)
+                            .lineLimit(1)
+                        Text(suggestion.kind.label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(WorkbenchStyle.muted)
+                            .lineLimit(1)
+                    }
                     if !suggestion.subtitle.isEmpty {
                         Text(suggestion.subtitle)
                             .font(.caption2)
                             .foregroundStyle(WorkbenchStyle.muted)
                             .lineLimit(1)
+                    }
+                    if let fallbackNote = suggestion.fallbackNote, !fallbackNote.isEmpty {
+                        Text(fallbackNote)
+                            .font(.caption2)
+                            .foregroundStyle(WorkbenchStyle.amberAlert)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 8)
