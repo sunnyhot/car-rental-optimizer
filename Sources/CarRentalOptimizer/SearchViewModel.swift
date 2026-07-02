@@ -227,6 +227,12 @@ final class SearchViewModel: ObservableObject {
             selectFirstDisplayedResult()
         }
     }
+    @Published var showsAllVehicleMatches = false {
+        didSet {
+            guard showsAllVehicleMatches != oldValue else { return }
+            selectFirstDisplayedResult()
+        }
+    }
     @Published var platformStatuses: [PlatformEvidenceStatus] = AppDefaults.searchRequest.platforms.map {
         PlatformEvidenceStatus(
             platform: $0,
@@ -235,7 +241,14 @@ final class SearchViewModel: ObservableObject {
             sourceUrl: officialPlatformURL(for: $0)
         )
     }
-    @Published var selectedId = ""
+    @Published var selectedId = "" {
+        didSet {
+            guard selectedId != oldValue else { return }
+            refreshSelectedVehicleInsight()
+        }
+    }
+    @Published var selectedVehicleInsight: VehicleInsight?
+    @Published var isLoadingSelectedVehicleInsight = false
     @Published var isSearching = false
     @Published var isLocatingOrigin = false
     @Published var isLoadingOriginSuggestions = false
@@ -259,6 +272,7 @@ final class SearchViewModel: ObservableObject {
     private let addressSuggestionProvider: AddressSuggestionProviding
     private let railStationSuggestionProvider: RailStationSuggestionProviding
     private let vehicleSuggestionStore: VehicleSuggestionStore
+    private let vehicleInsightService: VehicleInsightProviding
     private let initialLocationRetryDelayNanoseconds: UInt64
     private let now: () -> Date
     private var hasRequestedInitialLocation = false
@@ -269,6 +283,7 @@ final class SearchViewModel: ObservableObject {
     private var latestSuccessfulSelectedId = ""
     private var latestEvidenceRequest: SearchRequest?
     private var latestEvidenceResultsByPlatform: [PlatformId: PlatformEvidenceResult] = [:]
+    private var selectedVehicleInsightRequestID = 0
 
     init() {
         self.searchProvider = LiveRentalSearchService()
@@ -278,6 +293,7 @@ final class SearchViewModel: ObservableObject {
         self.addressSuggestionProvider = AppleAddressSuggestionProvider()
         self.railStationSuggestionProvider = AppleRailStationSuggestionProvider()
         self.vehicleSuggestionStore = VehicleSuggestionStore()
+        self.vehicleInsightService = VehicleInsightService()
         self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -291,6 +307,7 @@ final class SearchViewModel: ObservableObject {
         self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
         self.railStationSuggestionProvider = EmptyRailStationSuggestionProvider()
         self.vehicleSuggestionStore = VehicleSuggestionStore()
+        self.vehicleInsightService = VehicleInsightService()
         self.initialLocationRetryDelayNanoseconds = 0
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
@@ -304,6 +321,7 @@ final class SearchViewModel: ObservableObject {
         addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider(),
         railStationSuggestionProvider: RailStationSuggestionProviding = EmptyRailStationSuggestionProvider(),
         vehicleSuggestionStore: VehicleSuggestionStore = VehicleSuggestionStore(),
+        vehicleInsightService: VehicleInsightProviding = VehicleInsightService(),
         initialLocationRetryDelayNanoseconds: UInt64 = defaultInitialLocationRetryDelayNanoseconds,
         now: @escaping () -> Date = Date.init
     ) {
@@ -314,6 +332,7 @@ final class SearchViewModel: ObservableObject {
         self.addressSuggestionProvider = addressSuggestionProvider
         self.railStationSuggestionProvider = railStationSuggestionProvider
         self.vehicleSuggestionStore = vehicleSuggestionStore
+        self.vehicleInsightService = vehicleInsightService
         self.initialLocationRetryDelayNanoseconds = initialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = now
@@ -324,12 +343,26 @@ final class SearchViewModel: ObservableObject {
     }
 
     var displayedResults: [Recommendation] {
-        let filtered = filteredRecommendations(results)
+        let vehicleScoped = vehicleMatchScopedResults(results)
+        let filtered = filteredRecommendations(vehicleScoped)
         return sortedRecommendations(filtered)
     }
 
     var filteredResultCount: Int {
         displayedResults.count
+    }
+
+    var hasExpandableVehicleMatches: Bool {
+        concreteVehicleMatches(in: results).count > 1
+    }
+
+    var vehicleMatchDisplaySummary: String? {
+        let count = concreteVehicleMatches(in: results).count
+        guard count > 1 else { return nil }
+        if showsAllVehicleMatches {
+            return "\(count) 个匹配已展开"
+        }
+        return "1/\(count) 个匹配，显示最低价"
     }
 
     var hasActiveRecommendationFilters: Bool {
@@ -373,6 +406,19 @@ final class SearchViewModel: ObservableObject {
             filtered = deduplicateRecommendations(filtered, key: vehicleDeduplicationKey)
         }
         return filtered
+    }
+
+    private func vehicleMatchScopedResults(_ recommendations: [Recommendation]) -> [Recommendation] {
+        let matches = concreteVehicleMatches(in: recommendations)
+        guard matches.count > 1 else { return recommendations }
+        guard !showsAllVehicleMatches else { return matches }
+        return Array(rankRecommendations(matches).prefix(1))
+    }
+
+    private func concreteVehicleMatches(in recommendations: [Recommendation]) -> [Recommendation] {
+        let query = request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isSpecificVehicleModelQuery(query) else { return [] }
+        return recommendations.filter { $0.match.kind == .exact }
     }
 
     private func matchesRecommendationFilter(_ recommendation: Recommendation) -> Bool {
@@ -548,6 +594,11 @@ final class SearchViewModel: ObservableObject {
             return
         }
 
+        if !retryingFailedPlatformsOnly {
+            clearRecommendationFilters()
+            showsAllVehicleMatches = false
+        }
+
         isSearching = true
         isShowingStaleResults = false
         retainedResultsNotice = nil
@@ -624,6 +675,29 @@ final class SearchViewModel: ObservableObject {
 
     func selectResult(_ id: String) {
         selectedId = id
+    }
+
+    func refreshSelectedVehicleInsight() {
+        selectedVehicleInsightRequestID += 1
+        let requestID = selectedVehicleInsightRequestID
+        guard let listing = selected?.listing else {
+            selectedVehicleInsight = nil
+            isLoadingSelectedVehicleInsight = false
+            return
+        }
+
+        selectedVehicleInsight = vehicleInsightService.localInsight(for: listing)
+        isLoadingSelectedVehicleInsight = true
+
+        let service = vehicleInsightService
+        Task { [weak self, listing, requestID, service] in
+            let insight = await service.insight(for: listing)
+            await MainActor.run {
+                guard let self, requestID == self.selectedVehicleInsightRequestID else { return }
+                self.selectedVehicleInsight = insight
+                self.isLoadingSelectedVehicleInsight = false
+            }
+        }
     }
 
     private func selectFirstDisplayedResult() {

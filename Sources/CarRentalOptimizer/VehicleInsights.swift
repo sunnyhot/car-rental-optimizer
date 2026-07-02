@@ -357,3 +357,61 @@ enum VehicleInsightLocalInferencer {
 func formatVehicleInsightNumber(_ value: Double) -> String {
     value.rounded() == value ? "\(Int(value))" : String(format: "%.1f", value)
 }
+
+protocol VehicleInsightProviding: AnyObject {
+    func localInsight(for listing: RentalListing) -> VehicleInsight
+    func insight(for listing: RentalListing) async -> VehicleInsight
+}
+
+final class VehicleInsightService: VehicleInsightProviding {
+    private let store: VehicleInsightStore
+    private let networkProvider: VehicleInsightNetworkProvider
+    private let now: () -> Date
+
+    init(
+        store: VehicleInsightStore = VehicleInsightStore(),
+        networkProvider: VehicleInsightNetworkProvider = VehicleInsightNetworkProvider(httpClient: URLSessionVehicleInsightHTTPClient()),
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.store = store
+        self.networkProvider = networkProvider
+        self.now = now
+    }
+
+    func localInsight(for listing: RentalListing) -> VehicleInsight {
+        VehicleInsightLocalInferencer.localInsight(for: listing, now: now())
+    }
+
+    func insight(for listing: RentalListing) async -> VehicleInsight {
+        let key = VehicleInsightLocalInferencer.normalizedQuery(for: listing)
+        if let cached = store.cachedInsight(forKey: key, now: now()) {
+            return merge(cached, withLocalConfigurationFrom: listing)
+        }
+        if let network = await networkProvider.networkInsight(for: listing, now: now()) {
+            store.save(network, forKey: key, now: now())
+            return network
+        }
+        return localInsight(for: listing)
+    }
+
+    private func merge(_ cached: VehicleInsight, withLocalConfigurationFrom listing: RentalListing) -> VehicleInsight {
+        let local = localInsight(for: listing)
+        var merged = cached
+        merged.vehicleName = listing.vehicleName
+        merged.configurationSummary = local.configurationSummary
+        merged.trimConfidence = local.trimConfidence
+        merged.shortSummary = local.shortSummary
+        merged.specSheet.features = local.specSheet.features
+        if let seats = local.specSheet.seats {
+            merged.specSheet.seats = seats
+        }
+        if let bodyStyle = local.specSheet.bodyStyle {
+            merged.specSheet.bodyStyle = bodyStyle
+        }
+        if let battery = local.specSheet.batteryKWh {
+            merged.specSheet.batteryKWh = battery
+        }
+        merged.longSummary = "\(cached.longSummary) 当前租赁车辆配置以平台返回为准：\(local.configurationSummary ?? "配置以平台返回为准")。"
+        return merged
+    }
+}

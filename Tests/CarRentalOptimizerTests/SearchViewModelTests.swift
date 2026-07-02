@@ -158,6 +158,7 @@ struct SearchViewModelTests {
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService()
         )
+        viewModel.request.vehicleQuery = ""
         viewModel.results = [
             makeTestRecommendation(id: "lowest-rental", rentalTotal: 300, bestTotal: 800, distanceKm: 4.0, dataCompleteness: 0.80),
             makeTestRecommendation(id: "nearest", rentalTotal: 700, bestTotal: 820, distanceKm: 0.5, dataCompleteness: 0.78),
@@ -185,6 +186,7 @@ struct SearchViewModelTests {
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService()
         )
+        viewModel.request.vehicleQuery = ""
         viewModel.results = [
             makeTestRecommendation(id: "lowest-rental", rentalTotal: 300, bestTotal: 800, distanceKm: 4.0, dataCompleteness: 0.80),
             makeTestRecommendation(id: "nearest", rentalTotal: 700, bestTotal: 820, distanceKm: 0.5, dataCompleteness: 0.78),
@@ -212,6 +214,7 @@ struct SearchViewModelTests {
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService()
         )
+        viewModel.request.vehicleQuery = ""
         viewModel.results = [
             makeTestRecommendation(id: "ehi-suv", rentalTotal: 1_120, bestTotal: 1_140, distanceKm: 0.4, dataCompleteness: 0.98, platform: .ehi, vehicleName: "奇瑞 瑞虎8", vehicleClass: "中型SUV"),
             makeTestRecommendation(id: "ehi-suv-incomplete", rentalTotal: 1_080, bestTotal: 1_100, distanceKm: 0.3, dataCompleteness: 0.82, platform: .ehi, vehicleName: "哈弗 H6", vehicleClass: "SUV", warnings: [.partialPrice]),
@@ -238,6 +241,39 @@ struct SearchViewModelTests {
         #expect(!viewModel.hasActiveRecommendationFilters)
     }
 
+    @Test("Run search clears stale recommendation filters before displaying new results")
+    func runSearchClearsStaleRecommendationFiltersBeforeDisplayingNewResults() async {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: [
+                PlatformEvidenceResult(
+                    platform: .carInc,
+                    status: PlatformEvidenceStatus(platform: .carInc, kind: .ready, message: "神州已返回报价。", sourceUrl: "https://www.zuche.com/"),
+                    listings: [
+                        makeTestListing(
+                            id: "carinc-mona",
+                            platform: .carInc,
+                            vehicleName: "小鹏 MONA",
+                            vehicleClass: "纯电 51kWh | 三厢 5座",
+                            warnings: []
+                        )
+                    ]
+                ),
+            ]),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.request.vehicleQuery = "小鹏 mona"
+        viewModel.recommendationFilter.vehicleClass = .suv
+        viewModel.showsAllVehicleMatches = true
+
+        await viewModel.runSearch()
+
+        #expect(viewModel.results.map(\.id) == ["carinc-mona"])
+        #expect(viewModel.displayedResults.map(\.id) == ["carinc-mona"])
+        #expect(!viewModel.hasActiveRecommendationFilters)
+        #expect(!viewModel.showsAllVehicleMatches)
+    }
+
     @Test("Vehicle class filter recognizes sedan MPV EV and unspecified candidates")
     func vehicleClassFilterRecognizesSedanMPVEVAndUnspecifiedCandidates() {
         let viewModel = SearchViewModel(
@@ -245,6 +281,7 @@ struct SearchViewModelTests {
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService()
         )
+        viewModel.request.vehicleQuery = ""
         viewModel.results = [
             makeTestRecommendation(id: "sedan", rentalTotal: 900, bestTotal: 920, distanceKm: 0.5, dataCompleteness: 0.98, vehicleName: "雪佛兰科鲁泽", vehicleClass: "紧凑型车"),
             makeTestRecommendation(id: "mpv", rentalTotal: 1_600, bestTotal: 1_620, distanceKm: 0.7, dataCompleteness: 0.98, vehicleName: "别克 GL8", vehicleClass: "MPV"),
@@ -300,6 +337,7 @@ struct SearchViewModelTests {
             geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService()
         )
+        viewModel.request.vehicleQuery = ""
         viewModel.results = [
             makeTestRecommendation(id: "store-a-high", rentalTotal: 1_400, bestTotal: 1_430, distanceKm: 0.5, dataCompleteness: 0.98, storeID: "store-a", vehicleName: "大众朗逸"),
             makeTestRecommendation(id: "store-a-low", rentalTotal: 1_100, bestTotal: 1_130, distanceKm: 0.5, dataCompleteness: 0.98, storeID: "store-a", vehicleName: "雪佛兰科鲁泽"),
@@ -313,6 +351,51 @@ struct SearchViewModelTests {
         viewModel.recommendationFilter.deduplicateByStore = false
         viewModel.recommendationFilter.deduplicateByVehicle = true
         #expect(viewModel.displayedResults.map(\.id) == ["vehicle-low-cross-platform", "store-a-low"])
+    }
+
+    @Test("Concrete vehicle query defaults to cheapest match and can expand all matches")
+    func concreteVehicleQueryDefaultsToCheapestMatchAndCanExpandAllMatches() {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.request.vehicleQuery = "小鹏 mona"
+        viewModel.results = [
+            makeTestRecommendation(id: "mona-expensive", rentalTotal: 1_200, bestTotal: 1_220, distanceKm: 0.3, dataCompleteness: 0.98, platform: .carInc, vehicleName: "小鹏 MONA", vehicleClass: "纯电 51kWh | 三厢 5座"),
+            makeTestRecommendation(id: "mona-cheap", rentalTotal: 900, bestTotal: 920, distanceKm: 0.5, dataCompleteness: 0.98, platform: .ehi, vehicleName: "小鹏 MONA", vehicleClass: "纯电 51kWh | 三厢 5座"),
+            makeTestRecommendation(id: "haval", rentalTotal: 700, bestTotal: 720, distanceKm: 0.4, dataCompleteness: 0.98, vehicleName: "哈弗 H6", vehicleClass: "SUV", matchKind: .lowConfidence),
+        ]
+
+        #expect(viewModel.hasExpandableVehicleMatches)
+        #expect(viewModel.displayedResults.map(\.id) == ["mona-cheap"])
+        #expect(viewModel.vehicleMatchDisplaySummary == "1/2 个匹配，显示最低价")
+
+        viewModel.showsAllVehicleMatches = true
+
+        #expect(viewModel.displayedResults.map(\.id) == ["mona-cheap", "mona-expensive"])
+        #expect(viewModel.vehicleMatchDisplaySummary == "2 个匹配已展开")
+    }
+
+    @Test("Blank and generic vehicle queries do not collapse concrete matches")
+    func blankAndGenericVehicleQueriesDoNotCollapseConcreteMatches() {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.results = [
+            makeTestRecommendation(id: "suv-a", rentalTotal: 1_000, bestTotal: 1_020, distanceKm: 0.3, dataCompleteness: 0.98, vehicleName: "哈弗 H6", vehicleClass: "SUV", matchKind: .similarClass),
+            makeTestRecommendation(id: "suv-b", rentalTotal: 900, bestTotal: 920, distanceKm: 0.5, dataCompleteness: 0.98, vehicleName: "奇瑞 瑞虎8", vehicleClass: "SUV", matchKind: .similarClass),
+        ]
+
+        viewModel.request.vehicleQuery = ""
+        #expect(!viewModel.hasExpandableVehicleMatches)
+        #expect(viewModel.displayedResults.map(\.id) == ["suv-b", "suv-a"])
+
+        viewModel.request.vehicleQuery = "SUV"
+        #expect(!viewModel.hasExpandableVehicleMatches)
+        #expect(viewModel.displayedResults.map(\.id) == ["suv-b", "suv-a"])
     }
 
     @Test("Preflight blocks searches without selected platforms")
@@ -396,12 +479,14 @@ struct SearchViewModelTests {
         )
 
         await viewModel.runSearch()
+        viewModel.showsAllVehicleMatches = true
         await viewModel.retrySearch()
 
         #expect(provider.requestedPlatforms == [[.ehi, .carInc], [.ehi]])
         #expect(Set(viewModel.searchDiagnosticSummary.successfulPlatforms) == [.ehi, .carInc])
         #expect(viewModel.searchDiagnosticSummary.listingCount == 2)
         #expect(!viewModel.results.isEmpty)
+        #expect(viewModel.showsAllVehicleMatches)
         #expect(viewModel.platformStatus(for: .ehi).kind == .ready)
         #expect(viewModel.platformStatus(for: .carInc).kind == .ready)
     }
@@ -465,6 +550,68 @@ struct SearchViewModelTests {
 
         #expect(store.learnedSuggestions.map(\.name) == ["尚界 H5"])
     }
+
+    @Test("Selection emits local vehicle insight immediately and network insight later")
+    func selectionEmitsLocalVehicleInsightImmediatelyAndNetworkInsightLater() async {
+        let listing = makeTestListing(vehicleName: "大众 朗逸", vehicleClass: "1.5L | 三厢 5座 | 蓝牙")
+        let provider = StubRentalSearchProvider(results: [
+            PlatformEvidenceResult(
+                platform: .ehi,
+                status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "一嗨已返回报价。", sourceUrl: "https://booking.1hai.cn/"),
+                listings: [listing]
+            )
+        ])
+        let vehicleInsightService = StubVehicleInsightService(networkDelayNanoseconds: 20_000_000)
+        let viewModel = SearchViewModel(
+            searchProvider: provider,
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            vehicleInsightService: vehicleInsightService
+        )
+        viewModel.request.vehicleQuery = ""
+
+        await viewModel.runSearch()
+
+        #expect(viewModel.selectedVehicleInsight?.origin == .localInference)
+        #expect(viewModel.isLoadingSelectedVehicleInsight)
+        await waitForVehicleInsightCondition {
+            viewModel.selectedVehicleInsight?.origin == .network
+        }
+        #expect(viewModel.selectedVehicleInsight?.origin == .network)
+        #expect(viewModel.selectedVehicleInsight?.sourceName == "Wikipedia")
+    }
+
+    @Test("Displayed list rendering does not fetch network insights for every row")
+    func displayedListRenderingDoesNotFetchNetworkInsightsForEveryRow() async {
+        let recommendations = [
+            makeTestListing(id: "vehicle-1", vehicleName: "大众 朗逸", vehicleClass: "1.5L | 三厢 5座"),
+            makeTestListing(id: "vehicle-2", vehicleName: "小鹏 MONA", vehicleClass: "纯电 51kWh | 三厢 5座")
+        ]
+        let provider = StubRentalSearchProvider(results: [
+            PlatformEvidenceResult(
+                platform: .ehi,
+                status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "一嗨已返回报价。", sourceUrl: "https://booking.1hai.cn/"),
+                listings: recommendations
+            )
+        ])
+        let vehicleInsightService = StubVehicleInsightService(networkDelayNanoseconds: 0)
+        let viewModel = SearchViewModel(
+            searchProvider: provider,
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService(),
+            vehicleInsightService: vehicleInsightService
+        )
+        viewModel.request.vehicleQuery = ""
+
+        await viewModel.runSearch()
+        _ = viewModel.displayedResults
+        _ = viewModel.displayedResults
+        await waitForVehicleInsightCondition {
+            vehicleInsightService.networkRequestCount == 1
+        }
+
+        #expect(vehicleInsightService.networkRequestCount == 1)
+    }
 }
 
 @MainActor
@@ -495,6 +642,32 @@ private struct StubRentalSearchProvider: RentalSearchProviding {
     }
 }
 
+private final class StubVehicleInsightService: VehicleInsightProviding {
+    private(set) var networkRequestCount = 0
+    let networkDelayNanoseconds: UInt64
+
+    init(networkDelayNanoseconds: UInt64) {
+        self.networkDelayNanoseconds = networkDelayNanoseconds
+    }
+
+    func localInsight(for listing: RentalListing) -> VehicleInsight {
+        VehicleInsightLocalInferencer.localInsight(for: listing, now: vehicleInsightStubDate())
+    }
+
+    func insight(for listing: RentalListing) async -> VehicleInsight {
+        networkRequestCount += 1
+        if networkDelayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: networkDelayNanoseconds)
+        }
+        var insight = VehicleInsightLocalInferencer.localInsight(for: listing, now: vehicleInsightStubDate())
+        insight.origin = .network
+        insight.sourceName = "Wikipedia"
+        insight.sourceURL = "https://example.com/\(listing.vehicleName)"
+        insight.longSummary = "车系介绍：联网测试简介。当前租赁车辆配置以平台返回为准：\(insight.configurationSummary ?? "配置以平台返回为准")。"
+        return insight
+    }
+}
+
 @MainActor
 private final class SequencedRentalSearchProvider: RentalSearchProviding {
     private var responses: [[PlatformEvidenceResult]]
@@ -520,6 +693,8 @@ private struct FailingAddressGeocoder: AddressGeocoding {
 private func makeTestListing(
     id: String = "ehi-test",
     platform: PlatformId = .ehi,
+    vehicleName: String = "奇瑞 瑞虎8",
+    vehicleClass: String = "中型SUV",
     warnings: [ResultWarning] = [.partialPrice]
 ) -> RentalListing {
     RentalListing(
@@ -535,8 +710,8 @@ private func makeTestListing(
             distanceKm: 3.2,
             hours: "08:00-22:00"
         ),
-        vehicleName: "奇瑞 瑞虎8",
-        vehicleClass: "中型SUV",
+        vehicleName: vehicleName,
+        vehicleClass: vehicleClass,
         basePrice: 320,
         platformFees: 0,
         insuranceFees: 0,
@@ -582,6 +757,21 @@ private func vehicleSuggestionDate(_ value: String) -> Date {
     formatter.dateFormat = "yyyy-MM-dd HH:mm"
     formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
     return formatter.date(from: value)!
+}
+
+private func vehicleInsightStubDate() -> Date {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm"
+    formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+    return formatter.date(from: "2026-07-02 17:14")!
+}
+
+@MainActor
+private func waitForVehicleInsightCondition(_ condition: @escaping () -> Bool) async {
+    for _ in 0..<20 {
+        if condition() { return }
+        try? await Task.sleep(nanoseconds: 25_000_000)
+    }
 }
 
 private func makeTestRecommendation(
