@@ -188,7 +188,8 @@ private struct ZucheFeeEnrichment {
     let loginRejected: Bool
 }
 
-let maxZucheVehicleSearchCityCount = 20
+let maxZucheVehicleSearchCityCount = 60
+private let maxConcurrentZucheCityQueries = 6
 private let maxConcurrentZucheConfirmationRequests = 4
 private let zucheGatewayRequestTimeoutSeconds: TimeInterval = 10
 
@@ -437,72 +438,55 @@ private final class ZucheAPIClient {
             var confirmationContextsByListingID: [String: ZucheConfirmationContext] = [:]
             var queryErrors: [String] = []
 
-            for cityCandidate in plannedCities {
-                guard let city = citiesByID[cityCandidate.city.id] else { continue }
-
-                let deptList: ZucheDeptListContent
-                do {
-                    deptList = try await postGateway(
-                        uri: "/action/carrctapi/order/deptList/v1",
-                        payload: ["cityId": city.cityId, "entrance": 1, "pickupFlag": 1]
-                    )
-                } catch {
-                    queryErrors.append("\(city.cityName)：\(error.localizedDescription)")
-                    continue
-                }
-
-                let stores = flattenDepartments(deptList)
-                    .compactMap { makeStore(from: $0, cityName: city.cityName, request: request) }
-                    .filter { $0.distanceKm <= request.radiusKm }
-                guard let selectedStore = zucheSelectedStore(
-                    from: stores,
-                    cityName: city.cityName,
-                    isCurrentCity: cityCandidate.isCurrentCity
-                ) else {
-                    continue
-                }
-
-                let chooseCar: ZucheChooseCarContent
-                do {
-                    chooseCar = try await postGateway(
-                        uri: "/resource/carrctapi/order/chooseCar/v3",
-                        payload: [
-                            "pickupCityId": city.cityId,
-                            "pickupTime": timeRange.pickupTime,
-                            "returnCityId": city.cityId,
-                            "returnTime": timeRange.returnTime,
-                            "entrance": 1,
-                            "userChooseLat": String(selectedStore.location.lat),
-                            "userChooseLon": String(selectedStore.location.lng),
-                            "holidaysWaitingFlag": 0,
-                        ]
-                    )
-                } catch {
-                    queryErrors.append("\(city.cityName)：\(error.localizedDescription)")
-                    continue
-                }
-
-                for dept in chooseCar.deptHangModels {
-                    guard let store = makeStore(from: dept, cityName: city.cityName, request: request) else { continue }
-                    guard store.distanceKm <= request.radiusKm else { continue }
-                    guard store.id == selectedStore.id else { continue }
-
-                    let deptListings = listings(from: dept.models, city: city, dept: dept, store: store, request: request, timeRange: timeRange)
-                    for candidate in deptListings {
-                        confirmationContextsByListingID[candidate.listing.id] = candidate.confirmationContext
+            // Query each planned city concurrently. City planning stays breadth-
+            // limited by maxZucheVehicleSearchCityCount; within that bound every
+            // city is fetched in parallel (capped at maxConcurrentZucheCityQueries)
+            // so a 500km radius no longer times out on the nearest handful only.
+            await withTaskGroup(of: ZucheCityQueryResult?.self) { group in
+                func addNextCity(at index: Int) {
+                    guard index < plannedCities.count else { return }
+                    let candidate = plannedCities[index]
+                    guard let city = citiesByID[candidate.city.id] else {
+                        addNextCity(at: index + 1)
+                        return
                     }
-                    let listings = deptListings.map(\.listing)
-                    if !hasVehicleQuery {
-                        nearestStoreBatches.append(StoreListingsBatch(distanceKm: store.distanceKm, listings: listings))
-                        continue
+                    group.addTask { [weak self] in
+                        guard let self else { return nil }
+                        return await self.zucheCityQueryResult(
+                            city: city,
+                            candidate: candidate,
+                            request: request,
+                            timeRange: timeRange,
+                            hasVehicleQuery: hasVehicleQuery
+                        )
                     }
+                }
 
-                    for listing in listings {
-                        let key = "\(store.id)-\(listing.vehicleName)"
-                        if let old = listingsByKey[key], old.basePrice <= listing.basePrice {
-                            continue
+                var nextIndex = 0
+                for _ in 0..<min(maxConcurrentZucheCityQueries, plannedCities.count) {
+                    addNextCity(at: nextIndex)
+                    nextIndex += 1
+                }
+
+                while let result = await group.next() {
+                    if let result {
+                        queryErrors.append(contentsOf: result.errors)
+                        if let batch = result.nearestStoreBatch {
+                            nearestStoreBatches.append(batch)
                         }
-                        listingsByKey[key] = listing
+                        for (id, context) in result.confirmationContexts {
+                            confirmationContextsByListingID[id] = context
+                        }
+                        for (key, listing) in result.listingsByKey {
+                            if let old = listingsByKey[key], old.basePrice <= listing.basePrice {
+                                continue
+                            }
+                            listingsByKey[key] = listing
+                        }
+                    }
+                    if nextIndex < plannedCities.count {
+                        addNextCity(at: nextIndex)
+                        nextIndex += 1
                     }
                 }
             }
@@ -516,7 +500,7 @@ private final class ZucheAPIClient {
                     return status(.parseFailed, "神州 API 部分查询失败：\(queryErrors.prefix(2).joined(separator: "；"))")
                 }
                 if isCityPlanLimited {
-                    return status(.unavailable, "神州真实接口返回成功，但为避免超时已优先探测最近 \(plannedCities.count) 个城市（共 \(candidateCities.count) 个候选城市），没有找到匹配车型。")
+                    return status(.unavailable, "神州真实接口返回成功，但半径内候选城市超过 \(plannedCities.count) 个，为避免超时只扫描了最近的 \(plannedCities.count) 个，没有找到匹配车型。请缩小半径或更换取车地后重试。")
                 }
                 return status(.unavailable, "神州真实接口返回成功，但当前条件没有可订车型。")
             }
@@ -539,6 +523,123 @@ private final class ZucheAPIClient {
         } catch {
             return status(.parseFailed, "神州 API 查询失败：\(error.localizedDescription)")
         }
+    }
+
+    /// Aggregated results from querying a single city's deptList + chooseCar,
+    /// merged back into the caller's accumulators after the concurrent task group
+    /// collects it. Keeping these as one value lets the parallel loop stay lock-free
+    /// (each task produces an isolated result; the loop merges sequentially).
+    private struct ZucheCityQueryResult {
+        var listingsByKey: [String: RentalListing]
+        var nearestStoreBatch: StoreListingsBatch?
+        var confirmationContexts: [String: ZucheConfirmationContext]
+        var errors: [String]
+    }
+
+    /// Query one city end to end: deptList (store list) → select station store →
+    /// chooseCar (vehicles + prices). Returns nil only when the city id cannot be
+    /// resolved (already filtered upstream). All per-city logic — radius filtering,
+    /// station-store selection, store+vehicle dedup — is unchanged from the prior
+    /// serial loop; this method just isolates one city's work for concurrency.
+    private func zucheCityQueryResult(
+        city: ZucheCity,
+        candidate: ZucheCandidateCity,
+        request: SearchRequest,
+        timeRange: PlatformQueryTimeRange,
+        hasVehicleQuery: Bool
+    ) async -> ZucheCityQueryResult {
+        var listingsByKey: [String: RentalListing] = [:]
+        var nearestStoreBatch: StoreListingsBatch?
+        var confirmationContexts: [String: ZucheConfirmationContext] = [:]
+        var errors: [String] = []
+
+        let deptList: ZucheDeptListContent
+        do {
+            deptList = try await postGateway(
+                uri: "/action/carrctapi/order/deptList/v1",
+                payload: ["cityId": city.cityId, "entrance": 1, "pickupFlag": 1]
+            )
+        } catch {
+            errors.append("\(city.cityName)：\(error.localizedDescription)")
+            return ZucheCityQueryResult(
+                listingsByKey: listingsByKey,
+                nearestStoreBatch: nearestStoreBatch,
+                confirmationContexts: confirmationContexts,
+                errors: errors
+            )
+        }
+
+        let stores = flattenDepartments(deptList)
+            .compactMap { makeStore(from: $0, cityName: city.cityName, request: request) }
+            .filter { $0.distanceKm <= request.radiusKm }
+        guard let selectedStore = zucheSelectedStore(
+            from: stores,
+            cityName: city.cityName,
+            isCurrentCity: candidate.isCurrentCity
+        ) else {
+            return ZucheCityQueryResult(
+                listingsByKey: listingsByKey,
+                nearestStoreBatch: nearestStoreBatch,
+                confirmationContexts: confirmationContexts,
+                errors: errors
+            )
+        }
+
+        let chooseCar: ZucheChooseCarContent
+        do {
+            chooseCar = try await postGateway(
+                uri: "/resource/carrctapi/order/chooseCar/v3",
+                payload: [
+                    "pickupCityId": city.cityId,
+                    "pickupTime": timeRange.pickupTime,
+                    "returnCityId": city.cityId,
+                    "returnTime": timeRange.returnTime,
+                    "entrance": 1,
+                    "userChooseLat": String(selectedStore.location.lat),
+                    "userChooseLon": String(selectedStore.location.lng),
+                    "holidaysWaitingFlag": 0,
+                ]
+            )
+        } catch {
+            errors.append("\(city.cityName)：\(error.localizedDescription)")
+            return ZucheCityQueryResult(
+                listingsByKey: listingsByKey,
+                nearestStoreBatch: nearestStoreBatch,
+                confirmationContexts: confirmationContexts,
+                errors: errors
+            )
+        }
+
+        for dept in chooseCar.deptHangModels {
+            guard let store = makeStore(from: dept, cityName: city.cityName, request: request) else { continue }
+            guard store.distanceKm <= request.radiusKm else { continue }
+            guard store.id == selectedStore.id else { continue }
+
+            let deptListings = listings(from: dept.models, city: city, dept: dept, store: store, request: request, timeRange: timeRange)
+            for priced in deptListings {
+                confirmationContexts[priced.listing.id] = priced.confirmationContext
+            }
+            let listings = deptListings.map(\.listing)
+            if !hasVehicleQuery {
+                nearestStoreBatch = StoreListingsBatch(distanceKm: store.distanceKm, listings: listings)
+                continue
+            }
+
+            for listing in listings {
+                let key = "\(store.id)-\(listing.vehicleName)"
+                if let old = listingsByKey[key], old.basePrice <= listing.basePrice {
+                    continue
+                }
+                listingsByKey[key] = listing
+            }
+        }
+
+        return ZucheCityQueryResult(
+            listingsByKey: listingsByKey,
+            nearestStoreBatch: nearestStoreBatch,
+            confirmationContexts: confirmationContexts,
+            errors: errors
+        )
     }
 
     private func postGateway<Response: Decodable>(uri: String, payload: [String: Any]) async throws -> Response {

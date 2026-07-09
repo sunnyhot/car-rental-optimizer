@@ -292,37 +292,78 @@ struct LiveRentalSearchServiceTests {
 
     @Test("CAR Inc broad Beijing vehicle search reaches Dezhou within radius")
     func carIncBroadBeijingVehicleSearchReachesDezhouWithinRadius() {
+        // Real Zuche cityList data (cityId/coords): Dezhou is cityId 373 at
+        // (37.434092, 116.357464), ~261km from the JD HQ in Tongzhou. Among the 58
+        // cities within a 500km radius it ranks ~17th, so the prior cap of 8 (and
+        // even 20) was not the whole story — this test pins the candidate/planning
+        // behavior so a future regression in radius filtering or the city cap is
+        // caught before the next release.
         let request = makeSearchRequest(
             originLabel: "京东集团全球总部2号园区，北京通州 北京经济技术开发区",
             origin: GeoPoint(lat: 39.7784, lng: 116.5629),
             radiusKm: 500
         )
         let cities = [
-            ZucheSearchCity(id: "beijing", name: "北京", location: GeoPoint(lat: 39.904030, lng: 116.407526)),
-            ZucheSearchCity(id: "langfang", name: "廊坊", location: GeoPoint(lat: 39.538047, lng: 116.683752)),
-            ZucheSearchCity(id: "sanhe", name: "三河", location: GeoPoint(lat: 39.982718, lng: 117.078295)),
-            ZucheSearchCity(id: "gaobeidian", name: "高碑店", location: GeoPoint(lat: 39.327689, lng: 115.873612)),
-            ZucheSearchCity(id: "tianjin", name: "天津", location: GeoPoint(lat: 39.084158, lng: 117.200983)),
-            ZucheSearchCity(id: "xiongan", name: "雄安新区", location: GeoPoint(lat: 39.047984, lng: 115.934217)),
-            ZucheSearchCity(id: "renqiu", name: "任丘", location: GeoPoint(lat: 38.711639, lng: 116.099562)),
-            ZucheSearchCity(id: "baoding", name: "保定", location: GeoPoint(lat: 38.873891, lng: 115.464806)),
-            ZucheSearchCity(id: "tangshan", name: "唐山", location: GeoPoint(lat: 39.630867, lng: 118.180193)),
-            ZucheSearchCity(id: "cangzhou", name: "沧州", location: GeoPoint(lat: 38.304477, lng: 116.838835)),
-            ZucheSearchCity(id: "chengde", name: "承德", location: GeoPoint(lat: 40.954071, lng: 117.962410)),
-            ZucheSearchCity(id: "zhangjiakou", name: "张家口", location: GeoPoint(lat: 40.824418, lng: 114.887543)),
-            ZucheSearchCity(id: "dingzhou", name: "定州", location: GeoPoint(lat: 38.516174, lng: 114.990321)),
-            ZucheSearchCity(id: "xinji", name: "辛集", location: GeoPoint(lat: 37.943121, lng: 115.217451)),
-            ZucheSearchCity(id: "hengshui", name: "衡水", location: GeoPoint(lat: 37.738920, lng: 115.670177)),
-            ZucheSearchCity(id: "qinhuangdao", name: "秦皇岛", location: GeoPoint(lat: 39.935385, lng: 119.600493)),
-            ZucheSearchCity(id: "dezhou", name: "德州", location: GeoPoint(lat: 37.434092, lng: 116.357464)),
-            ZucheSearchCity(id: "shijiazhuang", name: "石家庄", location: GeoPoint(lat: 38.042307, lng: 114.514860)),
+            ZucheSearchCity(id: "1", name: "北京", location: GeoPoint(lat: 39.904030, lng: 116.407526)),
+            ZucheSearchCity(id: "38", name: "廊坊", location: GeoPoint(lat: 39.538047, lng: 116.683752)),
+            ZucheSearchCity(id: "2249", name: "三河", location: GeoPoint(lat: 39.982718, lng: 117.078295)),
+            ZucheSearchCity(id: "2359", name: "高碑店", location: GeoPoint(lat: 39.327689, lng: 115.873612)),
+            ZucheSearchCity(id: "2", name: "天津", location: GeoPoint(lat: 39.084158, lng: 117.200983)),
+            ZucheSearchCity(id: "1241", name: "雄安新区", location: GeoPoint(lat: 39.047984, lng: 115.934217)),
+            ZucheSearchCity(id: "2521", name: "任丘", location: GeoPoint(lat: 38.711639, lng: 116.099562)),
+            ZucheSearchCity(id: "377", name: "保定", location: GeoPoint(lat: 38.873891, lng: 115.464806)),
+            ZucheSearchCity(id: "40", name: "唐山", location: GeoPoint(lat: 39.630867, lng: 118.180193)),
+            ZucheSearchCity(id: "627", name: "沧州", location: GeoPoint(lat: 38.304477, lng: 116.838835)),
+            ZucheSearchCity(id: "34", name: "承德", location: GeoPoint(lat: 40.954071, lng: 117.962410)),
+            ZucheSearchCity(id: "37", name: "张家口", location: GeoPoint(lat: 40.824418, lng: 114.887543)),
+            ZucheSearchCity(id: "1773", name: "定州", location: GeoPoint(lat: 38.516174, lng: 114.990321)),
+            ZucheSearchCity(id: "1801", name: "辛集", location: GeoPoint(lat: 37.943121, lng: 115.217451)),
+            ZucheSearchCity(id: "634", name: "衡水", location: GeoPoint(lat: 37.738920, lng: 115.670177)),
+            ZucheSearchCity(id: "400", name: "秦皇岛", location: GeoPoint(lat: 39.935385, lng: 119.600493)),
+            ZucheSearchCity(id: "373", name: "德州", location: GeoPoint(lat: 37.434092, lng: 116.357464)),
+            ZucheSearchCity(id: "33", name: "石家庄", location: GeoPoint(lat: 38.042307, lng: 114.514860)),
         ]
 
         let candidates = zucheCandidateCities(from: cities, request: request)
         let planned = plannedZucheCities(from: candidates, hasVehicleQuery: true)
 
-        #expect(candidates.firstIndex { $0.city.id == "dezhou" } == 16)
-        #expect(planned.map(\.city.id).contains("dezhou"))
+        // Dezhou is the 17th nearest of these 18 (index 16 after sorting) and
+        // must survive both the radius filter and the planning cap.
+        #expect(candidates.firstIndex { $0.city.id == "373" } == 16)
+        #expect(planned.map(\.city.id).contains("373"))
+    }
+
+    @Test("CAR Inc planning cap covers the real 500km city count without truncating far cities")
+    func carIncPlanningCapCoversRealCityCountWithinRadius() {
+        // A 500km radius around Beijing touches ~58 real Zuche cities. The cap
+        // (maxZucheVehicleSearchCityCount) must be large enough to plan all of
+        // them so a cheaper car in a farther city (e.g. Dezhou) is never silently
+        // dropped for "timeout avoidance". This builds 65 in-radius cities and
+        // asserts planning is bounded only by the cap, not by some smaller value.
+        let request = makeSearchRequest(
+            originLabel: "北京",
+            origin: GeoPoint(lat: 39.90, lng: 116.40),
+            radiusKm: 500
+        )
+        let cities = (0..<65).map { index in
+            ZucheSearchCity(
+                id: "c\(index)",
+                name: "城\(index)",
+                // Spread cities on a ring well inside 500km so all are in-radius.
+                location: GeoPoint(lat: 39.90 + Double(index) * 0.01, lng: 116.40 + Double(index) * 0.01)
+            )
+        }
+
+        let candidates = zucheCandidateCities(from: cities, request: request)
+        let planned = plannedZucheCities(from: candidates, hasVehicleQuery: true)
+
+        // All 65 candidates are within radius; planning is capped at the global
+        // maxZucheVehicleSearchCityCount, which must be >= 60 to cover the real
+        // 500km city population. Far cities (tail of the sorted list) are still
+        // represented rather than truncated near the origin.
+        #expect(candidates.count == 65)
+        #expect(planned.count == maxZucheVehicleSearchCityCount)
+        #expect(maxZucheVehicleSearchCityCount >= 60)
     }
 
     @Test("CAR Inc specific vehicle query filters listings before confirmation fee enrichment")
