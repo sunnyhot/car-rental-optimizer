@@ -40,10 +40,16 @@ struct EhiLoginSheet: View {
             Spacer()
 
             Button {
+                let action = EhiLoginSession.refreshAction(forCaptchaWarning: captchaWarning)
                 captchaWarning = nil
-                reloadToken += 1
+                switch action {
+                case .reload:
+                    reloadToken += 1
+                case .resetChallenge:
+                    resetToken += 1
+                }
             } label: {
-                Label("刷新登录页", systemImage: "arrow.clockwise")
+                Label(captchaWarning == nil ? "刷新登录页" : "重置并刷新登录页", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
 
@@ -77,7 +83,7 @@ struct EhiLoginSheet: View {
                 ActionStatusRow(
                     icon: "exclamationmark.triangle.fill",
                     title: captchaWarning,
-                    message: "已停止自动刷新登录页，避免打断验证码输入。先点「刷新登录页」重新获取验证码，仍异常再重置验证状态。",
+                    message: "已停止自动刷新登录页，避免打断验证码输入。点「重置并刷新登录页」会清理一嗨验证状态并重新获取验证码。",
                     tone: .warning
                 )
                 .layoutPriority(1)

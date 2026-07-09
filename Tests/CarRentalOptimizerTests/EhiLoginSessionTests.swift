@@ -69,6 +69,12 @@ struct EhiLoginSessionTests {
         #expect(!EhiLoginSession.containsCaptchaValidationError("手机号登录"))
     }
 
+    @Test("Captcha warning upgrades refresh to challenge reset")
+    func captchaWarningUpgradesRefreshToChallengeReset() {
+        #expect(EhiLoginSession.refreshAction(forCaptchaWarning: nil) == .reload)
+        #expect(EhiLoginSession.refreshAction(forCaptchaWarning: "验证码校验异常，请刷新页面后重试") == .resetChallenge)
+    }
+
     @Test("Captcha observer reports validation errors inserted after page load")
     func captchaObserverReportsDynamicValidationError() {
         let source = EhiLoginSession.captchaValidationObserverSource(messageName: "testCaptchaObserver")
@@ -79,6 +85,15 @@ struct EhiLoginSessionTests {
         #expect(source.contains("subtree: true"))
         #expect(source.contains("characterData: true"))
         #expect(source.contains("handlers[messageName].postMessage(String(text).trim())"))
+    }
+
+    @Test("Login sheet uses reset challenge action when captcha warning is visible")
+    func loginSheetUsesResetChallengeActionWhenCaptchaWarningIsVisible() throws {
+        let source = try ehiLoginSheetSource()
+
+        #expect(source.contains("EhiLoginSession.refreshAction(forCaptchaWarning: captchaWarning)"))
+        #expect(source.contains("case .resetChallenge:"))
+        #expect(source.contains("resetToken += 1"))
     }
 
     @Test("Only eHi website data records are reset")

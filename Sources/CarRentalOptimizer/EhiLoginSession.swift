@@ -1,6 +1,11 @@
 import Foundation
 import WebKit
 
+enum EhiLoginRefreshAction: Equatable {
+    case reload
+    case resetChallenge
+}
+
 enum EhiLoginSession {
     static let loginURL = URL(string: "https://booking.1hai.cn/order/firstStep")!
     static let didChangeNotification = Notification.Name("EhiLoginSessionDidChange")
@@ -22,6 +27,10 @@ enum EhiLoginSession {
             || normalized.contains("请刷新页面后重试")
             || normalized.localizedCaseInsensitiveContains("captcha")
                 && normalized.localizedCaseInsensitiveContains("refresh")
+    }
+
+    static func refreshAction(forCaptchaWarning warning: String?) -> EhiLoginRefreshAction {
+        warning == nil ? .reload : .resetChallenge
     }
 
     static func makeCaptchaValidationObserverScript(
