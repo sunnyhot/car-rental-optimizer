@@ -188,7 +188,7 @@ private struct ZucheFeeEnrichment {
     let loginRejected: Bool
 }
 
-let maxZucheVehicleSearchCityCount = 8
+let maxZucheVehicleSearchCityCount = 20
 private let maxConcurrentZucheConfirmationRequests = 4
 private let zucheGatewayRequestTimeoutSeconds: TimeInterval = 10
 
