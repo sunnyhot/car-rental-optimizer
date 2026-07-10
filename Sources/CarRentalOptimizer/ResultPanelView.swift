@@ -138,29 +138,15 @@ private struct StagedSearchLoadingCard: View {
     let phase: SearchProgressPhase
 
     var body: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            WorkbenchCard(fill: WorkbenchStyle.panelSurface, stroke: WorkbenchStyle.commandBlue.opacity(0.24), padding: 18) {
-                VStack(spacing: 12) {
-                    StatusLightRail(isActive: true, tone: .active)
-                        .frame(width: 240)
-                    ProgressView()
-                        .controlSize(.large)
-                    Text(phase.title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                    Text(phase.message)
-                        .font(.callout)
-                        .foregroundStyle(WorkbenchStyle.muted)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                }
-                .frame(width: 320)
-            }
-            Spacer()
-        }
+        BlueprintStatePanel(
+            icon: phase == .rankingRoutes ? "point.3.connected.trianglepath.dotted" : "arrow.triangle.2.circlepath",
+            title: phase.title,
+            message: phase.message,
+            tone: phase == .failed ? .critical : .active,
+            isActive: phase != .failed
+        )
+        .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(24)
     }
 }
 
@@ -171,13 +157,14 @@ private struct EmptyResultsView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Spacer()
-            EmptyStateBlock(
+            BlueprintStatePanel(
                 icon: emptyStateIcon,
                 title: emptyStateTitle,
-                message: emptyStateMessage
+                message: emptyStateMessage,
+                tone: phase == .failed ? .critical : .idle,
+                isActive: false
             )
-            .frame(maxHeight: 210)
+            .padding(16)
 
             SurfaceBox(fill: WorkbenchStyle.surface, padding: 0) {
                 VStack(spacing: 0) {
@@ -540,17 +527,35 @@ private struct ResultSignalCard: View {
                 cardHeader
                 cardMetrics
 
-                Text(rankingReason)
-                    .font(.caption2)
-                    .foregroundStyle(WorkbenchStyle.muted)
-                    .lineLimit(1)
-
                 QuoteCredibilityBadge(credibility: QuoteCredibility.make(for: recommendation))
+
+                HStack {
+                    Label(rankingReason, systemImage: "arrow.up.arrow.down")
+                        .font(.caption2)
+                        .foregroundStyle(WorkbenchStyle.muted)
+                        .lineLimit(1)
+                    Spacer()
+                    Button {
+                        onMonitor()
+                    } label: {
+                        Label("监控", systemImage: "bell.badge")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityLabel("监控此租车方案")
+                }
             }
             .padding(14)
         }
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(isSelected ? WorkbenchStyle.decisionBlue : Color.clear)
+                .frame(width: 3)
+                .padding(.vertical, 8)
+        }
         .scaleEffect(isSelected ? 1.006 : 1.0)
         .animation(WorkbenchStyle.motionFast, value: isSelected)
+        .accessibilityIdentifier("candidate-card-selection")
         .accessibilityLabel(accessibilitySummary)
     }
 
@@ -638,19 +643,31 @@ private struct ResultSignalCard: View {
     }
 
     private var cardMetrics: some View {
-        HStack(spacing: 8) {
-            InlineMetric(title: "租车小计", value: formatMoney(recommendation.rentalTotal))
-            InlineMetric(title: "打车到店", value: formatMoney(recommendation.taxiRoute.cost))
-            InlineMetric(title: "公交到店", value: formatMoney(recommendation.transitRoute.cost))
-            InlineMetric(title: "完整度", value: "\(Int((recommendation.listing.dataCompleteness * 100).rounded()))%")
-            Button {
-                onMonitor()
-            } label: {
-                Label("监控", systemImage: "bell.badge")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .accessibilityLabel("监控此租车方案")
+        HStack(spacing: 7) {
+            BlueprintMetricTile(
+                title: "租车小计",
+                value: formatMoney(recommendation.rentalTotal),
+                icon: "car.fill",
+                tone: .active
+            )
+            BlueprintMetricTile(
+                title: "最优到店",
+                value: formatMoney(bestRouteCost),
+                icon: recommendation.bestRouteMode == .taxi ? "car.side" : "bus.fill",
+                tone: .success
+            )
+            BlueprintMetricTile(
+                title: "门店距离",
+                value: String(format: "%.1f km", recommendation.listing.store.distanceKm),
+                icon: "location.fill",
+                tone: .idle
+            )
+            BlueprintMetricTile(
+                title: "完整度",
+                value: "\(Int((recommendation.listing.dataCompleteness * 100).rounded()))%",
+                icon: "checkmark.shield.fill",
+                tone: recommendation.listing.dataCompleteness >= 0.9 ? .success : .warning
+            )
         }
     }
 

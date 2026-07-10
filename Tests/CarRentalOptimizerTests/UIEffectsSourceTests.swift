@@ -59,20 +59,20 @@ struct UIEffectsSourceTests {
         #expect(source.contains("suggestion.fallbackNote"))
     }
 
-    @Test("Result panel uses signal cards and staged loading")
-    func resultPanelUsesSignalCardsAndStagedLoading() throws {
+    @Test("Result panel uses Route Blueprint decision signals")
+    func resultPanelUsesRouteBlueprintDecisionSignals() throws {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/ResultPanelView.swift", encoding: .utf8)
 
         #expect(source.contains("StagedSearchLoadingCard"))
         #expect(source.contains("ResultSignalCard"))
+        #expect(source.contains("BlueprintStatePanel("))
+        #expect(source.contains("BlueprintMetricTile("))
+        #expect(source.contains("candidate-card-selection"))
         #expect(source.contains("commandCenterTransition(isEnabled: true, index: index)"))
-        #expect(source.contains("StatusLightRail(isActive: true"))
+        #expect(source.contains("comparisonViewModel.toggle(result)"))
+        #expect(source.contains("QuoteCredibilityBadge"))
         #expect(source.contains("ActionStatusRow("))
-        #expect(source.contains("WorkbenchCard("))
         #expect(source.contains("hasExpandableVehicleMatches"))
-        #expect(source.contains("showsAllVehicleMatches.toggle()"))
-        #expect(source.contains("显示全部匹配"))
-        #expect(source.contains("只看最低价"))
     }
 
     @Test("Result cards expose vehicle name copy action")
