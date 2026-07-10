@@ -109,15 +109,17 @@ struct UIEffectsSourceTests {
         #expect(detailPanel.contains("recommendation.listing.displayNameWithClass"))
     }
 
-    @Test("Detail panel uses decision receipt components")
-    func detailPanelUsesDecisionReceiptComponents() throws {
+    @Test("Detail panel renders a Route Blueprint decision path")
+    func detailPanelRendersRouteBlueprintDecisionPath() throws {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/DetailPanelView.swift", encoding: .utf8)
 
         #expect(source.contains("DecisionReceiptHeader"))
+        #expect(source.contains("BlueprintRoutePath("))
+        #expect(source.contains("originLabel: viewModel.request.originLabel"))
+        #expect(source.contains("decisionRouteSteps"))
+        #expect(source.contains("BlueprintMetricTile("))
         #expect(source.contains("RouteDecisionCard"))
         #expect(source.contains("ReceiptActionBar"))
-        #expect(source.contains("TaskStatusTile("))
-        #expect(source.contains("WorkbenchCard("))
         #expect(source.contains("ActionStatusRow("))
     }
 

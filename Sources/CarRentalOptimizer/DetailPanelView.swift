@@ -13,6 +13,7 @@ struct DetailPanelView: View {
                 if let recommendation = viewModel.selected {
                     RecommendationDetailView(
                         recommendation: recommendation,
+                        originLabel: viewModel.request.originLabel,
                         vehicleInsight: viewModel.selectedVehicleInsight,
                         isLoadingVehicleInsight: viewModel.isLoadingSelectedVehicleInsight
                     ) {
@@ -48,6 +49,7 @@ struct DetailPanelView: View {
 
 private struct RecommendationDetailView: View {
     let recommendation: Recommendation
+    let originLabel: String
     let vehicleInsight: VehicleInsight?
     let isLoadingVehicleInsight: Bool
     let onMonitor: () -> Void
@@ -58,8 +60,8 @@ private struct RecommendationDetailView: View {
                 DecisionReceiptHeader(recommendation: recommendation)
 
                 HStack(spacing: 8) {
-                    TaskStatusTile(title: "租车小计", value: formatMoney(recommendation.rentalTotal), icon: "car.fill", tone: .active)
-                    TaskStatusTile(title: "到店成本", value: formatMoney(bestRouteCost), icon: recommendation.bestRouteMode == .taxi ? "car.side" : "bus.fill", tone: .success)
+                    BlueprintMetricTile(title: "租车小计", value: formatMoney(recommendation.rentalTotal), icon: "car.fill", tone: .active)
+                    BlueprintMetricTile(title: "到店成本", value: formatMoney(bestRouteCost), icon: recommendation.bestRouteMode == .taxi ? "car.side" : "bus.fill", tone: .success)
                 }
 
                 SurfaceBox {
@@ -109,6 +111,13 @@ private struct RecommendationDetailView: View {
                     }
                 }
 
+                SurfaceBox {
+                    VStack(alignment: .leading, spacing: 10) {
+                        BlueprintSectionHeader(icon: "point.3.connected.trianglepath.dotted", title: "决策路径", step: "ROUTE")
+                        BlueprintRoutePath(steps: decisionRouteSteps)
+                    }
+                }
+
                 VStack(alignment: .leading, spacing: 9) {
                     DetailTitleRow(icon: "map.fill", title: "到店路线")
 
@@ -143,6 +152,35 @@ private struct RecommendationDetailView: View {
 
     private var bestRouteCost: Double {
         recommendation.bestRouteMode == .taxi ? recommendation.taxiRoute.cost : recommendation.transitRoute.cost
+    }
+
+    private var decisionRouteSteps: [BlueprintRouteStep] {
+        let route = recommendation.bestRouteMode == .taxi
+            ? recommendation.taxiRoute
+            : recommendation.transitRoute
+        return [
+            BlueprintRouteStep(
+                id: "origin",
+                title: originLabel,
+                detail: "当前行程起点",
+                systemImage: "mappin.circle.fill",
+                tone: .active
+            ),
+            BlueprintRouteStep(
+                id: "transport",
+                title: recommendation.bestRouteMode.label,
+                detail: "\(Int(route.durationMinutes.rounded())) 分钟 · \(String(format: "%.1f km", route.distanceKm)) · \(formatMoney(route.cost))",
+                systemImage: recommendation.bestRouteMode == .taxi ? "car.side.fill" : "bus.fill",
+                tone: .success
+            ),
+            BlueprintRouteStep(
+                id: "store",
+                title: recommendation.listing.store.name,
+                detail: recommendation.listing.store.address,
+                systemImage: "building.2.fill",
+                tone: .success
+            ),
+        ]
     }
 }
 
@@ -337,8 +375,8 @@ private struct DecisionReceiptHeader: View {
 
     var body: some View {
         WorkbenchCard(
-            fill: WorkbenchStyle.commandBlue.opacity(0.12),
-            stroke: WorkbenchStyle.commandBlue.opacity(0.28),
+            fill: WorkbenchStyle.decisionBlue.opacity(0.11),
+            stroke: WorkbenchStyle.decisionBlue.opacity(0.34),
             isHighlighted: true,
             padding: 16
         ) {
@@ -362,7 +400,7 @@ private struct DecisionReceiptHeader: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(WorkbenchStyle.muted)
                     Text(formatMoney(recommendation.bestTotal))
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .font(.system(size: 34, weight: .bold, design: .default))
                         .foregroundStyle(WorkbenchStyle.ink)
                         .monospacedDigit()
                         .contentTransition(.numericText())
