@@ -174,7 +174,7 @@ struct VehicleInsight: Codable, Equatable {
         scopes.contains(.platformListing) ? VehicleSpecScope.platformListing.label : scopes[0].label
     }
 
-    private static let commonConfigurationFeatureNames = [
+    static let commonConfigurationFeatureNames = [
         "倒车影像",
         "360影像",
         "倒车雷达",
