@@ -3,21 +3,39 @@ import AppKit
 import SwiftUI
 
 enum WorkbenchStyle {
-    static let commandBlue = adaptiveColor(
-        light: NSColor(calibratedRed: 0.10, green: 0.34, blue: 0.78, alpha: 1),
-        dark: NSColor(calibratedRed: 0.32, green: 0.58, blue: 1.00, alpha: 1)
+    // Route Blueprint semantic palette — the single source of truth for the
+    // app's signature visual language. Legacy aliases below delegate to these.
+    static let blueprintMist = adaptiveColor(
+        light: NSColor(calibratedRed: 0.918, green: 0.945, blue: 0.961, alpha: 1),
+        dark: NSColor(calibratedRed: 0.035, green: 0.075, blue: 0.114, alpha: 1)
+    )
+    static let routeInk = adaptiveColor(
+        light: NSColor(calibratedRed: 0.090, green: 0.224, blue: 0.325, alpha: 1),
+        dark: NSColor(calibratedRed: 0.780, green: 0.866, blue: 0.925, alpha: 1)
+    )
+    static let decisionBlue = adaptiveColor(
+        light: NSColor(calibratedRed: 0.141, green: 0.412, blue: 0.827, alpha: 1),
+        dark: NSColor(calibratedRed: 0.345, green: 0.631, blue: 1.000, alpha: 1)
     )
     static let signalTeal = adaptiveColor(
-        light: NSColor(calibratedRed: 0.00, green: 0.48, blue: 0.56, alpha: 1),
-        dark: NSColor(calibratedRed: 0.30, green: 0.86, blue: 0.90, alpha: 1)
+        light: NSColor(calibratedRed: 0.051, green: 0.608, blue: 0.588, alpha: 1),
+        dark: NSColor(calibratedRed: 0.290, green: 0.855, blue: 0.820, alpha: 1)
     )
+    static let riskAmber = adaptiveColor(
+        light: NSColor(calibratedRed: 0.851, green: 0.541, blue: 0.133, alpha: 1),
+        dark: NSColor(calibratedRed: 1.000, green: 0.690, blue: 0.290, alpha: 1)
+    )
+
+    // Legacy aliases kept source-compatible with earlier call sites; each maps
+    // to a Route Blueprint semantic token so there is one palette underneath.
+    static let commandBlue = decisionBlue
+    static let amberAlert = riskAmber
+    static let consoleBase = blueprintMist
+    static let accent = decisionBlue
+    static let orange = riskAmber
+
     static let routeGreen = Color(nsColor: .systemGreen)
-    static let amberAlert = Color(nsColor: .systemOrange)
     static let criticalRed = Color(nsColor: .systemRed)
-    static let consoleBase = adaptiveColor(
-        light: NSColor(calibratedRed: 0.94, green: 0.96, blue: 0.98, alpha: 1),
-        dark: NSColor(calibratedRed: 0.045, green: 0.055, blue: 0.075, alpha: 1)
-    )
     static let panelSurface = adaptiveColor(
         light: NSColor(calibratedRed: 0.985, green: 0.99, blue: 1.0, alpha: 1),
         dark: NSColor(calibratedRed: 0.085, green: 0.10, blue: 0.13, alpha: 1)
@@ -43,14 +61,12 @@ enum WorkbenchStyle {
     static let motionStandard = Animation.easeOut(duration: 0.24)
     static let motionSlow = Animation.easeInOut(duration: 0.34)
 
-    static let accent = commandBlue
     static let accentSoft = adaptiveColor(
         light: NSColor(calibratedRed: 0.88, green: 0.93, blue: 1.0, alpha: 1),
         dark: NSColor(calibratedRed: 0.07, green: 0.13, blue: 0.25, alpha: 1)
     )
     static let teal = signalTeal
     static let green = routeGreen
-    static let orange = amberAlert
     static let red = criticalRed
     static let ink = Color(nsColor: .labelColor)
     static let muted = Color(nsColor: .secondaryLabelColor)
@@ -103,7 +119,7 @@ enum WorkbenchStyle {
     }
 }
 
-enum WorkbenchRailTone {
+enum WorkbenchRailTone: Equatable {
     case idle
     case active
     case success
@@ -168,6 +184,38 @@ struct StatusLightRail: View {
                 phase = true
             }
         }
+    }
+}
+
+struct BlueprintRouteTrail: View {
+    let stops: [WorkbenchRailTone]
+    var activeIndex: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(stops.enumerated()), id: \.offset) { index, tone in
+                Circle()
+                    .fill(tone.color)
+                    .frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(WorkbenchStyle.panelSurface, lineWidth: 2))
+                    .scaleEffect(activeIndex == index && !reduceMotion ? 1.12 : 1)
+
+                if index < stops.count - 1 {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [tone.color.opacity(0.75), stops[index + 1].color.opacity(0.75)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 2)
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : WorkbenchStyle.motionStandard, value: activeIndex)
+        .accessibilityHidden(true)
     }
 }
 

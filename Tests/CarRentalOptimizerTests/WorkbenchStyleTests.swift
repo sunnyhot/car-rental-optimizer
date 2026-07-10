@@ -42,4 +42,17 @@ struct WorkbenchStyleTests {
         #expect(source.contains("accessibilityReduceMotion"))
         #expect(source.contains("commandCenterTransition"))
     }
+
+    @Test("Workbench style exposes Route Blueprint semantic tokens")
+    func workbenchStyleExposesRouteBlueprintTokens() throws {
+        let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/WorkbenchStyle.swift", encoding: .utf8)
+
+        #expect(source.contains("static let blueprintMist"))
+        #expect(source.contains("static let routeInk"))
+        #expect(source.contains("static let decisionBlue"))
+        #expect(source.contains("static let signalTeal"))
+        #expect(source.contains("static let riskAmber"))
+        #expect(source.contains("struct BlueprintRouteTrail"))
+        #expect(source.contains("accessibilityReduceMotion"))
+    }
 }
