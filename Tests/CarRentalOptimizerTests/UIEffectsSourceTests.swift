@@ -136,15 +136,22 @@ struct UIEffectsSourceTests {
         #expect(source.contains("下单前以平台确认页为准"))
     }
 
-    @Test("Monitor center uses command surfaces")
-    func monitorCenterUsesCommandSurfaces() throws {
+    @Test("Monitor center is an integrated Route Blueprint workspace")
+    func monitorCenterIsIntegratedRouteBlueprintWorkspace() throws {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/MonitorCenterView.swift", encoding: .utf8)
 
-        #expect(source.contains("MonitorCommandSurface"))
-        #expect(source.contains("MonitorEventPulseRow"))
-        #expect(source.contains("TaskStatusTile("))
-        #expect(source.contains("ActionStatusRow("))
-        #expect(source.contains("WorkbenchCard("))
+        #expect(source.contains("title: \"价格监控\""))
+        #expect(source.contains("MonitorHealthStrip"))
+        #expect(source.contains("BlueprintMetricTile("))
+        #expect(source.contains("MonitorFilterBar"))
+        #expect(source.contains("runShownChecks()"))
+        #expect(source.contains("pauseMonitors(ids:"))
+        #expect(source.contains("resumeMonitors(ids:"))
+        #expect(source.contains("BlueprintStatePanel("))
+        #expect(source.contains("MonitorCommandSurface(title: \"价格趋势\", icon: \"chart.xyaxis.line\", step: \"TREND\")"))
+        #expect(source.contains("历史快照，可能已失效"))
+        #expect(source.contains("chartForegroundStyleScale"))
+        #expect(!source.contains(".frame(minWidth: 920, minHeight: 620)"))
     }
 
     @Test("Sheets use shared workbench chrome")

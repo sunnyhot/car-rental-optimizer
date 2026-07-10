@@ -14,7 +14,6 @@ struct MonitorCenterView: View {
             monitorDetail
                 .frame(minWidth: 560, idealWidth: 680)
         }
-        .frame(minWidth: 920, minHeight: 620)
         .task {
             try? await monitorViewModel.reload()
         }
@@ -42,15 +41,16 @@ struct MonitorCenterView: View {
 
     private var monitorList: some View {
         WorkbenchPanel(
-            title: "监控中心",
+            title: "价格监控",
             subtitle: monitorListSubtitle,
             trailing: AnyView(
                 Button {
                     showingCreateSheet = true
                 } label: {
-                    Image(systemName: "plus")
+                    Label("新建", systemImage: "plus")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(WorkbenchStyle.decisionBlue)
                 .help("新建价格监控")
             )
         ) {
@@ -156,7 +156,14 @@ struct MonitorCenterView: View {
                     .padding(16)
                 }
             } else {
-                EmptyStateBlock(icon: "bell.badge", title: "暂无监控", message: "从候选方案或这里新建价格监控。")
+                BlueprintStatePanel(
+                    icon: "bell.badge",
+                    title: "暂无监控",
+                    message: "从候选方案创建监控，或点击左上角“新建”手动配置巡查条件。",
+                    tone: .idle,
+                    isActive: false
+                )
+                .padding(16)
             }
         }
     }
@@ -184,11 +191,12 @@ private struct MonitorListRow: View {
                     .font(.callout.weight(.semibold))
                     .lineLimit(1)
                 Spacer()
-                StatusPill(
-                    text: monitor.status.label,
-                    color: monitor.status == .needsAttention ? WorkbenchStyle.orange : WorkbenchStyle.accent,
-                    systemImage: nil
+                Label(
+                    monitor.status.label,
+                    systemImage: monitor.status == .needsAttention ? "exclamationmark.triangle.fill" : "circle.fill"
                 )
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(monitor.status == .needsAttention ? WorkbenchStyle.riskAmber : WorkbenchStyle.decisionBlue)
             }
             Text("\(monitor.request.pickupAt) 至 \(monitor.request.returnAt)")
                 .font(.caption)
@@ -202,9 +210,13 @@ private struct MonitorListRow: View {
                     .foregroundStyle(WorkbenchStyle.muted)
                     .lineLimit(1)
             }
+            Text("\(monitor.request.originLabel) · \(monitor.targetVehicleQuery.isEmpty ? "未指定车型" : monitor.targetVehicleQuery)")
+                .font(.caption2)
+                .foregroundStyle(WorkbenchStyle.muted)
+                .lineLimit(1)
         }
         .padding(.vertical, 5)
-        .accessibilityLabel("\(monitor.name)，\(monitor.status.label)，\(monitor.frequency.label)")
+        .accessibilityLabel("\(monitor.name)，\(monitor.status.label)，\(monitor.frequency.label)，\(monitor.request.originLabel)")
     }
 }
 
@@ -218,28 +230,35 @@ private struct MonitorSummaryBox: View {
 
     var body: some View {
         WorkbenchCard(
-            fill: WorkbenchStyle.commandBlue.opacity(0.10),
-            stroke: WorkbenchStyle.commandBlue.opacity(0.22),
+            fill: WorkbenchStyle.decisionBlue.opacity(0.08),
+            stroke: WorkbenchStyle.decisionBlue.opacity(0.24),
             padding: 12
         ) {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                MetricPill(title: "最近租车价", value: trend.latestPlatformRentalPrice.map(formatMoney) ?? "--")
-                MetricPill(
-                    title: "相比上次",
-                    value: formatSignedMoney(trend.platformRentalDelta),
-                    color: (trend.platformRentalDelta ?? 0) < 0 ? WorkbenchStyle.routeGreen : WorkbenchStyle.muted
+            VStack(alignment: .leading, spacing: 10) {
+                BlueprintSectionHeader(
+                    icon: "waveform.path.ecg.rectangle",
+                    title: "监控摘要",
+                    step: "LIVE",
+                    trailing: monitor.status.label
                 )
-                MetricPill(
-                    title: "下次巡查",
-                    value: monitor.nextCheckAt.map { DateFormatter.localizedString(from: $0, dateStyle: .short, timeStyle: .short) } ?? "--"
-                )
-                MetricPill(title: "历史低点", value: trend.lowestPlatformRentalPrice.map(formatMoney) ?? "--", color: WorkbenchStyle.routeGreen)
-                MetricPill(title: "历史高点", value: trend.highestPlatformRentalPrice.map(formatMoney) ?? "--")
-                MetricPill(
-                    title: "首次至今",
-                    value: formatSignedMoney(trend.platformRentalDeltaFromFirst),
-                    color: (trend.platformRentalDeltaFromFirst ?? 0) < 0 ? WorkbenchStyle.routeGreen : WorkbenchStyle.muted
-                )
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                    BlueprintMetricTile(title: "最近租车价", value: trend.latestPlatformRentalPrice.map(formatMoney) ?? "--", icon: "yensign.circle", tone: .active)
+                    BlueprintMetricTile(
+                        title: "相比上次",
+                        value: formatSignedMoney(trend.platformRentalDelta),
+                        icon: "arrow.left.arrow.right",
+                        tone: (trend.platformRentalDelta ?? 0) < 0 ? .success : .idle
+                    )
+                    BlueprintMetricTile(title: "下次巡查", value: monitor.nextCheckAt.map(formatCompactDateTime) ?? "--", icon: "clock.badge", tone: .idle)
+                    BlueprintMetricTile(title: "历史低点", value: trend.lowestPlatformRentalPrice.map(formatMoney) ?? "--", icon: "arrow.down.circle", tone: .success)
+                    BlueprintMetricTile(title: "历史高点", value: trend.highestPlatformRentalPrice.map(formatMoney) ?? "--", icon: "arrow.up.circle", tone: .idle)
+                    BlueprintMetricTile(
+                        title: "首次至今",
+                        value: formatSignedMoney(trend.platformRentalDeltaFromFirst),
+                        icon: "calendar.badge.clock",
+                        tone: (trend.platformRentalDeltaFromFirst ?? 0) < 0 ? .success : .idle
+                    )
+                }
             }
         }
         .accessibilityLabel("监控摘要，最近租车价 \(trend.latestPlatformRentalPrice.map(formatMoney) ?? "暂无")")
@@ -254,7 +273,7 @@ private struct MonitorTrendChart: View {
     }
 
     var body: some View {
-        MonitorCommandSurface(title: "价格趋势", icon: "chart.xyaxis.line") {
+        MonitorCommandSurface(title: "价格趋势", icon: "chart.xyaxis.line", step: "TREND") {
             Chart {
                 ForEach(points) { snapshot in
                     if let price = snapshot.platformRentalPrice {
@@ -268,6 +287,10 @@ private struct MonitorTrendChart: View {
                 }
             }
             .chartLegend(position: .bottom)
+            .chartForegroundStyleScale([
+                "平台租车价": WorkbenchStyle.decisionBlue,
+                "推荐总成本": WorkbenchStyle.signalTeal,
+            ])
         }
     }
 }
@@ -333,28 +356,29 @@ private struct MonitorHealthStrip: View {
 
     var body: some View {
         WorkbenchCard(fill: WorkbenchStyle.panelSurface, padding: 10) {
-            VStack(alignment: .leading, spacing: 8) {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                    TaskStatusTile(title: "总数", value: "\(summary.totalCount)", icon: "number", tone: .idle)
-                    TaskStatusTile(
+            VStack(alignment: .leading, spacing: 9) {
+                BlueprintSectionHeader(
+                    icon: "heart.text.square.fill",
+                    title: "巡查健康",
+                    step: "STATUS",
+                    trailing: backgroundMonitoringEnabled ? "后台开启" : "手动巡查"
+                )
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 7) {
+                    BlueprintMetricTile(title: "总数", value: "\(summary.totalCount)", icon: "number", tone: .idle)
+                    BlueprintMetricTile(
                         title: "需处理",
                         value: "\(summary.needsAttentionCount)",
                         icon: "exclamationmark.triangle.fill",
                         tone: summary.needsAttentionCount > 0 ? .warning : .idle
                     )
-                    TaskStatusTile(
-                        title: "降价",
+                    BlueprintMetricTile(
+                        title: "近期降价",
                         value: "\(summary.recentPriceDropCount)",
                         icon: "arrow.down.circle.fill",
                         tone: summary.recentPriceDropCount > 0 ? .success : .idle
                     )
-                    TaskStatusTile(title: "今日", value: "\(summary.dueTodayCount)", icon: "calendar.badge.clock", tone: .active)
+                    BlueprintMetricTile(title: "今日巡查", value: "\(summary.dueTodayCount)", icon: "calendar.badge.clock", tone: .active)
                 }
-                StatusPill(
-                    text: backgroundMonitoringEnabled ? "后台开" : "后台关",
-                    color: backgroundMonitoringEnabled ? WorkbenchStyle.routeGreen : WorkbenchStyle.muted,
-                    systemImage: backgroundMonitoringEnabled ? "checkmark.circle.fill" : "pause.circle"
-                )
             }
         }
     }
@@ -398,12 +422,13 @@ private struct StatusMessageRow: View {
 private struct MonitorCommandSurface<Content: View>: View {
     let title: String
     let icon: String
+    var step = "HISTORY"
     @ViewBuilder let content: Content
 
     var body: some View {
         WorkbenchCard(fill: WorkbenchStyle.elevatedSurface, stroke: WorkbenchStyle.hairline, padding: 12) {
             VStack(alignment: .leading, spacing: 10) {
-                MonitorSectionTitleRow(icon: icon, title: title)
+                BlueprintSectionHeader(icon: icon, title: title, step: step)
                 content
             }
         }
@@ -422,22 +447,5 @@ private struct MonitorEventPulseRow: View {
             tone: event.kind == .priceDrop ? .success : .warning
         )
         .commandCenterTransition(isEnabled: true, index: index)
-    }
-}
-
-private struct MonitorSectionTitleRow: View {
-    let icon: String
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .foregroundStyle(WorkbenchStyle.accent)
-                .frame(width: 18)
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(WorkbenchStyle.ink)
-            Spacer()
-        }
     }
 }
