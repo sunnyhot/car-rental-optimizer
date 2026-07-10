@@ -12,12 +12,12 @@ struct SearchPanelView: View {
 
     var body: some View {
         WorkbenchPanel(
-            title: "查询控制台",
-            subtitle: "真实车源 + 到店成本",
+            title: "行程配置",
+            subtitle: "位置 → 租期 → 车辆 → 平台",
             trailing: AnyView(
                 StatusPill(
-                    text: "静默 API",
-                    color: WorkbenchStyle.accent,
+                    text: "官方实时",
+                    color: WorkbenchStyle.decisionBlue,
                     systemImage: "bolt.horizontal.circle.fill"
                 )
             )
@@ -41,6 +41,13 @@ struct SearchPanelView: View {
                 StatusLightRail(isActive: viewModel.isSearching, tone: viewModel.hasBlockingPreflightIssues ? .warning : .active)
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
+
+                Text(viewModel.hasBlockingPreflightIssues ? "修正上方阻断项后可开始" : "将读取官方报价并计算到店成本")
+                    .font(.caption2)
+                    .foregroundStyle(viewModel.hasBlockingPreflightIssues ? WorkbenchStyle.riskAmber : WorkbenchStyle.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
 
                 compareButton
                     .padding(16)
@@ -81,7 +88,13 @@ struct SearchPanelView: View {
 
     private var searchControls: some View {
         VStack(alignment: .leading, spacing: 14) {
-            QueryConsoleSection(icon: "mappin.and.ellipse", title: "行程") {
+            BlueprintRouteTrail(
+                stops: [.active, .idle, .idle, .idle],
+                activeIndex: viewModel.isSearching ? searchTrailIndex : nil
+            )
+            .padding(.horizontal, 4)
+
+            QueryConsoleSection(step: "01", icon: "mappin.and.ellipse", title: "行程坐标") {
                 OriginLocationField(
                     originInputTask: $originInputTask,
                     dismissRequest: originInputDismissRequest
@@ -95,7 +108,7 @@ struct SearchPanelView: View {
                 }
             }
 
-            QueryConsoleSection(icon: "car", title: "车辆与范围") {
+            QueryConsoleSection(step: "02", icon: "car", title: "车辆与范围") {
                 VehicleSuggestionField()
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -121,7 +134,7 @@ struct SearchPanelView: View {
                 }
             }
 
-            QueryConsoleSection(icon: "arrow.triangle.2.circlepath", title: "取还规则") {
+            QueryConsoleSection(step: "03", icon: "arrow.triangle.2.circlepath", title: "取还规则") {
                 FieldView(label: "还车方式") {
                     Picker("", selection: $viewModel.request.returnMode) {
                         ForEach(ReturnMode.allCases, id: \.self) { mode in
@@ -133,7 +146,7 @@ struct SearchPanelView: View {
                 }
             }
 
-            QueryConsoleSection(icon: "link", title: "平台") {
+            QueryConsoleSection(step: "04", icon: "link", title: "报价平台") {
                 HStack(spacing: 8) {
                     ForEach(PlatformId.allCases, id: \.self) { platform in
                         PlatformSignalToggleButton(
@@ -158,6 +171,15 @@ struct SearchPanelView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var searchTrailIndex: Int {
+        switch viewModel.searchProgressPhase {
+        case .idle, .resolvingLocation: return 0
+        case .queryingPlatforms: return 3
+        case .rankingRoutes, .completed: return 3
+        case .failed: return 0
         }
     }
 
@@ -1010,6 +1032,7 @@ private struct DateRangeDurationBadge: View {
 }
 
 private struct QueryConsoleSection<Content: View>: View {
+    let step: String
     let icon: String
     let title: String
     @ViewBuilder let content: Content
@@ -1017,16 +1040,7 @@ private struct QueryConsoleSection<Content: View>: View {
     var body: some View {
         WorkbenchCard(fill: WorkbenchStyle.panelSurface, stroke: WorkbenchStyle.hairline, padding: 12) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .foregroundStyle(WorkbenchStyle.signalTeal)
-                        .frame(width: 18)
-                    Text(title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WorkbenchStyle.ink)
-                    Spacer()
-                }
-
+                BlueprintSectionHeader(icon: icon, title: title, step: step)
                 VStack(alignment: .leading, spacing: 12) {
                     content
                 }
@@ -1092,6 +1106,7 @@ private struct CompareCommandButton: View {
         .controlSize(.large)
         .tint(WorkbenchStyle.commandBlue)
         .disabled(isDisabled)
+        .accessibilityHint(isDisabled ? "搜索条件存在阻断项" : "读取所选平台的真实报价")
         .animation(WorkbenchStyle.motionFast, value: isSearching)
     }
 }
