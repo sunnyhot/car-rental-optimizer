@@ -15,6 +15,7 @@ struct CreateMonitorSheet: View {
     @State private var minimumDropPercent = ""
     @State private var systemNotificationsEnabled = false
     @State private var errorMessage: String?
+    @State private var isSaving = false
 
     var body: some View {
         WorkbenchSheetShell(
@@ -23,32 +24,50 @@ struct CreateMonitorSheet: View {
             icon: "bell.badge",
             tone: .active
         ) {
-            VStack(alignment: .leading, spacing: 16) {
-                summary
-                controls
-
-                if let errorMessage {
-                    ActionStatusRow(
-                        icon: "exclamationmark.triangle.fill",
-                        title: "保存失败",
-                        message: errorMessage,
-                        tone: .critical
-                    )
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            BlueprintSectionHeader(icon: "point.3.connected.trianglepath.dotted", title: "行程与方案", step: "01")
+                            summary
+                        }
+                        VStack(alignment: .leading, spacing: 10) {
+                            BlueprintSectionHeader(icon: "bell.and.waves.left.and.right", title: "提醒规则", step: "02")
+                            controls
+                        }
+                        if let errorMessage {
+                            ActionStatusRow(
+                                icon: "exclamationmark.triangle.fill",
+                                title: "保存失败",
+                                message: errorMessage,
+                                tone: .critical
+                            )
+                        }
+                    }
+                    .padding(20)
                 }
 
-                HStack {
+                BlueprintSheetActionBar {
+                    if isSaving {
+                        ProgressView().controlSize(.small)
+                        Text("正在保存监控…")
+                            .font(.caption)
+                            .foregroundStyle(WorkbenchStyle.muted)
+                    }
                     Spacer()
                     Button("取消") { dismiss() }
+                        .disabled(isSaving)
                     Button("保存监控") {
                         Task { await save() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(WorkbenchStyle.commandBlue)
+                    .tint(WorkbenchStyle.decisionBlue)
+                    .disabled(isSaving)
+                    .keyboardShortcut(.defaultAction)
                 }
             }
-            .padding(20)
         }
-        .frame(width: 460)
+        .frame(width: 500, height: 560)
         .onAppear {
             name = recommendation.map { "\($0.listing.vehicleName) \(request.pickupAt)" } ?? "租车价格监控"
             vehicleQuery = recommendation?.listing.vehicleName ?? request.vehicleQuery
@@ -94,6 +113,11 @@ struct CreateMonitorSheet: View {
     }
 
     private func save() async {
+        guard !isSaving else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+
         do {
             let rule = PriceDropRule(
                 notifyOnAnyDecrease: notifyOnAnyDecrease,

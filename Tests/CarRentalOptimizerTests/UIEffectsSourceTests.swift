@@ -183,4 +183,17 @@ struct UIEffectsSourceTests {
         #expect(matrix.contains("设为当前方案"))
         #expect(matrix.contains("打开官方页面"))
     }
+
+    @Test("Sheets share Route Blueprint action and location chrome")
+    func sheetsShareRouteBlueprintChrome() throws {
+        let shared = try String(contentsOfFile: "Sources/CarRentalOptimizer/BlueprintSheetComponents.swift", encoding: .utf8)
+        let create = try String(contentsOfFile: "Sources/CarRentalOptimizer/CreateMonitorSheet.swift", encoding: .utf8)
+
+        #expect(shared.contains("struct BlueprintSheetActionBar"))
+        #expect(shared.contains("struct BlueprintWebLocationBar"))
+        #expect(create.contains("BlueprintSheetActionBar"))
+        #expect(create.contains("isSaving"))
+        #expect(create.contains("行程与方案"))
+        #expect(create.contains("提醒规则"))
+    }
 }
