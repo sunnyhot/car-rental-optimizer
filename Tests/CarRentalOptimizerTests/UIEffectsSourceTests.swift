@@ -195,5 +195,16 @@ struct UIEffectsSourceTests {
         #expect(create.contains("isSaving"))
         #expect(create.contains("行程与方案"))
         #expect(create.contains("提醒规则"))
+
+        let ehi = try String(contentsOfFile: "Sources/CarRentalOptimizer/EhiLoginSheet.swift", encoding: .utf8)
+        let platform = try String(contentsOfFile: "Sources/CarRentalOptimizer/PlatformLoginSheet.swift", encoding: .utf8)
+
+        #expect(ehi.contains("BlueprintWebLocationBar"))
+        #expect(ehi.contains("BlueprintSheetActionBar"))
+        #expect(ehi.contains("EhiCookieVault.save"))
+        #expect(ehi.contains("resetToken += 1"))
+        #expect(platform.contains("BlueprintWebLocationBar"))
+        #expect(platform.contains("BlueprintSheetActionBar"))
+        #expect(platform.contains("ZucheCookieVault.save"))
     }
 }

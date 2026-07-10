@@ -27,6 +27,11 @@ struct PlatformLoginSheet: View {
         ) {
             VStack(spacing: 0) {
                 platformActionBar
+                BlueprintWebLocationBar(
+                    platformName: platform.label,
+                    currentURL: currentURL,
+                    message: "登录官网后可重新比较并尝试补全确认页基础服务费。"
+                )
                 platformInfoRow
 
                 PlatformLoginWebView(
@@ -42,7 +47,7 @@ struct PlatformLoginSheet: View {
     }
 
     private var platformActionBar: some View {
-        HStack(alignment: .center, spacing: 10) {
+        BlueprintSheetActionBar {
             Spacer()
 
             Button {
@@ -67,13 +72,9 @@ struct PlatformLoginSheet: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .tint(WorkbenchStyle.commandBlue)
+            .tint(WorkbenchStyle.decisionBlue)
             .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .background(WorkbenchStyle.elevatedSurface)
-        .subtleDividerOverlay()
     }
 
     private var platformInfoRow: some View {

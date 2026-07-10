@@ -20,6 +20,12 @@ struct EhiLoginSheet: View {
         ) {
             VStack(spacing: 0) {
                 loginActionBar
+                BlueprintWebLocationBar(
+                    platformName: "一嗨",
+                    currentURL: currentURL,
+                    message: "登录状态仅保存在本机，用于重新读取官方库存报价。",
+                    tone: captchaWarning == nil ? .active : .warning
+                )
                 captchaWarningView
 
                 EhiLoginWebView(
@@ -36,7 +42,7 @@ struct EhiLoginSheet: View {
     }
 
     private var loginActionBar: some View {
-        HStack(alignment: .center, spacing: 10) {
+        BlueprintSheetActionBar {
             Spacer()
 
             Button {
@@ -67,13 +73,9 @@ struct EhiLoginSheet: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .tint(WorkbenchStyle.commandBlue)
+            .tint(WorkbenchStyle.decisionBlue)
             .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .background(WorkbenchStyle.elevatedSurface)
-        .subtleDividerOverlay()
     }
 
     @ViewBuilder
