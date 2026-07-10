@@ -3,16 +3,34 @@ import Testing
 
 @Suite("UI effects source contracts")
 struct UIEffectsSourceTests {
-    @Test("Main view uses command center shell components")
-    func mainViewUsesCommandCenterShellComponents() throws {
+    @Test("Main view routes app commands through the primary workspace shell")
+    func mainViewRoutesCommandsThroughWorkspaceShell() throws {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/MainView.swift", encoding: .utf8)
+        let shell = try String(contentsOfFile: "Sources/CarRentalOptimizer/AppShellView.swift", encoding: .utf8)
 
-        #expect(source.contains("WorkbenchBackground()"))
-        #expect(source.contains("StatusLightRail(isActive: viewModel.isSearching"))
-        #expect(source.contains("TaskStatusTile("))
-        #expect(source.contains("tone: .active"))
-        #expect(source.contains("tone: .success"))
-        #expect(source.contains("tone: .warning"))
+        #expect(source.contains("AppNavigationModel"))
+        #expect(source.contains("AppShellView(navigationModel:"))
+        #expect(source.contains("navigationModel.showMonitoring()"))
+        #expect(source.contains("navigationModel.showComparison()"))
+        #expect(!source.contains("showingMonitorCenter"))
+        #expect(shell.contains("PrimaryNavigationRail"))
+        #expect(shell.contains("BlueprintStatusBar"))
+        #expect(shell.contains("MonitorCenterView()"))
+    }
+
+    @Test("Main shell uses Route Blueprint status components")
+    func mainShellUsesRouteBlueprintStatusComponents() throws {
+        let main = try String(contentsOfFile: "Sources/CarRentalOptimizer/MainView.swift", encoding: .utf8)
+        let shell = try String(contentsOfFile: "Sources/CarRentalOptimizer/AppShellView.swift", encoding: .utf8)
+
+        #expect(main.contains("AppShellView(navigationModel:"))
+        #expect(shell.contains("WorkbenchBackground()"))
+        #expect(shell.contains("BlueprintStatusBar"))
+        #expect(shell.contains("StatusLightRail("))
+        #expect(shell.contains("TaskStatusTile("))
+        #expect(shell.contains("tone: .active"))
+        #expect(shell.contains("tone: .success"))
+        #expect(shell.contains("tone: .warning"))
     }
 
     @Test("Search panel uses command console components")
