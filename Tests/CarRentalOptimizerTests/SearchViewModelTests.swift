@@ -612,6 +612,52 @@ struct SearchViewModelTests {
 
         #expect(vehicleInsightService.networkRequestCount == 1)
     }
+
+    @Test("A valid search advances the search generation")
+    func validSearchAdvancesGeneration() async {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        let initialGeneration = viewModel.searchGeneration
+
+        await viewModel.runSearch()
+
+        #expect(viewModel.searchGeneration == initialGeneration + 1)
+    }
+
+    @Test("A blocked search does not advance the search generation")
+    func blockedSearchDoesNotAdvanceGeneration() async {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.request.platforms = []
+
+        await viewModel.runSearch()
+
+        #expect(viewModel.searchGeneration == 0)
+    }
+
+    @Test("A comparison choice can remain current while filters hide its card")
+    func hiddenComparisonChoiceRemainsCurrent() {
+        let viewModel = SearchViewModel(
+            searchProvider: StubRentalSearchProvider(results: []),
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        let visible = makeTestRecommendation(id: "visible", rentalTotal: 900, bestTotal: 930, distanceKm: 1, dataCompleteness: 0.98, platform: .ehi)
+        let hidden = makeTestRecommendation(id: "hidden", rentalTotal: 950, bestTotal: 980, distanceKm: 2, dataCompleteness: 0.98, platform: .carInc)
+        viewModel.results = [visible, hidden]
+        viewModel.recommendationFilter.platform = .ehi
+
+        viewModel.selectResult(hidden.id)
+
+        #expect(viewModel.selected?.id == hidden.id)
+        #expect(viewModel.isSelectedResultHidden)
+    }
 }
 
 @MainActor

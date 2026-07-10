@@ -251,6 +251,9 @@ final class SearchViewModel: ObservableObject {
     @Published var isLoadingSelectedVehicleInsight = false
     @Published var isSearching = false
     @Published var isLocatingOrigin = false
+    /// Advances once per validated (non-blocked) search so observers can reset
+    /// derived state (e.g. the comparison workspace) when a new result set begins.
+    @Published private(set) var searchGeneration = 0
     @Published var isLoadingOriginSuggestions = false
     @Published var isOriginSuggestionPanelVisible = false
     @Published var originSuggestions: [OriginSuggestion] = []
@@ -299,6 +302,22 @@ final class SearchViewModel: ObservableObject {
         self.now = Date.init
     }
 
+    /// Live initializer that shares a vehicle-insight service with another
+    /// workspace (e.g. comparison) so both fetch through one cache.
+    init(vehicleInsightService: VehicleInsightProviding = VehicleInsightService()) {
+        self.searchProvider = LiveRentalSearchService()
+        self.geocoder = AppleAddressGeocoder()
+        self.mapService = AppleMapService()
+        self.currentLocationProvider = AppleCurrentLocationProvider()
+        self.addressSuggestionProvider = AppleAddressSuggestionProvider()
+        self.railStationSuggestionProvider = AppleRailStationSuggestionProvider()
+        self.vehicleSuggestionStore = VehicleSuggestionStore()
+        self.vehicleInsightService = vehicleInsightService
+        self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
+        self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
+        self.now = Date.init
+    }
+
     init(snapshotProvider: PlatformSnapshotProviding) {
         self.searchProvider = SnapshotRentalSearchService(snapshotProvider: snapshotProvider)
         self.geocoder = CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin)
@@ -339,7 +358,12 @@ final class SearchViewModel: ObservableObject {
     }
 
     var selected: Recommendation? {
-        displayedResults.first { $0.id == selectedId } ?? displayedResults.first
+        results.first { $0.id == selectedId } ?? displayedResults.first
+    }
+
+    var isSelectedResultHidden: Bool {
+        guard !selectedId.isEmpty, results.contains(where: { $0.id == selectedId }) else { return false }
+        return !displayedResults.contains { $0.id == selectedId }
     }
 
     var displayedResults: [Recommendation] {
@@ -593,6 +617,8 @@ final class SearchViewModel: ObservableObject {
             searchDiagnosticSummary = .empty
             return
         }
+
+        searchGeneration += 1
 
         if !retryingFailedPlatformsOnly {
             clearRecommendationFilters()
