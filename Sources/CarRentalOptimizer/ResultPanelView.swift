@@ -6,15 +6,17 @@ import SwiftUI
 struct ResultPanelView: View {
     @EnvironmentObject var viewModel: SearchViewModel
     @EnvironmentObject var monitorViewModel: MonitorCenterViewModel
+    @EnvironmentObject var comparisonViewModel: ComparisonWorkspaceViewModel
     @State private var pendingMonitorRecommendation: Recommendation?
 
     var body: some View {
-        WorkbenchPanel(
-            title: "候选方案",
-            subtitle: panelSubtitle,
-            trailing: panelTrailing
-        ) {
-            Group {
+        VStack(spacing: 0) {
+            WorkbenchPanel(
+                title: "候选方案",
+                subtitle: panelSubtitle,
+                trailing: panelTrailing
+            ) {
+                Group {
                 if viewModel.isSearching {
                     StagedSearchLoadingCard(phase: viewModel.searchProgressPhase)
                 } else if viewModel.results.isEmpty {
@@ -45,11 +47,15 @@ struct ResultPanelView: View {
                                         ResultSignalCard(
                                             rank: index + 1,
                                             recommendation: result,
-                                            isSelected: viewModel.selected?.id == result.id
-                                        ) {
-                                            viewModel.selectResult(result.id)
-                                            pendingMonitorRecommendation = result
-                                        }
+                                            isSelected: viewModel.selected?.id == result.id,
+                                            isComparisonSelected: comparisonViewModel.isSelected(result.id),
+                                            isComparisonSelectionEnabled: comparisonViewModel.canSelect(result.id),
+                                            onToggleComparison: { comparisonViewModel.toggle(result) },
+                                            onMonitor: {
+                                                viewModel.selectResult(result.id)
+                                                pendingMonitorRecommendation = result
+                                            }
+                                        )
                                         .contentShape(Rectangle())
                                         .commandCenterTransition(isEnabled: true, index: index)
                                         .onTapGesture {
@@ -79,6 +85,11 @@ struct ResultPanelView: View {
                 },
                 onSaveManual: { _, _, _, _, _, _ in }
             )
+        }
+
+            if !comparisonViewModel.selectedRecommendations.isEmpty {
+                ComparisonSelectionBar()
+            }
         }
     }
 
@@ -512,6 +523,9 @@ private struct ResultSignalCard: View {
     let rank: Int
     let recommendation: Recommendation
     let isSelected: Bool
+    let isComparisonSelected: Bool
+    let isComparisonSelectionEnabled: Bool
+    let onToggleComparison: () -> Void
     let onMonitor: () -> Void
     @State private var didCopyVehicleName = false
 
@@ -542,6 +556,16 @@ private struct ResultSignalCard: View {
 
     private var cardHeader: some View {
         HStack(alignment: .top, spacing: 12) {
+            Button(action: onToggleComparison) {
+                Image(systemName: isComparisonSelected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isComparisonSelected ? WorkbenchStyle.decisionBlue : WorkbenchStyle.muted)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isComparisonSelectionEnabled)
+            .accessibilityLabel(isComparisonSelected ? "从对比中移除" : "加入对比")
+            .help(isComparisonSelectionEnabled ? "选择此方案进行对比" : "最多选择 4 个方案")
+
             rankBadge
 
             VStack(alignment: .leading, spacing: 6) {

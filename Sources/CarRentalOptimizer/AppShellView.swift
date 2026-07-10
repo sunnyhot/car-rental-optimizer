@@ -4,6 +4,7 @@ struct AppShellView: View {
     @ObservedObject var navigationModel: AppNavigationModel
     @EnvironmentObject private var searchViewModel: SearchViewModel
     @EnvironmentObject private var monitorViewModel: MonitorCenterViewModel
+    @EnvironmentObject private var comparisonViewModel: ComparisonWorkspaceViewModel
 
     var body: some View {
         ZStack {
@@ -40,17 +41,29 @@ struct AppShellView: View {
                     idealWidth: AppWindowLayout.searchPanelIdealWidth,
                     maxWidth: AppWindowLayout.searchPanelMaximumWidth
                 )
-            ResultPanelView()
-                .frame(
-                    minWidth: AppWindowLayout.resultsPanelMinimumWidth,
-                    idealWidth: AppWindowLayout.resultsPanelIdealWidth
-                )
-            DetailPanelView()
-                .frame(
-                    minWidth: AppWindowLayout.detailPanelMinimumWidth,
-                    idealWidth: AppWindowLayout.detailPanelIdealWidth,
-                    maxWidth: AppWindowLayout.detailPanelMaximumWidth
-                )
+
+            if comparisonViewModel.isComparing {
+                ComparisonMatrixView()
+                    .frame(
+                        minWidth: AppWindowLayout.resultsPanelMinimumWidth + AppWindowLayout.detailPanelMinimumWidth,
+                        idealWidth: AppWindowLayout.resultsPanelIdealWidth + AppWindowLayout.detailPanelIdealWidth
+                    )
+            } else {
+                ResultPanelView()
+                    .frame(minWidth: AppWindowLayout.resultsPanelMinimumWidth, idealWidth: AppWindowLayout.resultsPanelIdealWidth)
+                DetailPanelView()
+                    .frame(
+                        minWidth: AppWindowLayout.detailPanelMinimumWidth,
+                        idealWidth: AppWindowLayout.detailPanelIdealWidth,
+                        maxWidth: AppWindowLayout.detailPanelMaximumWidth
+                    )
+            }
+        }
+        .onChange(of: searchViewModel.searchGeneration) { _, _ in
+            comparisonViewModel.resetForNewSearch()
+        }
+        .onChange(of: searchViewModel.results) { _, results in
+            comparisonViewModel.reconcile(with: results)
         }
     }
 }

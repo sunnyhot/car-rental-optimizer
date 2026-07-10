@@ -3,9 +3,16 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var viewModel: SearchViewModel
     @StateObject private var monitorViewModel: MonitorCenterViewModel
+    @StateObject private var comparisonViewModel: ComparisonWorkspaceViewModel
 
     init() {
-        _viewModel = StateObject(wrappedValue: SearchViewModel())
+        let vehicleInsightService = VehicleInsightService()
+        _viewModel = StateObject(
+            wrappedValue: SearchViewModel(vehicleInsightService: vehicleInsightService)
+        )
+        _comparisonViewModel = StateObject(
+            wrappedValue: ComparisonWorkspaceViewModel(vehicleInsightService: vehicleInsightService)
+        )
         let store: JSONMonitorStore
         do {
             store = try JSONMonitorStore.live()
@@ -30,6 +37,7 @@ struct ContentView: View {
         MainView()
             .environmentObject(viewModel)
             .environmentObject(monitorViewModel)
+            .environmentObject(comparisonViewModel)
             .task {
                 viewModel.startInitialCurrentLocationRefresh()
                 try? await monitorViewModel.reload()

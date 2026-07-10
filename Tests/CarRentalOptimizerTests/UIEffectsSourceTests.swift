@@ -157,4 +157,19 @@ struct UIEffectsSourceTests {
         #expect(platform.contains("WorkbenchSheetShell("))
         #expect(platform.contains("ActionStatusRow("))
     }
+
+    @Test("Search workspace exposes multi-select and the in-place comparison matrix")
+    func searchWorkspaceExposesComparison() throws {
+        let result = try String(contentsOfFile: "Sources/CarRentalOptimizer/ResultPanelView.swift", encoding: .utf8)
+        let shell = try String(contentsOfFile: "Sources/CarRentalOptimizer/AppShellView.swift", encoding: .utf8)
+        let matrix = try String(contentsOfFile: "Sources/CarRentalOptimizer/ComparisonMatrixView.swift", encoding: .utf8)
+
+        #expect(result.contains("comparisonViewModel.toggle(result)"))
+        #expect(result.contains("ComparisonSelectionBar("))
+        #expect(shell.contains("comparisonViewModel.isComparing"))
+        #expect(shell.contains("ComparisonMatrixView()"))
+        #expect(matrix.contains("只看差异"))
+        #expect(matrix.contains("设为当前方案"))
+        #expect(matrix.contains("打开官方页面"))
+    }
 }

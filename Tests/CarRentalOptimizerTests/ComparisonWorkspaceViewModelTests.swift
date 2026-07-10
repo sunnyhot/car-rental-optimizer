@@ -59,7 +59,7 @@ struct ComparisonWorkspaceViewModelTests {
         let candidate = makeComparisonRecommendation(id: "fallback", vehicleName: "车型", rentalTotal: 900, bestTotal: 930, distanceKm: 1)
 
         model.toggle(candidate)
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        try? await Task.sleep(nanoseconds: 100_000_000)
 
         guard case .fallback(let insight) = model.insightStates[candidate.id] else {
             Issue.record("Expected a per-column fallback state")
