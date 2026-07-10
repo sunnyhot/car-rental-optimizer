@@ -2,22 +2,24 @@ import AppKit
 import SwiftUI
 
 enum AppWindowLayout {
-    static let searchPanelMinimumWidth: CGFloat = 340
-    static let searchPanelIdealWidth: CGFloat = 380
-    static let searchPanelMaximumWidth: CGFloat = 460
+    static let navigationRailWidth: CGFloat = 56
 
-    static let resultsPanelMinimumWidth: CGFloat = 560
-    static let resultsPanelIdealWidth: CGFloat = 720
+    static let searchPanelMinimumWidth: CGFloat = 320
+    static let searchPanelIdealWidth: CGFloat = 360
+    static let searchPanelMaximumWidth: CGFloat = 430
+
+    static let resultsPanelMinimumWidth: CGFloat = 520
+    static let resultsPanelIdealWidth: CGFloat = 680
 
     static let detailPanelMinimumWidth: CGFloat = 340
     static let detailPanelIdealWidth: CGFloat = 400
     static let detailPanelMaximumWidth: CGFloat = 460
 
-    static let splitHandleReserveWidth: CGFloat = 24
+    static let splitHandleReserveWidth: CGFloat = 40
 
     static let minimumWidth: CGFloat = 1280
     static let minimumHeight: CGFloat = 760
-    static let defaultWidth: CGFloat = 1320
+    static let defaultWidth: CGFloat = 1380
     static let defaultHeight: CGFloat = 860
 
     static var minimumContentSize: CGSize {

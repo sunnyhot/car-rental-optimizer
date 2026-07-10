@@ -3,14 +3,17 @@ import Testing
 
 @Suite("App window layout")
 struct AppWindowLayoutTests {
-    @Test("Minimum window width covers the three-column workbench")
-    func minimumWindowWidthCoversThreeColumnWorkbench() {
-        let requiredWidth = AppWindowLayout.searchPanelMinimumWidth
+    @Test("Minimum window width covers navigation and the three-column workbench")
+    func minimumWindowWidthCoversNavigationAndWorkbench() {
+        let requiredWidth = AppWindowLayout.navigationRailWidth
+            + AppWindowLayout.searchPanelMinimumWidth
             + AppWindowLayout.resultsPanelMinimumWidth
             + AppWindowLayout.detailPanelMinimumWidth
             + AppWindowLayout.splitHandleReserveWidth
 
+        #expect(AppWindowLayout.navigationRailWidth == 56)
         #expect(AppWindowLayout.minimumWidth >= requiredWidth)
+        #expect(AppWindowLayout.minimumWidth == 1280)
         #expect(AppWindowLayout.defaultWidth >= AppWindowLayout.minimumWidth)
     }
 
