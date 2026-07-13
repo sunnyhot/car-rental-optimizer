@@ -29,13 +29,13 @@ GitHub Release 里的当前 ZIP 是本机测试包。macOS 会对浏览器下载
 本机测试安装请用：
 
 ```bash
-scripts/install-local-app.sh build/CarRentalOptimizer-v0.9.11.zip
+scripts/install-local-app.sh build/CarRentalOptimizer-v0.9.12.zip
 ```
 
 或下载 release 后：
 
 ```bash
-scripts/install-local-app.sh ~/Downloads/CarRentalOptimizer-v0.9.11.zip
+scripts/install-local-app.sh ~/Downloads/CarRentalOptimizer-v0.9.12.zip
 ```
 
 脚本会复制到 `/Applications/租车比价助手.app`、清除 quarantine、把真实可执行文件安装到
