@@ -243,6 +243,57 @@ struct LiveRentalSearchServiceTests {
         #expect(!isRetryableZucheTransportError(URLError(.userAuthenticationRequired)))
     }
 
+    @Test("CAR Inc recognizes only gateway rate-limit messages")
+    func carIncRecognizesGatewayRateLimitMessages() {
+        #expect(isZucheRateLimitMessage("访问频繁，请稍后再试"))
+        #expect(isZucheRateLimitMessage("请求过于频繁"))
+        #expect(!isZucheRateLimitMessage("当前条件没有可订车型"))
+    }
+
+    @Test("CAR Inc retries a temporary gateway rate limit")
+    func carIncRetriesTemporaryGatewayRateLimit() async throws {
+        let throttle = ZucheRequestThrottle(minimumInterval: 0)
+        var attempts = 0
+
+        let value: String = try await withZucheRateLimitRetry(
+            throttle: throttle,
+            baseCooldown: 0
+        ) {
+            attempts += 1
+            if attempts == 1 {
+                throw ZucheRateLimitError(message: "访问频繁，请稍后再试")
+            }
+            return "success"
+        }
+
+        #expect(value == "success")
+        #expect(attempts == 2)
+    }
+
+    @Test("CAR Inc stops retrying a persistent gateway rate limit")
+    func carIncStopsRetryingPersistentGatewayRateLimit() async {
+        let throttle = ZucheRequestThrottle(minimumInterval: 0)
+        var attempts = 0
+
+        do {
+            let _: String = try await withZucheRateLimitRetry(
+                throttle: throttle,
+                maxAttempts: 3,
+                baseCooldown: 0
+            ) {
+                attempts += 1
+                throw ZucheRateLimitError(message: "访问频繁，请稍后再试")
+            }
+            Issue.record("Expected the persistent rate limit to be returned")
+        } catch let error as ZucheRateLimitError {
+            #expect(error.localizedDescription == "访问频繁，请稍后再试")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        #expect(attempts == 3)
+    }
+
     @Test("CAR Inc vehicle search plans one current city and one station city inside radius")
     func carIncVehicleSearchPlansOneCurrentCityAndOneStationCityInsideRadius() {
         let request = makeSearchRequest(
