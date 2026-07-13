@@ -189,7 +189,7 @@ private struct ZucheFeeEnrichment {
 }
 
 let maxZucheVehicleSearchCityCount = 60
-private let maxConcurrentZucheCityQueries = 6
+let maxConcurrentZucheCityQueries = 3
 private let maxConcurrentZucheConfirmationRequests = 4
 private let zucheGatewayRequestTimeoutSeconds: TimeInterval = 10
 
@@ -428,6 +428,7 @@ private final class ZucheAPIClient {
             let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
             let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let plannedCities = plannedZucheCities(from: candidateCities, hasVehicleQuery: hasVehicleQuery)
+            let requestThrottle = ZucheRequestThrottle(minimumInterval: 0.12)
             let isCityPlanLimited = hasVehicleQuery && plannedCities.count < candidateCities.count
             var citiesByID: [String: ZucheCity] = [:]
             for city in cities.allCities {
@@ -457,7 +458,8 @@ private final class ZucheAPIClient {
                             candidate: candidate,
                             request: request,
                             timeRange: timeRange,
-                            hasVehicleQuery: hasVehicleQuery
+                            hasVehicleQuery: hasVehicleQuery,
+                            throttle: requestThrottle
                         )
                     }
                 }
@@ -546,7 +548,8 @@ private final class ZucheAPIClient {
         candidate: ZucheCandidateCity,
         request: SearchRequest,
         timeRange: PlatformQueryTimeRange,
-        hasVehicleQuery: Bool
+        hasVehicleQuery: Bool,
+        throttle: ZucheRequestThrottle
     ) async -> ZucheCityQueryResult {
         var listingsByKey: [String: RentalListing] = [:]
         var nearestStoreBatch: StoreListingsBatch?
@@ -555,9 +558,10 @@ private final class ZucheAPIClient {
 
         let deptList: ZucheDeptListContent
         do {
-            deptList = try await postGateway(
+            deptList = try await postCityGateway(
                 uri: "/action/carrctapi/order/deptList/v1",
-                payload: ["cityId": city.cityId, "entrance": 1, "pickupFlag": 1]
+                payload: ["cityId": city.cityId, "entrance": 1, "pickupFlag": 1],
+                throttle: throttle
             )
         } catch {
             errors.append("\(city.cityName)：\(error.localizedDescription)")
@@ -587,7 +591,7 @@ private final class ZucheAPIClient {
 
         let chooseCar: ZucheChooseCarContent
         do {
-            chooseCar = try await postGateway(
+            chooseCar = try await postCityGateway(
                 uri: "/resource/carrctapi/order/chooseCar/v3",
                 payload: [
                     "pickupCityId": city.cityId,
@@ -598,7 +602,8 @@ private final class ZucheAPIClient {
                     "userChooseLat": String(selectedStore.location.lat),
                     "userChooseLon": String(selectedStore.location.lng),
                     "holidaysWaitingFlag": 0,
-                ]
+                ],
+                throttle: throttle
             )
         } catch {
             errors.append("\(city.cityName)：\(error.localizedDescription)")
@@ -642,10 +647,25 @@ private final class ZucheAPIClient {
         )
     }
 
+    private func postCityGateway<Response: Decodable>(
+        uri: String,
+        payload: [String: Any],
+        throttle: ZucheRequestThrottle
+    ) async throws -> Response {
+        try await withZucheRateLimitRetry(throttle: throttle) { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.postGateway(uri: uri, payload: payload)
+        }
+    }
+
     private func postGateway<Response: Decodable>(uri: String, payload: [String: Any]) async throws -> Response {
         let envelope: ZucheResponse<Response> = try await postGatewayForm(uri: uri, payload: payload)
         guard envelope.code == 1 || envelope.status == "SUCCESS", let content = envelope.content else {
-            throw PlatformAPIError.message(envelope.msg ?? "神州接口返回异常")
+            let message = envelope.msg ?? "神州接口返回异常"
+            if isZucheRateLimitMessage(message) {
+                throw ZucheRateLimitError(message: message)
+            }
+            throw PlatformAPIError.message(message)
         }
         return content
     }

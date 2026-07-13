@@ -294,6 +294,17 @@ struct LiveRentalSearchServiceTests {
         #expect(attempts == 3)
     }
 
+    @Test("CAR Inc city scans share conservative throttling without shrinking coverage")
+    func carIncCityScansShareConservativeThrottlingWithoutShrinkingCoverage() throws {
+        let source = try liveRentalSearchServiceSource()
+
+        #expect(maxConcurrentZucheCityQueries == 3)
+        #expect(maxZucheVehicleSearchCityCount == 60)
+        #expect(source.contains("ZucheRequestThrottle(minimumInterval: 0.12)"))
+        #expect(source.contains("postCityGateway("))
+        #expect(source.contains("throttle: requestThrottle"))
+    }
+
     @Test("CAR Inc vehicle search plans one current city and one station city inside radius")
     func carIncVehicleSearchPlansOneCurrentCityAndOneStationCityInsideRadius() {
         let request = makeSearchRequest(
