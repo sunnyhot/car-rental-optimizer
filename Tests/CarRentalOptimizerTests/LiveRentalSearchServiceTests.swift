@@ -111,6 +111,25 @@ struct LiveRentalSearchServiceTests {
         #expect(result.listings.isEmpty)
     }
 
+    @Test("CAR Inc uses a longer outer timeout without changing the default platform timeout")
+    func carIncUsesLongerOuterTimeoutWithoutChangingDefaultTimeout() {
+        #expect(livePlatformQueryTimeoutSeconds == 35)
+        #expect(liveZucheQueryTimeoutSeconds == 60)
+    }
+
+    @Test("CAR Inc city query concurrency scales with the planned city count")
+    func carIncCityQueryConcurrencyScalesWithPlannedCityCount() {
+        #expect(zucheCityQueryConcurrency(for: 0) == 0)
+        #expect(zucheCityQueryConcurrency(for: 1) == 1)
+        #expect(zucheCityQueryConcurrency(for: 12) == 3)
+        #expect(zucheCityQueryConcurrency(for: 13) == 4)
+        #expect(zucheCityQueryConcurrency(for: 30) == 4)
+        #expect(zucheCityQueryConcurrency(for: 31) == 6)
+        #expect(zucheCityQueryConcurrency(for: 48) == 6)
+        #expect(zucheCityQueryConcurrency(for: 49) == 8)
+        #expect(zucheCityQueryConcurrency(for: 60) == 8)
+    }
+
     @Test("eHi obfuscated price digits convert to usable numeric prices")
     func ehiObfuscatedPriceDigitsConvertToUsableNumericPrices() throws {
         let context = try #require(JSContext())
@@ -294,15 +313,16 @@ struct LiveRentalSearchServiceTests {
         #expect(attempts == 3)
     }
 
-    @Test("CAR Inc city scans share conservative throttling without shrinking coverage")
-    func carIncCityScansShareConservativeThrottlingWithoutShrinkingCoverage() throws {
+    @Test("CAR Inc city scans use dynamic concurrency and shared throttling without shrinking coverage")
+    func carIncCityScansUseDynamicConcurrencyAndSharedThrottlingWithoutShrinkingCoverage() throws {
         let source = try liveRentalSearchServiceSource()
 
-        #expect(maxConcurrentZucheCityQueries == 3)
         #expect(maxZucheVehicleSearchCityCount == 60)
+        #expect(source.contains("zucheCityQueryConcurrency(for: plannedCities.count)"))
         #expect(source.contains("ZucheRequestThrottle(minimumInterval: 0.12)"))
         #expect(source.contains("postCityGateway("))
         #expect(source.contains("throttle: requestThrottle"))
+        #expect(source.contains("timeoutSeconds: liveZucheQueryTimeoutSeconds"))
     }
 
     @Test("CAR Inc vehicle search plans one current city and one station city inside radius")

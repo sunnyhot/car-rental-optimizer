@@ -7,6 +7,7 @@ protocol RentalSearchProviding {
 }
 
 let livePlatformQueryTimeoutSeconds: TimeInterval = 35
+let liveZucheQueryTimeoutSeconds: TimeInterval = 60
 
 @MainActor
 func platformResultWithTimeout(
@@ -81,7 +82,10 @@ final class LiveRentalSearchService: NSObject, RentalSearchProviding {
         var results: [PlatformEvidenceResult] = []
 
         if request.platforms.contains(.carInc) {
-            results.append(await platformResultWithTimeout(platform: .carInc) {
+            results.append(await platformResultWithTimeout(
+                platform: .carInc,
+                timeoutSeconds: liveZucheQueryTimeoutSeconds
+            ) {
                 await self.zucheClient.search(request: request)
             })
         }
@@ -189,9 +193,25 @@ private struct ZucheFeeEnrichment {
 }
 
 let maxZucheVehicleSearchCityCount = 60
-let maxConcurrentZucheCityQueries = 3
 private let maxConcurrentZucheConfirmationRequests = 4
 private let zucheGatewayRequestTimeoutSeconds: TimeInterval = 10
+
+func zucheCityQueryConcurrency(for cityCount: Int) -> Int {
+    guard cityCount > 0 else { return 0 }
+
+    let limit: Int
+    switch cityCount {
+    case ...12:
+        limit = 3
+    case ...30:
+        limit = 4
+    case ...48:
+        limit = 6
+    default:
+        limit = 8
+    }
+    return min(cityCount, limit)
+}
 
 struct ZucheGatewayEndpoint: Equatable {
     let url: URL
@@ -428,6 +448,7 @@ private final class ZucheAPIClient {
             let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
             let hasVehicleQuery = !request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let plannedCities = plannedZucheCities(from: candidateCities, hasVehicleQuery: hasVehicleQuery)
+            let cityQueryConcurrency = zucheCityQueryConcurrency(for: plannedCities.count)
             let requestThrottle = ZucheRequestThrottle(minimumInterval: 0.12)
             let isCityPlanLimited = hasVehicleQuery && plannedCities.count < candidateCities.count
             var citiesByID: [String: ZucheCity] = [:]
@@ -441,7 +462,7 @@ private final class ZucheAPIClient {
 
             // Query each planned city concurrently. City planning stays breadth-
             // limited by maxZucheVehicleSearchCityCount; within that bound every
-            // city is fetched in parallel (capped at maxConcurrentZucheCityQueries)
+            // city is fetched in parallel (capped by the dynamic concurrency tier)
             // so a 500km radius no longer times out on the nearest handful only.
             await withTaskGroup(of: ZucheCityQueryResult?.self) { group in
                 func addNextCity(at index: Int) {
@@ -465,7 +486,7 @@ private final class ZucheAPIClient {
                 }
 
                 var nextIndex = 0
-                for _ in 0..<min(maxConcurrentZucheCityQueries, plannedCities.count) {
+                for _ in 0..<cityQueryConcurrency {
                     addNextCity(at: nextIndex)
                     nextIndex += 1
                 }
