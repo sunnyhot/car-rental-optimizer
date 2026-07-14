@@ -284,6 +284,7 @@ final class SearchViewModel: ObservableObject {
     private var requiresOriginCandidateSelection = false
     private var latestSuccessfulResults: [Recommendation] = []
     private var latestSuccessfulSelectedId = ""
+    private var latestSuccessfulRequest: SearchRequest?
     private var latestEvidenceRequest: SearchRequest?
     private var latestEvidenceResultsByPlatform: [PlatformId: PlatformEvidenceResult] = [:]
     private var selectedVehicleInsightRequestID = 0
@@ -658,7 +659,7 @@ final class SearchViewModel: ObservableObject {
                 },
                 recommendations: []
             )
-            restoreLatestSuccessfulResultsIfAvailable()
+            restoreLatestSuccessfulResultsIfAvailable(for: liveRequest)
             return
         }
 
@@ -675,7 +676,7 @@ final class SearchViewModel: ObservableObject {
             status = formatNoAPIListingsStatus(evidenceResults)
             searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: [])
             searchProgressPhase = .completed
-            restoreLatestSuccessfulResultsIfAvailable()
+            restoreLatestSuccessfulResultsIfAvailable(for: liveRequest)
             return
         }
 
@@ -688,7 +689,7 @@ final class SearchViewModel: ObservableObject {
 
         results = recommendations
         selectFirstDisplayedResult()
-        recordSuccessfulResults(recommendations)
+        recordSuccessfulResults(recommendations, request: liveRequest)
         recordVehicleSuggestions(from: recommendations)
         searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: recommendations)
         status = formatSearchCompletionStatus(request: liveRequest, resultCount: recommendations.count)
@@ -1012,16 +1013,20 @@ final class SearchViewModel: ObservableObject {
         vehicleSuggestionStore.recordSearchResults(names, now: now())
     }
 
-    private func recordSuccessfulResults(_ recommendations: [Recommendation]) {
+    private func recordSuccessfulResults(_ recommendations: [Recommendation], request: SearchRequest) {
         latestSuccessfulResults = recommendations
         latestSuccessfulSelectedId = selectedId
+        latestSuccessfulRequest = request
         lastSuccessfulSearchAt = now()
         isShowingStaleResults = false
         retainedResultsNotice = nil
     }
 
-    private func restoreLatestSuccessfulResultsIfAvailable() {
-        guard !latestSuccessfulResults.isEmpty, let lastSuccessfulSearchAt else {
+    private func restoreLatestSuccessfulResultsIfAvailable(for request: SearchRequest) {
+        guard !latestSuccessfulResults.isEmpty,
+              let lastSuccessfulSearchAt,
+              latestSuccessfulRequest == request
+        else {
             results = []
             selectedId = ""
             isShowingStaleResults = false

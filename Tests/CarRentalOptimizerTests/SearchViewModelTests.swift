@@ -421,32 +421,76 @@ struct SearchViewModelTests {
         #expect(viewModel.status.contains("请选择平台"))
     }
 
-    @Test("Failed search keeps last successful recommendations as stale results")
-    func failedSearchKeepsLastSuccessfulRecommendationsAsStaleResults() async {
-        let viewModel = SearchViewModel(
-            searchProvider: StubRentalSearchProvider(results: [
+    @Test("Failed identical search keeps last successful recommendations as stale results")
+    func failedIdenticalSearchKeepsLastSuccessfulRecommendationsAsStaleResults() async {
+        let provider = SequencedRentalSearchProvider(responses: [
+            [
                 PlatformEvidenceResult(
                     platform: .ehi,
                     status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "一嗨已返回报价。", sourceUrl: "https://booking.1hai.cn/"),
                     listings: [makeTestListing()]
                 ),
-            ]),
-            geocoder: FailingAddressGeocoder(),
+            ],
+            [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .parseFailed, message: "一嗨查询超时。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: []
+                ),
+            ],
+        ])
+        let viewModel = SearchViewModel(
+            searchProvider: provider,
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
             mapService: EstimatedMapService(),
             now: { Date(timeIntervalSince1970: 1_800_000_000) }
         )
+        viewModel.request.platforms = [.ehi]
 
         await viewModel.runSearch()
         let successfulResultIDs = viewModel.results.map(\.id)
-
-        viewModel.request.originLabel = "无法识别的位置"
         await viewModel.runSearch()
 
         #expect(!successfulResultIDs.isEmpty)
         #expect(viewModel.results.map(\.id) == successfulResultIDs)
         #expect(viewModel.isShowingStaleResults)
         #expect(viewModel.retainedResultsNotice?.title == "显示上次成功结果")
-        #expect(viewModel.searchProgressPhase == .failed)
+    }
+
+    @Test("Failed search with a changed vehicle does not restore previous candidates")
+    func failedSearchWithChangedVehicleDoesNotRestorePreviousCandidates() async {
+        let provider = SequencedRentalSearchProvider(responses: [
+            [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "一嗨已返回报价。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: [makeTestListing()]
+                ),
+            ],
+            [
+                PlatformEvidenceResult(
+                    platform: .ehi,
+                    status: PlatformEvidenceStatus(platform: .ehi, kind: .parseFailed, message: "一嗨查询超时。", sourceUrl: "https://booking.1hai.cn/"),
+                    listings: []
+                ),
+            ],
+        ])
+        let viewModel = SearchViewModel(
+            searchProvider: provider,
+            geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin),
+            mapService: EstimatedMapService()
+        )
+        viewModel.request.platforms = [.ehi]
+
+        await viewModel.runSearch()
+        #expect(!viewModel.results.isEmpty)
+
+        viewModel.request.vehicleQuery = "尚界 H5"
+        await viewModel.runSearch()
+
+        #expect(viewModel.results.isEmpty)
+        #expect(!viewModel.isShowingStaleResults)
+        #expect(viewModel.retainedResultsNotice == nil)
     }
 
     @Test("Retry search requests failed platforms only and reuses successful evidence")
