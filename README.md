@@ -2,6 +2,17 @@
 
 macOS 原生桌面应用，静默调用一嗨和神州官方接口，比较真实租车总成本（租车费 + 到店路线估算）。
 
+## 安装
+
+推荐 Homebrew（自动跟随最新 Release，且不受 Gatekeeper 未公证拦截）：
+
+```bash
+brew tap sunnyhot/tap
+brew install --cask sunnyhot/tap/car-rental-optimizer
+```
+
+或从 [GitHub Releases](https://github.com/sunnyhot/car-rental-optimizer/releases/latest) 下载 zip，用 `scripts/install-local-app.sh` 安装（见下方「安装本机测试包」）。
+
 ## 构建（Swift/SwiftUI）
 
 ### 前置条件
