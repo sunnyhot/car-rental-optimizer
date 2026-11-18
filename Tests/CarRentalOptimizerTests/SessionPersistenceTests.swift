@@ -3,7 +3,7 @@ import Testing
 import WebKit
 @testable import CarRentalOptimizer
 
-@Suite("Session persistence") @MainActor
+@Suite("Session persistence", .serialized) @MainActor
 struct SessionPersistenceTests {
     @Test func restoreMustNotOverwriteANewerBrowserCookie() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
