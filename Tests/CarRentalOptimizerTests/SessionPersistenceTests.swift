@@ -96,14 +96,10 @@ struct SessionPersistenceTests {
         let store = firstDataStore.httpCookieStore
         let coordinator = PlatformSessionPersistence(store: store, ehiFile: ehiFile, zucheFile: zucheFile)
         await coordinator.start()
-        let rawObserver = RawCookieStoreObserver()
-        store.add(rawObserver)
-        defer { store.remove(rawObserver) }
         let revision = coordinator.saveRevision
         await set(rotated, in: store)
         await waitForSave(coordinator, after: revision)
         let saved = try JSONDecoder().decode([PersistedEhiCookie].self, from: Data(contentsOf: ehiFile))
-        print("COORDINATOR_OBSERVER kind=update rawCallbacks=\(rawObserver.callbackCount) revisionBefore=\(revision) revisionAfter=\(coordinator.saveRevision) lastSaveSucceeded=\(String(describing: coordinator.lastSaveSucceeded)) savedValues=\(saved.map(\.value))")
         #expect(saved.first?.value == "rotated")
         // A stale backup must not be replayed by another query in this process.
         try oldData.write(to: ehiFile)
@@ -134,14 +130,10 @@ struct SessionPersistenceTests {
         await coordinator.applyAuthenticatedResponseCookies([responseCookie], for: url)
         var saved = try JSONDecoder().decode([PersistedZucheCookie].self, from: Data(contentsOf: zucheFile))
         #expect(saved.first?.value == "new")
-        let rawObserver = RawCookieStoreObserver()
-        dataStore.httpCookieStore.add(rawObserver)
-        defer { dataStore.httpCookieStore.remove(rawObserver) }
         let revision = coordinator.saveRevision
         await withCheckedContinuation { continuation in dataStore.httpCookieStore.delete(responseCookie) { continuation.resume() } }
         await waitForSave(coordinator, after: revision)
         saved = try JSONDecoder().decode([PersistedZucheCookie].self, from: Data(contentsOf: zucheFile))
-        print("COORDINATOR_OBSERVER kind=delete rawCallbacks=\(rawObserver.callbackCount) revisionBefore=\(revision) revisionAfter=\(coordinator.saveRevision) lastSaveSucceeded=\(String(describing: coordinator.lastSaveSucceeded)) savedValues=\(saved.map(\.value))")
         #expect(saved.isEmpty)
         await coordinator.start()
         #expect(await all(in: dataStore.httpCookieStore).isEmpty)
