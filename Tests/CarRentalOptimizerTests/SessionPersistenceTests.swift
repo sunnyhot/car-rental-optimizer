@@ -45,6 +45,7 @@ struct SessionPersistenceTests {
         let oldData = try JSONEncoder().encode(EhiCookieVault.persistableCookies(from: [old]))
         try oldData.write(to: ehiFile)
         let firstDataStore = WKWebsiteDataStore.nonPersistent()
+        let firstWebView = webView(for: firstDataStore)
         let store = firstDataStore.httpCookieStore
         let coordinator = PlatformSessionPersistence(store: store, ehiFile: ehiFile, zucheFile: zucheFile)
         await coordinator.start()
@@ -60,18 +61,20 @@ struct SessionPersistenceTests {
         #expect(await coordinator.flush())
         coordinator.stop()
         let secondDataStore = WKWebsiteDataStore.nonPersistent()
+        let secondWebView = webView(for: secondDataStore)
         let restarted = PlatformSessionPersistence(store: secondDataStore.httpCookieStore, ehiFile: ehiFile, zucheFile: zucheFile)
         await restarted.start()
         #expect(await all(in: secondDataStore.httpCookieStore).first { $0.name == "session" }?.value == "rotated")
         let permissions = try FileManager.default.attributesOfItem(atPath: ehiFile.path)[.posixPermissions] as? NSNumber
         #expect(permissions?.intValue == 0o600)
         restarted.stop()
-        withExtendedLifetime((firstDataStore, secondDataStore)) {}
+        withExtendedLifetime((firstDataStore, secondDataStore, firstWebView, secondWebView)) {}
     }
 
     @Test func authenticatedResponseUpdatesAreSavedAndLogoutDoesNotResurrectThem() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let dataStore = WKWebsiteDataStore.nonPersistent()
+        let webView = webView(for: dataStore)
         let ehiFile = folder.appendingPathComponent("ehi.json"), zucheFile = folder.appendingPathComponent("zuche.json")
         let coordinator = PlatformSessionPersistence(store: dataStore.httpCookieStore, ehiFile: ehiFile, zucheFile: zucheFile)
         await coordinator.start()
@@ -88,7 +91,7 @@ struct SessionPersistenceTests {
         await coordinator.start()
         #expect(await all(in: dataStore.httpCookieStore).isEmpty)
         coordinator.stop()
-        withExtendedLifetime(dataStore) {}
+        withExtendedLifetime((dataStore, webView)) {}
     }
 
     @Test func failedPersistenceIsReportedInsteadOfPretendingSuccess() async throws {
@@ -110,6 +113,12 @@ struct SessionPersistenceTests {
         policy.urlSession(.shared, task: task, willPerformHTTPRedirection: response, newRequest: redirected) { allowed = $0 != nil }
         #expect(!allowed)
         task.cancel()
+    }
+
+    private func webView(for dataStore: WKWebsiteDataStore) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = dataStore
+        return WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
     }
 
     private func waitForSave(_ coordinator: PlatformSessionPersistence, after revision: Int) async {
