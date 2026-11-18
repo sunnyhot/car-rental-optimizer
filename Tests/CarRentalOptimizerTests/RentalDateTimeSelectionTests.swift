@@ -17,10 +17,11 @@ struct RentalDateTimeSelectionTests {
     }
 
     @Test func draftChangesDoNotAlterCommittedRange() throws {
-        let committed = RentalDateTimeSelection(pickup: try date("2027-01-15 10:00"), returnDate: try date("2027-02-14 10:00"))
+        let expectedPickup = try date("2027-01-15 10:00")
+        let committed = RentalDateTimeSelection(pickup: expectedPickup, returnDate: try date("2027-02-14 10:00"))
         var draft = committed
         draft.pickup = RentalDateTimeSelection.replacingDay(of: draft.pickup, with: try date("2027-03-01 00:00"))
-        #expect(committed.pickup == (try date("2027-01-15 10:00")))
+        #expect(committed.pickup == expectedPickup)
         #expect(draft.returnDate == committed.returnDate)
         #expect(draft.validationMessage(now: try date("2026-11-16 12:00")) != nil)
     }
