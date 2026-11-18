@@ -3,6 +3,36 @@ import Testing
 import WebKit
 @testable import CarRentalOptimizer
 
+@MainActor
+private final class WebViewNavigationDelegate: NSObject, WKNavigationDelegate {
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    func loadLocalHTML(in webView: WKWebView) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            _ = webView.loadHTMLString("<html><body>Cookie observer fixture</body></html>", baseURL: URL(string: "http://127.0.0.1")!)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        fail(with: error)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        fail(with: error)
+    }
+
+    private func fail(with error: Error) {
+        continuation?.resume(throwing: error)
+        continuation = nil
+    }
+}
+
 @Suite("Session persistence", .serialized) @MainActor
 struct SessionPersistenceTests {
     @Test func restoreMustNotOverwriteANewerBrowserCookie() async throws {
@@ -45,7 +75,7 @@ struct SessionPersistenceTests {
         let oldData = try JSONEncoder().encode(EhiCookieVault.persistableCookies(from: [old]))
         try oldData.write(to: ehiFile)
         let firstDataStore = WKWebsiteDataStore.nonPersistent()
-        let firstWebView = webView(for: firstDataStore)
+        let (firstWebView, firstNavigationDelegate) = try await loadedWebView(for: firstDataStore)
         let store = firstDataStore.httpCookieStore
         let coordinator = PlatformSessionPersistence(store: store, ehiFile: ehiFile, zucheFile: zucheFile)
         await coordinator.start()
@@ -68,13 +98,13 @@ struct SessionPersistenceTests {
         let permissions = try FileManager.default.attributesOfItem(atPath: ehiFile.path)[.posixPermissions] as? NSNumber
         #expect(permissions?.intValue == 0o600)
         restarted.stop()
-        withExtendedLifetime((firstDataStore, secondDataStore, firstWebView, secondWebView)) {}
+        withExtendedLifetime((firstDataStore, secondDataStore, firstWebView, secondWebView, firstNavigationDelegate)) {}
     }
 
     @Test func authenticatedResponseUpdatesAreSavedAndLogoutDoesNotResurrectThem() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let dataStore = WKWebsiteDataStore.nonPersistent()
-        let webView = webView(for: dataStore)
+        let (webView, navigationDelegate) = try await loadedWebView(for: dataStore)
         let ehiFile = folder.appendingPathComponent("ehi.json"), zucheFile = folder.appendingPathComponent("zuche.json")
         let coordinator = PlatformSessionPersistence(store: dataStore.httpCookieStore, ehiFile: ehiFile, zucheFile: zucheFile)
         await coordinator.start()
@@ -91,7 +121,7 @@ struct SessionPersistenceTests {
         await coordinator.start()
         #expect(await all(in: dataStore.httpCookieStore).isEmpty)
         coordinator.stop()
-        withExtendedLifetime((dataStore, webView)) {}
+        withExtendedLifetime((dataStore, webView, navigationDelegate)) {}
     }
 
     @Test func failedPersistenceIsReportedInsteadOfPretendingSuccess() async throws {
@@ -119,6 +149,14 @@ struct SessionPersistenceTests {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
         return WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
+    }
+
+    private func loadedWebView(for dataStore: WKWebsiteDataStore) async throws -> (WKWebView, WebViewNavigationDelegate) {
+        let webView = webView(for: dataStore)
+        let delegate = WebViewNavigationDelegate()
+        webView.navigationDelegate = delegate
+        try await delegate.loadLocalHTML(in: webView)
+        return (webView, delegate)
     }
 
     private func waitForSave(_ coordinator: PlatformSessionPersistence, after revision: Int) async {
