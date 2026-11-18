@@ -14,8 +14,8 @@ public func calculateRentalDays(pickupAt: String, returnAt: String) -> Int {
     formatter.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime]
 
     // Try ISO 8601 first; fall back to a lenient "yyyy-MM-dd'T'HH:mm" parser.
-    guard let pickupDate = formatter.date(from: pickupAt) ?? parseLenient(pickupAt),
-          let returnDate = formatter.date(from: returnAt) ?? parseLenient(returnAt)
+    guard let pickupDate = parseRentalDate(pickupAt) ?? formatter.date(from: pickupAt),
+          let returnDate = parseRentalDate(returnAt) ?? formatter.date(from: returnAt)
     else { return 1 }
 
     let hours = max(1, returnDate.timeIntervalSince(pickupDate) / 3600)
@@ -28,10 +28,10 @@ public func formatSearchCompletionStatus(request: SearchRequest, resultCount: In
     let billableDays = calculateRentalDays(pickupAt: request.pickupAt, returnAt: request.returnAt)
 
     if resultCount == 0 {
-        return "已按 \(timeRange) 查询，按 \(billableDays) 天计费，没有找到候选车辆。"
+        return "已按 \(timeRange) 查询，约 \(billableDays) 天（计费以平台为准），没有找到候选车辆。"
     }
 
-    return "已按 \(timeRange) 查询，按 \(billableDays) 天计费，找到 \(resultCount) 个候选方案。"
+    return "已按 \(timeRange) 查询，约 \(billableDays) 天（计费以平台为准），找到 \(resultCount) 个候选方案。"
 }
 
 private func parseLenient(_ string: String) -> Date? {
@@ -60,7 +60,7 @@ private func formatDateTime(_ value: String) -> String {
         return formatter.string(from: date)
     }
 
-    guard let date = parseLenient(value) else { return value }
+    guard let date = parseRentalDate(value) else { return value }
 
     let formatter = DateFormatter()
     formatter.dateFormat = "yyyy/MM/dd HH:mm"

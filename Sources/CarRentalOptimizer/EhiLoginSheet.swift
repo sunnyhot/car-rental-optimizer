@@ -6,6 +6,8 @@ struct EhiLoginSheet: View {
     @State private var pageTitle = "一嗨登录"
     @State private var currentURL = EhiLoginSession.loginURL.absoluteString
     @State private var reloadToken = 0
+    @State private var savingSession = false
+    @State private var sessionSaveFailed = false
     @State private var resetToken = 0
     @State private var captchaWarning: String?
 
@@ -23,7 +25,7 @@ struct EhiLoginSheet: View {
                 BlueprintWebLocationBar(
                     platformName: "一嗨",
                     currentURL: currentURL,
-                    message: "登录状态仅保存在本机，用于重新读取官方库存报价。",
+                    message: "登录 Cookie 会自动保存在本机；重开应用优先复用，平台过期后仍需重新登录。",
                     tone: captchaWarning == nil ? .active : .warning
                 )
                 captchaWarningView
@@ -39,6 +41,11 @@ struct EhiLoginSheet: View {
             }
         }
         .frame(minWidth: 760, minHeight: 680)
+        .alert("登录状态未能保存", isPresented: $sessionSaveFailed) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请检查本机存储权限后重试。本次未把保存失败当作登录完成。")
+        }
     }
 
     private var loginActionBar: some View {
@@ -65,8 +72,12 @@ struct EhiLoginSheet: View {
             .keyboardShortcut(.cancelAction)
 
             Button("登录完成，重新比较") {
+                guard !savingSession else { return }
+                savingSession = true
                 Task { @MainActor in
-                    await EhiCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)
+                    defer { savingSession = false }
+                    await PlatformSessionPersistence.shared.start()
+                    guard await PlatformSessionPersistence.shared.flush() else { sessionSaveFailed = true; return }
                     EhiLoginSession.notifyDidChange()
                     dismiss()
                     onCompleted()
@@ -74,6 +85,7 @@ struct EhiLoginSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(WorkbenchStyle.decisionBlue)
+            .disabled(savingSession)
             .keyboardShortcut(.defaultAction)
         }
     }
@@ -210,7 +222,7 @@ private struct EhiLoginWebView: NSViewRepresentable {
                     self.currentURL.wrappedValue = EhiLoginSession.loginURL.absoluteString
                     webView.stopLoading()
                     if restoreSavedSession {
-                        await EhiCookieVault.restore(into: webView.configuration.websiteDataStore.httpCookieStore)
+                        await PlatformSessionPersistence.shared.start()
                     }
                     webView.load(EhiLoginSession.makeLoginRequest())
                 }

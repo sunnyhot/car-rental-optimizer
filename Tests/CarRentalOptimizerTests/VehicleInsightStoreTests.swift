@@ -19,8 +19,8 @@ struct VehicleInsightStoreTests {
         #expect(cached?.origin == .network)
     }
 
-    @Test("Stale cache returns nil after thirty days")
-    func staleCacheReturnsNilAfterThirtyDays() {
+    @Test("Stale cache stays readable after thirty days and requests refresh")
+    func staleCacheRemainsReadableAfterThirtyDays() {
         let fileURL = temporaryInsightStoreURL()
         let store = VehicleInsightStore(fileURL: fileURL)
         store.save(cachedInsight(name: "大众朗逸"), forKey: "大众 朗逸", now: cacheDate("2026-07-02 12:00"))
@@ -28,7 +28,21 @@ struct VehicleInsightStoreTests {
         let cached = VehicleInsightStore(fileURL: fileURL)
             .cachedInsight(forKey: "大众朗逸", now: cacheDate("2026-08-02 12:01"))
 
-        #expect(cached == nil)
+        #expect(cached?.vehicleName == "大众朗逸")
+        #expect(cached?.cacheState == .stale)
+    }
+
+    @Test("Text-only cache requests a refresh but remembers recent failed attempts")
+    func emptySpecificationCacheIsRefreshableWithBackoff() {
+        let url = temporaryInsightStoreURL()
+        let now = cacheDate("2026-07-02 12:00")
+        let store = VehicleInsightStore(fileURL: url)
+        store.save(cachedInsight(name: "北京BJ40"), forKey: "北京BJ40", now: now)
+        #expect(store.needsRefresh(forKey: "北京BJ40", now: now))
+        store.recordRefreshAttempt(forKey: "北京BJ40", now: now)
+        let reloaded = VehicleInsightStore(fileURL: url)
+        #expect(!reloaded.needsRefresh(forKey: "北京BJ40", now: now.addingTimeInterval(60)))
+        #expect(reloaded.needsRefresh(forKey: "北京BJ40", now: now.addingTimeInterval(301)))
     }
 
     @Test("Older cache schema returns nil")

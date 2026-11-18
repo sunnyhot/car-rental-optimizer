@@ -129,6 +129,7 @@ public struct RentalListing: Codable, Equatable, Identifiable {
     public let sourceUrl: String
     public let dataCompleteness: Double
     public let warnings: [ResultWarning]
+    public let confirmedQuote: ConfirmedRentalQuote?
 
     public init(
         id: String,
@@ -143,7 +144,8 @@ public struct RentalListing: Codable, Equatable, Identifiable {
         currency: String = "CNY",
         sourceUrl: String,
         dataCompleteness: Double,
-        warnings: [ResultWarning] = []
+        warnings: [ResultWarning] = [],
+        confirmedQuote: ConfirmedRentalQuote? = nil
     ) {
         self.id = id
         self.platform = platform
@@ -158,6 +160,7 @@ public struct RentalListing: Codable, Equatable, Identifiable {
         self.sourceUrl = sourceUrl
         self.dataCompleteness = dataCompleteness
         self.warnings = warnings
+        self.confirmedQuote = confirmedQuote
     }
 }
 

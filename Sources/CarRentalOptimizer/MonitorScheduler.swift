@@ -37,19 +37,33 @@ final class MonitorScheduler {
         self.idGenerator = idGenerator
     }
 
-    func runDueChecks(limit: Int = 2) async throws {
+    @discardableResult
+    func runDueChecks(limit: Int = 2, monitorIDs: Set<String>? = nil) async throws -> Int {
         let currentTime = now()
         let monitors = try await store.listMonitors()
         let dueMonitors = monitors
-            .filter { $0.status == .active || $0.status == .needsAttention }
+            .filter { $0.status == .active || $0.status == .needsAttention || $0.status == .checking }
+            .filter { monitorIDs?.contains($0.id) ?? true }
+            .filter { !runningMonitorIDs.contains($0.id) }
             .filter { ($0.nextCheckAt ?? $0.createdAt) <= currentTime }
-            .prefix(limit)
+            .prefix(max(0, limit))
 
+        var count = 0
         for monitor in dueMonitors where !runningMonitorIDs.contains(monitor.id) {
+            try Task.checkCancellation()
             runningMonitorIDs.insert(monitor.id)
             defer { runningMonitorIDs.remove(monitor.id) }
-            try await runCheck(for: monitor, at: currentTime)
+            do {
+                try await runCheck(for: monitor, at: currentTime)
+                count += 1
+            } catch {
+                if let latest = try? await store.listMonitors().first(where: { $0.id == monitor.id }), latest.status == .checking {
+                    try? await store.markMonitorStatus(id: monitor.id, status: .needsAttention, updatedAt: now())
+                }
+                throw error
+            }
         }
+        return count
     }
 
     private func runCheck(for monitor: PriceMonitor, at checkedAt: Date) async throws {
@@ -68,14 +82,25 @@ final class MonitorScheduler {
         }
 
         try await store.markMonitorStatus(id: monitor.id, status: .checking, updatedAt: checkedAt)
-        let evidenceResults = await searchProvider.search(request: monitor.request)
+        if let issue = validateSearchPreflight(monitor.request, now: checkedAt).issues.first(where: { $0.severity == .blocking }) {
+            try await store.markMonitorStatus(id: monitor.id, status: .paused, updatedAt: checkedAt)
+            try await store.appendSnapshot(PriceSnapshot(id: idGenerator.nextID(prefix: "snapshot"), monitorID: monitor.id, checkedAt: checkedAt, status: .noMatch, message: issue.message + " 已暂停，请确认条件后重新创建。"))
+            return
+        }
+        var searchRequest = monitor.request
+        searchRequest.vehicleQuery = monitor.targetVehicleQuery
+        if let platform = monitor.targetListingSignature?.platform ?? monitor.targetPlatform {
+            searchRequest.platforms = [platform]
+        }
+        let evidenceResults = await searchProvider.search(request: searchRequest)
+        try Task.checkCancellation()
         let listings = evidenceResults.flatMap(\.listings)
         let snapshot: PriceSnapshot
 
         if listings.isEmpty {
             snapshot = failureSnapshot(for: monitor, evidenceResults: evidenceResults, checkedAt: checkedAt)
         } else {
-            let recommendations = await rankRentalListings(request: monitor.request, listings: listings, mapService: mapService)
+            let recommendations = await rankRentalListings(request: searchRequest, listings: listings, mapService: mapService)
             if let selected = selectMonitoredRecommendationWithExplanation(
                 from: recommendations,
                 signature: monitor.targetListingSignature,
@@ -94,11 +119,13 @@ final class MonitorScheduler {
                     monitorID: monitor.id,
                     checkedAt: checkedAt,
                     status: .noMatch,
-                    message: "本次查询没有找到匹配的监控车型。"
+                    message: "本次未找到原门店及车型，不使用其他方案续接价格或触发降价。"
                 )
             }
         }
 
+        try Task.checkCancellation()
+        guard let latest = try await store.listMonitors().first(where: { $0.id == monitor.id }), latest.status == .checking else { return }
         let previousSnapshots = try await store.snapshots(for: monitor.id)
         try await store.appendSnapshot(snapshot)
         for event in makeMonitorLifecycleEvents(
@@ -120,7 +147,7 @@ final class MonitorScheduler {
             await notificationService.sendPriceDropNotification(monitor: monitor, event: event)
         }
 
-        var updated = monitor
+        var updated = latest
         updated.status = snapshot.status == .successful ? .active : .needsAttention
         updated.lastCheckedAt = checkedAt
         if let pickupAt = AppDateRules.parseRequestDate(monitor.request.pickupAt) {
@@ -152,7 +179,12 @@ final class MonitorScheduler {
             dataCompleteness: recommendation.listing.dataCompleteness,
             warnings: recommendation.warnings,
             sourceURL: recommendation.listing.sourceUrl,
-            message: "已记录本次官方报价。\(matchSummary)"
+            listingSignature: ListingSignature(recommendation: recommendation),
+            priceIsComplete: recommendation.listing.hasCompleteRentalPrice,
+            confirmedQuote: recommendation.listing.confirmedQuote,
+            message: recommendation.listing.hasCompleteRentalPrice
+                ? "已记录本次平台报价。\(matchSummary)"
+                : "仅记录已知费用；费用未完整，不触发降价提醒。\(matchSummary)"
         )
     }
 
@@ -204,6 +236,11 @@ final class MonitorScheduler {
         guard currentSnapshot.status == .successful,
               let currentPrice = currentSnapshot.platformRentalPrice,
               let previous = previousSnapshots.reversed().first(where: { $0.status == .successful && $0.platformRentalPrice != nil }),
+              currentSnapshot.priceIsComplete == true,
+              previous.priceIsComplete == true,
+              let signature = currentSnapshot.listingSignature,
+              signature == previous.listingSignature,
+              currentSnapshot.confirmedQuote?.scope == previous.confirmedQuote?.scope,
               let previousPrice = previous.platformRentalPrice,
               monitor.alertRule.isSatisfied(previous: previousPrice, current: currentPrice)
         else { return nil }

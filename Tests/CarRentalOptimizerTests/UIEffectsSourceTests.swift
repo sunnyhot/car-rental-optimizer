@@ -40,23 +40,28 @@ struct UIEffectsSourceTests {
         #expect(source.contains("QueryConsoleSection(step: \"01\""))
         #expect(source.contains("QueryConsoleSection(step: \"02\""))
         #expect(source.contains("QueryConsoleSection(step: \"03\""))
-        #expect(source.contains("QueryConsoleSection(step: \"04\""))
+        #expect(!source.contains("QueryConsoleSection(step: \"04\""))
+        #expect(!source.contains("取还规则"))
+        #expect(source.contains("QueryConsoleSection(step: \"03\", icon: \"link\", title: \"报价平台\""))
+        #expect(source.contains("stops: [.active, .idle, .idle]"))
+        #expect(source.contains("case .queryingPlatforms: return 2"))
         #expect(source.contains("BlueprintSectionHeader("))
         #expect(source.contains("BlueprintRouteTrail("))
         #expect(source.contains("PlatformSignalToggleButton"))
         #expect(source.contains("CompareCommandButton"))
         #expect(source.contains("VehicleSuggestionField("))
-        #expect(source.contains("OriginSuggestionDropdown"))
+        #expect(!source.contains("OriginSuggestionDropdown"))
+        #expect(source.contains("DateRangeField("))
+        #expect(!source.contains("displayedComponents: [.date, .hourAndMinute]"))
     }
 
-    @Test("Origin suggestion dropdown distinguishes stations from addresses")
-    func originSuggestionDropdownDistinguishesStationsFromAddresses() throws {
+    @Test("Current location panel has no address editor or suggestion dropdown")
+    func currentLocationPanelHasNoAddressEditor() throws {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/SearchPanelView.swift", encoding: .utf8)
-
-        #expect(source.contains("OriginSuggestionDropdown"))
-        #expect(source.contains("suggestion.kind.systemImage"))
-        #expect(source.contains("suggestion.kind.label"))
-        #expect(source.contains("suggestion.fallbackNote"))
+        #expect(source.contains("CurrentLocationView()"))
+        #expect(!source.contains("OriginLocationField"))
+        #expect(!source.contains("OriginSuggestionDropdown"))
+        #expect(!source.contains("updateOriginInput"))
     }
 
     @Test("Result panel uses Route Blueprint decision signals")
@@ -91,7 +96,7 @@ struct UIEffectsSourceTests {
         let source = try String(contentsOfFile: "Sources/CarRentalOptimizer/ResultPanelView.swift", encoding: .utf8)
 
         #expect(source.contains("VehicleInsightLine("))
-        #expect(source.contains("VehicleInsightLocalInferencer.localInsight(for: recommendation.listing)"))
+        #expect(source.contains("referenceLoader.reference(for: recommendation.listing)"))
         #expect(source.contains(".lineLimit(1)"))
     }
 
@@ -115,7 +120,7 @@ struct UIEffectsSourceTests {
 
         #expect(source.contains("DecisionReceiptHeader"))
         #expect(source.contains("BlueprintRoutePath("))
-        #expect(source.contains("originLabel: viewModel.request.originLabel"))
+        #expect(source.contains("originLabel: viewModel.resultsRequest.originLabel"))
         #expect(source.contains("decisionRouteSteps"))
         #expect(source.contains("BlueprintMetricTile("))
         #expect(source.contains("RouteDecisionCard"))
@@ -149,7 +154,7 @@ struct UIEffectsSourceTests {
         #expect(source.contains("resumeMonitors(ids:"))
         #expect(source.contains("BlueprintStatePanel("))
         #expect(source.contains("MonitorCommandSurface(title: \"价格趋势\", icon: \"chart.xyaxis.line\", step: \"TREND\")"))
-        #expect(source.contains("历史快照，可能已失效"))
+        #expect(source.contains("历史完整报价，可能已失效"))
         #expect(source.contains("chartForegroundStyleScale"))
         #expect(!source.contains(".frame(minWidth: 920, minHeight: 620)"))
     }
@@ -201,10 +206,10 @@ struct UIEffectsSourceTests {
 
         #expect(ehi.contains("BlueprintWebLocationBar"))
         #expect(ehi.contains("BlueprintSheetActionBar"))
-        #expect(ehi.contains("EhiCookieVault.save"))
+        #expect(ehi.contains("PlatformSessionPersistence.shared.flush"))
         #expect(ehi.contains("resetToken += 1"))
         #expect(platform.contains("BlueprintWebLocationBar"))
         #expect(platform.contains("BlueprintSheetActionBar"))
-        #expect(platform.contains("ZucheCookieVault.save"))
+        #expect(platform.contains("PlatformSessionPersistence.shared.flush"))
     }
 }

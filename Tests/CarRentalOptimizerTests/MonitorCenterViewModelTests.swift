@@ -120,8 +120,35 @@ struct MonitorCenterViewModelTests {
 
         await viewModel.runShownChecks()
 
-        #expect(viewModel.operationFeedbackMessage == "已完成当前筛选的 1 个监控巡查。")
+        #expect(viewModel.operationFeedbackMessage == "当前筛选已处理 1 个到期监控；未到期、暂停或运行中的监控已跳过。")
         #expect((try await store.snapshots(for: monitor.id)).last?.status == .successful)
+    }
+
+    @Test("Shown checks do not query monitors outside the filter")
+    func shownChecksRespectFilter() async throws {
+        let store = InMemoryMonitorStore()
+        try await store.saveMonitor(makeMonitor(id: "outside", status: .active, nextCheckAt: Date(timeIntervalSince1970: 100)))
+        try await store.saveMonitor(makeMonitor(id: "inside", status: .needsAttention, nextCheckAt: Date(timeIntervalSince1970: 100)))
+        let scheduler = MonitorScheduler(store: store, searchProvider: StubRentalSearchProvider(results: [readyResult(price: 450)]), mapService: EstimatedMapService(), notificationService: RecordingNotificationService(), now: { Date(timeIntervalSince1970: 200) })
+        let model = MonitorCenterViewModel(store: store, scheduler: scheduler)
+        try await model.reload()
+        model.filter = .needsAttention
+        await model.runShownChecks()
+        #expect(try await store.snapshots(for: "outside").isEmpty)
+        #expect(try await store.snapshots(for: "inside").count == 1)
+    }
+
+    @Test("Invalid monitor conditions are rejected before writing")
+    func invalidConditionsDoNotCreateMonitor() async throws {
+        let store = InMemoryMonitorStore()
+        let model = MonitorCenterViewModel(store: store, scheduler: nil)
+        var request = AppDefaults.searchRequest
+        request.returnMode = .differentStore
+        do {
+            try await model.createMonitor(from: makeRecommendation(), request: request, frequency: .smart, alertRule: .defaultRule, systemNotificationsEnabled: false)
+            Issue.record("Expected unsupported return mode to be rejected")
+        } catch { }
+        #expect(try await store.listMonitors().isEmpty)
     }
 
     private func makeMonitor(

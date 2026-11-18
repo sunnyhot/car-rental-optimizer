@@ -255,8 +255,8 @@ struct EhiLoginSessionTests {
     func carIncLoginSheetRestoresAndSavesLocalSessionVault() throws {
         let source = try platformLoginSheetSource()
 
-        #expect(source.contains("await ZucheCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)"))
-        #expect(source.contains("await ZucheCookieVault.restore(into: webView.configuration.websiteDataStore.httpCookieStore)"))
+        #expect(source.contains("await PlatformSessionPersistence.shared.flush()"))
+        #expect(source.contains("await PlatformSessionPersistence.shared.start()"))
     }
 
     @Test("CAR Inc login sheet opens the official desktop login page")

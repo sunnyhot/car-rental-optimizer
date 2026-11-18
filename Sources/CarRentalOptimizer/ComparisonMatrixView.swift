@@ -84,11 +84,11 @@ struct ComparisonMatrixView: View {
         .sheet(item: $pendingMonitorRecommendation) { recommendation in
             CreateMonitorSheet(
                 recommendation: recommendation,
-                request: searchViewModel.request,
+                request: searchViewModel.resultsRequest,
                 onSaveFromRecommendation: { frequency, rule, notifications in
                     try await monitorViewModel.createMonitor(
                         from: recommendation,
-                        request: searchViewModel.request,
+                        request: searchViewModel.resultsRequest,
                         frequency: frequency,
                         alertRule: rule,
                         systemNotificationsEnabled: notifications
@@ -114,7 +114,9 @@ struct ComparisonMatrixView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("移除此候选")
             }
-            Text(formatMoney(recommendation.bestTotal))
+            Text(QuotePresentation.rentalLabel(recommendation))
+                .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
+            Text(formatMoney(recommendation.rentalTotal))
                 .font(.title3.weight(.bold))
                 .monospacedDigit()
             HStack(spacing: 6) {

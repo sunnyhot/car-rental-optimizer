@@ -63,7 +63,7 @@ struct LiveRentalSearchServiceTests {
         let script = makeEhiSearchScript(json: "{}")
 
         #expect(script.contains("const stockPayloads = ["))
-        #expect(script.contains("label: '个人匿名'"))
+        #expect(script.contains("label: '个人方案'"))
         #expect(script.contains("label: '默认上下文'"))
         #expect(script.contains("isEnterprise: false"))
         #expect(script.contains("isEnterprise: true"))
@@ -151,13 +151,24 @@ struct LiveRentalSearchServiceTests {
         #expect(decodedPrice?.toDouble() == 123.5)
     }
 
+    @Test("eHi expired store session is a login failure rather than no stores")
+    func ehiStoreSessionExpiryIsLoginRequired() throws {
+        let context = try #require(JSContext())
+        context.evaluateScript(makeEhiResponseFailureScript())
+        let kind = context.evaluateScript(#"ehiResponseFailure({code:401,message:'登录已过期，请重新登录。'}).statusKind"#)?.toString()
+        #expect(kind == "login-required")
+        #expect(context.evaluateScript(#"ehiResponseFailure({data:{code:'401',message:'expired'}}).statusKind"#)?.toString() == "login-required")
+        #expect(context.evaluateScript(#"ehiResponseFailure({code:200,data:[]}) === null"#)?.toBool() == true)
+        #expect(context.evaluateScript(#"ehiResponseFailure({code:500,message:'系统异常'}).statusKind"#)?.toString() == "parse-failed")
+    }
+
     @Test("eHi blank vehicle query probes stores inside radius before reporting no cars")
     func ehiBlankVehicleQueryProbesStoresInsideRadiusBeforeReportingNoCars() {
         let script = makeEhiSearchScript(json: "{}")
 
         #expect(script.contains("blankStoreProbeLimit = 40"))
         #expect(script.contains("const blankStoreCandidates = storeCandidates.filter(s => s.distanceKm <= request.radiusKm)"))
-        #expect(script.contains(": blankStoreCandidates.slice(0, blankStoreProbeLimit)"))
+        #expect(script.contains("candidates.push(...blankStoreCandidates.slice(0, blankStoreProbeLimit))"))
         #expect(script.contains("selectedBlankStoreId"))
         #expect(script.contains("!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId"))
         #expect(script.contains("半径 ${Math.round(request.radiusKm)}km"))
@@ -172,7 +183,7 @@ struct LiveRentalSearchServiceTests {
         #expect(script.contains("const selectedStoreForCity = (cityPlan, cityStores) =>"))
         #expect(script.contains("isRailwayStationStore"))
         #expect(script.contains("cityPlan.isCurrentCity ? sortedStores[0]"))
-        #expect(script.contains("每个城市最多探测 1 个候选门店"))
+        #expect(script.contains("maxCurrentCityStoreProbes = 4"))
         #expect(!script.contains("vehicleStoreProbeLimit = 12"))
         #expect(!script.contains("storesInsideRadius.slice(0, vehicleStoreProbeLimit)"))
     }
@@ -181,13 +192,13 @@ struct LiveRentalSearchServiceTests {
     func ehiVehicleQueryProbesCitiesAndStockQuotesWithBoundedConcurrency() {
         let script = makeEhiSearchScript(json: "{}")
 
-        #expect(script.contains("const ehiProbeConcurrency = 3"))
-        #expect(script.contains("const mapWithConcurrency = async (items, limit, worker) =>"))
-        #expect(script.contains("const cityFetchResults = await mapWithConcurrency(storeCityPlans, ehiProbeConcurrency, fetchStoresForCity)"))
+        #expect(script.contains("const ehiProbeConcurrency = 1"))
+        #expect(script.contains("createEhiQueryQueue(ehiProbeConcurrency"))
+        #expect(script.contains("recordCityResult(result)"))
         #expect(script.contains("const quoteStore = async (store) =>"))
-        #expect(script.contains("const quoteResults = hasVehicleQuery"))
-        #expect(script.contains("? await mapWithConcurrency(candidates, ehiProbeConcurrency, quoteStore)"))
-        #expect(!script.contains("for (const cityPlan of storeCityPlans) {"))
+        #expect(script.contains("queue.addAll(targets.map(store => async () =>"))
+        #expect(script.contains("applyQuoteResult(quote)"))
+        #expect(script.contains("withEhiQueryBudget(() => queue.run())"))
     }
 
     @Test("eHi bridge API calls have an in-page timeout")
@@ -196,9 +207,9 @@ struct LiveRentalSearchServiceTests {
 
         #expect(script.contains("apiTimeoutMs = 6000"))
         #expect(script.contains("withAPITimeout"))
-        #expect(script.contains("withAPITimeout(http.getEncrypt('/Address/City/List'"))
-        #expect(script.contains("withAPITimeout(http.postEncrypt('/Verify/Step1'"))
-        #expect(script.contains("withAPITimeout(http.postEncrypt('/Stock/Step2'"))
+        #expect(script.contains("withAPITimeout(() => http.getEncrypt('/Address/City/List'"))
+        #expect(script.contains("withAPITimeout(() => http.postEncrypt('/Verify/Step1'"))
+        #expect(script.contains("withAPITimeout(() => http.postEncrypt('/Stock/Step2'"))
     }
 
     @Test("eHi bridge guards empty verify and stock responses")
@@ -491,6 +502,15 @@ struct LiveRentalSearchServiceTests {
         ) == nil)
     }
 
+    @Test("Official nearby quoted stores remain usable when the query-center store has no inventory")
+    func nearbyQuotedStoresSurviveMissingQueryStore() {
+        let queryStore = makeStore(id: "83365", name: "次渠物美服务点", city: "北京", distanceKm: 1)
+        let available = makeStore(id: "83358", name: "同济南路地铁站服务点", city: "北京", distanceKm: 3)
+        #expect(zucheAcceptsQuotedStore(available, queryStore: queryStore, isCurrentCity: true, radiusKm: 100))
+        #expect(!zucheAcceptsQuotedStore(available, queryStore: queryStore, isCurrentCity: true, radiusKm: 2))
+        #expect(!zucheAcceptsQuotedStore(available, queryStore: queryStore, isCurrentCity: false, radiusKm: 100))
+    }
+
     @Test("CAR Inc confirmation fee parser uses official base service fee and ignores preparation fee")
     func carIncConfirmationFeeParserUsesOfficialBaseServiceFeeAndIgnoresPreparationFee() throws {
         let json = """
@@ -532,10 +552,19 @@ struct LiveRentalSearchServiceTests {
 
         #expect(source.contains("/action/carrctapi/order/confirmOrderInfo/v4"))
         #expect(source.contains("WKWebsiteDataStore.default().httpCookieStore"))
-        #expect(source.contains("await ZucheCookieVault.restore(into: store)"))
+        #expect(source.contains("await PlatformSessionPersistence.shared.start()"))
         #expect(source.contains("zucheActualBaseServiceFee(from: content)"))
         #expect(!source.contains("estimatedZucheMandatoryFees"))
         #expect(!source.contains("zucheBaseServiceFeePerDay"))
+    }
+
+    @Test("Nearest priced store ignores empty responses and does not depend on server order")
+    func nearestPricedBatchIgnoresEmptyAndResponseOrder() throws {
+        let far = StoreListingsBatch(distanceKm: 8, listings: [makeListing(id: "far", storeId: "far", vehicleName: "大众朗逸", distanceKm: 8)])
+        let near = StoreListingsBatch(distanceKm: 3, listings: [makeListing(id: "near", storeId: "near", vehicleName: "大众朗逸", distanceKm: 3)])
+        let empty = StoreListingsBatch(distanceKm: 1, listings: [])
+        #expect(try #require(nearestPricedStoreBatch([near, far, empty])).listings.first?.id == "near")
+        #expect(try #require(nearestPricedStoreBatch([empty, far, near])).listings.first?.id == "near")
     }
 
     @Test("Blank vehicle query keeps all vehicles from nearest priced store only")

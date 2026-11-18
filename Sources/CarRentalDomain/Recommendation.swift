@@ -15,7 +15,8 @@ public func buildRecommendation(
     taxiRoute: RouteEstimate,
     transitRoute: RouteEstimate
 ) -> Recommendation {
-    let rentalTotal = roundMoney(listing.basePrice + listing.platformFees + listing.insuranceFees + listing.oneWayFee)
+    let confirmedTotal = listing.confirmedQuote.flatMap { $0.isValid ? $0.payableTotal : nil }
+    let rentalTotal = roundMoney(confirmedTotal ?? (listing.basePrice + listing.platformFees + listing.insuranceFees + listing.oneWayFee))
     let taxiTotal = roundMoney(rentalTotal + taxiRoute.cost)
     let transitTotal = roundMoney(rentalTotal + transitRoute.cost)
     let bestRouteMode: RouteMode = taxiTotal <= transitTotal ? .taxi : .transit
@@ -42,6 +43,9 @@ public func buildRecommendation(
 /// Ranks recommendations by: best total cost → match priority → route duration → data completeness.
 public func rankRecommendations(_ recommendations: [Recommendation]) -> [Recommendation] {
     recommendations.sorted { left, right in
+        if left.listing.hasCompleteRentalPrice != right.listing.hasCompleteRentalPrice {
+            return left.listing.hasCompleteRentalPrice
+        }
         let totalDelta = left.bestTotal - right.bestTotal
         if totalDelta != 0 { return totalDelta < 0 }
 

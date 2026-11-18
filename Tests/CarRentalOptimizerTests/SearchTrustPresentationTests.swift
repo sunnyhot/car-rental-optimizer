@@ -17,7 +17,7 @@ struct SearchTrustPresentationTests {
         #expect(result.issues.first { $0.id == "platforms-empty" }?.severity == .blocking)
     }
 
-    @Test("Preflight validation reports helpful warnings")
+    @Test("Preflight blocks missing location and still reports wide-radius warnings")
     func preflightValidationReportsHelpfulWarnings() {
         var request = AppDefaults.searchRequest
         request.originLabel = "   "
@@ -26,7 +26,7 @@ struct SearchTrustPresentationTests {
 
         let result = validateSearchPreflight(request)
 
-        #expect(!result.hasBlockingIssue)
+        #expect(result.hasBlockingIssue)
         #expect(result.issues.map(\.id).contains("origin-empty"))
         #expect(result.issues.map(\.id).contains("specific-vehicle-wide-radius"))
     }

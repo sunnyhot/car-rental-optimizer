@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct ContentView: View {
     @StateObject private var viewModel: SearchViewModel
     @StateObject private var monitorViewModel: MonitorCenterViewModel
@@ -15,7 +16,9 @@ struct ContentView: View {
         )
         let store: JSONMonitorStore
         do {
-            store = try JSONMonitorStore.live()
+            store = AppInfo.isUIValidation
+                ? JSONMonitorStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("CarRentalOptimizer-UIValidation-\(UUID().uuidString)"))
+                : try JSONMonitorStore.live()
         } catch {
             store = JSONMonitorStore(
                 directory: FileManager.default.temporaryDirectory
@@ -28,7 +31,7 @@ struct ContentView: View {
             mapService: AppleMapService(),
             notificationService: UserNotificationMonitorService()
         )
-        let monitorViewModel = MonitorCenterViewModel(store: store, scheduler: scheduler)
+        let monitorViewModel = AppLifecycleDelegate.monitorViewModel ?? MonitorCenterViewModel(store: store, scheduler: scheduler)
         AppLifecycleDelegate.monitorViewModel = monitorViewModel
         _monitorViewModel = StateObject(wrappedValue: monitorViewModel)
     }
@@ -39,9 +42,12 @@ struct ContentView: View {
             .environmentObject(monitorViewModel)
             .environmentObject(comparisonViewModel)
             .task {
+                guard !AppInfo.isUIValidation else { return }
+                async let restoreSession: Void = PlatformSessionPersistence.shared.start()
                 viewModel.startInitialCurrentLocationRefresh()
                 try? await monitorViewModel.reload()
-                await monitorViewModel.runDueChecks()
+                await restoreSession
+                // Background polling is opt-in; loading a window must not query saved monitors.
             }
             .frame(
                 minWidth: AppWindowLayout.minimumWidth,

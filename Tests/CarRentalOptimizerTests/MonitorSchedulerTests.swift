@@ -134,6 +134,61 @@ struct MonitorSchedulerTests {
         #expect(events.first?.currentSnapshotID == "snapshot-1")
     }
 
+    @Test("Interrupted checking monitors are retried")
+    func interruptedCheckRecovers() async throws {
+        let store = InMemoryMonitorStore()
+        var monitor = makeMonitor(nextCheckAt: Date(timeIntervalSince1970: 100))
+        monitor.status = .checking
+        try await store.saveMonitor(monitor)
+        let scheduler = MonitorScheduler(store: store, searchProvider: StubRentalSearchProvider(results: [readyResult(price: 450)]), mapService: EstimatedMapService(), notificationService: RecordingNotificationService(), now: { Date(timeIntervalSince1970: 200) })
+        try await scheduler.runDueChecks()
+        #expect(try await store.snapshots(for: monitor.id).count == 1)
+    }
+
+    @Test("Incomplete and changed-store snapshots never trigger a price drop")
+    func nonComparablePricesDoNotAlert() async throws {
+        for complete in [true, false] {
+            let store = InMemoryMonitorStore()
+            let monitor = makeMonitor(nextCheckAt: Date(timeIntervalSince1970: 100))
+            try await store.saveMonitor(monitor)
+            try await store.appendSnapshot(PriceSnapshot(id: "old", monitorID: monitor.id, checkedAt: Date(timeIntervalSince1970: 50), status: .successful, platformRentalPrice: 500, listingSignature: ListingSignature(platform: .ehi, storeID: complete ? "other-store" : "store-1", normalizedStoreName: "一嗨通州店通州", normalizedVehicleName: "奇瑞瑞虎8", normalizedVehicleClass: "suv"), priceIsComplete: complete, message: "old"))
+            let scheduler = MonitorScheduler(store: store, searchProvider: StubRentalSearchProvider(results: [readyResult(price: 450)]), mapService: EstimatedMapService(), notificationService: RecordingNotificationService(), now: { Date(timeIntervalSince1970: 200) })
+            try await scheduler.runDueChecks()
+            #expect(try await store.events(for: monitor.id).allSatisfy { $0.kind != .priceDrop })
+        }
+    }
+
+    @Test("Failed snapshot writes do not leave a monitor checking")
+    func storageFailureRecoversStatus() async throws {
+        let store = InMemoryMonitorStore()
+        let monitor = makeMonitor(nextCheckAt: Date(timeIntervalSince1970: 100))
+        try await store.saveMonitor(monitor)
+        await store.failNextSnapshotWrite()
+        let scheduler = MonitorScheduler(store: store, searchProvider: StubRentalSearchProvider(results: [readyResult(price: 450)]), mapService: EstimatedMapService(), notificationService: RecordingNotificationService(), now: { Date(timeIntervalSince1970: 200) })
+        do {
+            try await scheduler.runDueChecks()
+            Issue.record("Expected a storage failure")
+        } catch { }
+        #expect(try await store.listMonitors().first?.status == .needsAttention)
+        try await scheduler.runDueChecks()
+        #expect(try await store.snapshots(for: monitor.id).count == 1)
+    }
+
+    @Test("A partial current quote cannot report a price drop")
+    func partialCurrentQuoteDoesNotAlert() async throws {
+        let store = InMemoryMonitorStore()
+        let monitor = makeMonitor(nextCheckAt: Date(timeIntervalSince1970: 100))
+        try await store.saveMonitor(monitor)
+        try await store.appendSnapshot(successSnapshot(id: "old", monitorID: monitor.id, price: 500, total: 560))
+        let original = readyResult(price: 100)
+        let item = original.listings[0]
+        let partial = RentalListing(id: item.id, platform: item.platform, store: item.store, vehicleName: item.vehicleName, vehicleClass: item.vehicleClass, basePrice: item.basePrice, platformFees: 0, insuranceFees: 0, oneWayFee: 0, sourceUrl: item.sourceUrl, dataCompleteness: 0.7, warnings: [.partialPrice])
+        let scheduler = MonitorScheduler(store: store, searchProvider: StubRentalSearchProvider(results: [PlatformEvidenceResult(platform: original.platform, status: original.status, listings: [partial])]), mapService: EstimatedMapService(), notificationService: RecordingNotificationService(), now: { Date(timeIntervalSince1970: 200) })
+        try await scheduler.runDueChecks()
+        #expect(try await store.events(for: monitor.id).allSatisfy { $0.kind != .priceDrop })
+        #expect(try await store.snapshots(for: monitor.id).last?.priceIsComplete == false)
+    }
+
     private func makeMonitor(nextCheckAt: Date) -> PriceMonitor {
         PriceMonitor(
             id: "monitor-1",
@@ -169,7 +224,7 @@ struct MonitorSchedulerTests {
     }
 
     private func successSnapshot(id: String, monitorID: String, price: Double, total: Double) -> PriceSnapshot {
-        PriceSnapshot(id: id, monitorID: monitorID, checkedAt: Date(timeIntervalSince1970: 50), status: .successful, platformRentalPrice: price, recommendationTotalCost: total, platform: .ehi, storeName: "一嗨通州店", vehicleName: "奇瑞 瑞虎8", message: "success")
+        PriceSnapshot(id: id, monitorID: monitorID, checkedAt: Date(timeIntervalSince1970: 50), status: .successful, platformRentalPrice: price, recommendationTotalCost: total, platform: .ehi, storeName: "一嗨通州店", vehicleName: "奇瑞 瑞虎8", listingSignature: ListingSignature(platform: .ehi, storeID: "store-1", normalizedStoreName: "一嗨通州店通州", normalizedVehicleName: "奇瑞瑞虎8", normalizedVehicleClass: "suv"), priceIsComplete: true, message: "success")
     }
 
     private func failureSnapshot(id: String, monitorID: String, status: PriceSnapshotStatus, checkedAt: Date) -> PriceSnapshot {
@@ -179,6 +234,8 @@ struct MonitorSchedulerTests {
 
 private actor InMemoryMonitorStore: MonitorStoring {
     private var monitors: [PriceMonitor] = []
+    private var failWrite = false
+    func failNextSnapshotWrite() { failWrite = true }
     private var snapshotsByMonitor: [String: [PriceSnapshot]] = [:]
     private var eventsByMonitor: [String: [PriceMonitorEvent]] = [:]
 
@@ -197,6 +254,7 @@ private actor InMemoryMonitorStore: MonitorStoring {
     }
 
     func appendSnapshot(_ snapshot: PriceSnapshot) async throws {
+        if failWrite { failWrite = false; throw CocoaError(.fileWriteUnknown) }
         snapshotsByMonitor[snapshot.monitorID, default: []].append(snapshot)
     }
 

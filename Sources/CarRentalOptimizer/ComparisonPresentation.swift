@@ -68,14 +68,14 @@ enum ComparisonPresentation {
         [
             textRow(id: "platform", label: "平台", values: values) { $0.listing.platform.label },
             textRow(id: "vehicle-name", label: "车型", values: values) { $0.listing.vehicleName },
-            minimumRow(id: "best-total", label: "总成本", values: values, value: \.bestTotal, format: formatMoney, isCore: true),
+            minimumRow(id: "best-total", label: "租车 + 到店估算", values: values, value: \.bestTotal, format: formatMoney, isCore: true),
             textRow(id: "store", label: "门店", values: values) { $0.listing.store.name },
         ]
     }
 
     private static func costRows(_ values: [Recommendation]) -> [ComparisonRow] {
         [
-            minimumRow(id: "rental-total", label: "租车小计", values: values, value: \.rentalTotal, format: formatMoney),
+            minimumRow(id: "rental-total", label: "平台应付/已知租车费用", values: values, value: \.rentalTotal, format: formatMoney),
             minimumRow(id: "base-price", label: "车辆租金", values: values, value: \.listing.basePrice, format: formatMoney),
             minimumRow(id: "platform-fees", label: "平台费", values: values, value: \.listing.platformFees, format: formatMoney),
             minimumRow(id: "insurance-fees", label: "保险费", values: values, value: \.listing.insuranceFees, format: formatMoney),
@@ -193,17 +193,29 @@ enum ComparisonPresentation {
         format: (Double) -> String,
         isCore: Bool = false
     ) -> ComparisonRow {
-        let minimum = values.map(value).min()
+        let rentalCostIDs: Set<String> = ["best-total", "rental-total", "base-price", "platform-fees", "insurance-fees", "one-way-fee"]
+        let needsCompletePrice = rentalCostIDs.contains(id)
+        let eligible = values.filter { !needsCompletePrice || $0.listing.hasCompleteRentalPrice }
+        let minimum = eligible.map(value).min()
         return ComparisonRow(
             id: id,
             label: label,
             cells: values.map { recommendation in
                 let raw = value(recommendation)
+                if recommendation.listing.confirmedQuote?.isValid == true,
+                   ["base-price", "platform-fees", "insurance-fees", "one-way-fee"].contains(id) {
+                    return ComparisonCell(candidateID: recommendation.id, text: "见确认页明细", comparisonKey: "confirmed-details", tone: .standard)
+                }
+                let incomplete = needsCompletePrice && !recommendation.listing.hasCompleteRentalPrice
+                let itemized = ["platform-fees", "insurance-fees", "one-way-fee"].contains(id)
+                let text = incomplete
+                    ? (itemized && raw == 0 ? "未确认/未单列" : "已知 " + format(raw))
+                    : format(raw)
                 return ComparisonCell(
                     candidateID: recommendation.id,
-                    text: format(raw),
-                    comparisonKey: String(format: "%.4f", raw),
-                    tone: minimum.map { raw == $0 } == true ? .advantage : .standard
+                    text: text,
+                    comparisonKey: "\(incomplete)-\(text)",
+                    tone: incomplete ? .warning : (minimum.map { raw == $0 } == true ? .advantage : .standard)
                 )
             },
             isCore: isCore

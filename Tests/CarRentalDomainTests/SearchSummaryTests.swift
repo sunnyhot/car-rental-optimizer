@@ -24,7 +24,7 @@ final class SearchSummaryTests: XCTestCase {
 
         XCTAssertEqual(
             formatSearchCompletionStatus(request: request, resultCount: 0),
-            "已按 2026/09/01 - 2026/10/11 查询，按 40 天计费，没有找到候选车辆。"
+            "已按 2026/09/01 - 2026/10/11 查询，约 40 天（计费以平台为准），没有找到候选车辆。"
         )
     }
 }

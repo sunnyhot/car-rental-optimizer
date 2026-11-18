@@ -7,6 +7,8 @@ struct PlatformLoginSheet: View {
     @State private var pageTitle: String
     @State private var currentURL: String
     @State private var reloadToken = 0
+    @State private var savingSession = false
+    @State private var sessionSaveFailed = false
 
     let platform: PlatformId
     let onCompleted: () -> Void
@@ -30,7 +32,7 @@ struct PlatformLoginSheet: View {
                 BlueprintWebLocationBar(
                     platformName: platform.label,
                     currentURL: currentURL,
-                    message: "登录官网后可重新比较并尝试补全确认页基础服务费。"
+                    message: "登录官网后重新比较，读取当前方案的确认页应付总额。"
                 )
                 platformInfoRow
 
@@ -44,6 +46,11 @@ struct PlatformLoginSheet: View {
             }
         }
         .frame(minWidth: 760, minHeight: 680)
+        .alert("登录状态未能保存", isPresented: $sessionSaveFailed) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请检查本机存储权限后重试。本次未把保存失败当作登录完成。")
+        }
     }
 
     private var platformActionBar: some View {
@@ -63,16 +70,19 @@ struct PlatformLoginSheet: View {
             .keyboardShortcut(.cancelAction)
 
             Button("登录完成，重新比较") {
+                guard !savingSession else { return }
+                savingSession = true
                 Task { @MainActor in
-                    if platform == .carInc {
-                        await ZucheCookieVault.save(from: WKWebsiteDataStore.default().httpCookieStore)
-                    }
+                    defer { savingSession = false }
+                    await PlatformSessionPersistence.shared.start()
+                    guard await PlatformSessionPersistence.shared.flush() else { sessionSaveFailed = true; return }
                     dismiss()
                     onCompleted()
                 }
             }
             .buttonStyle(.borderedProminent)
             .tint(WorkbenchStyle.decisionBlue)
+            .disabled(savingSession)
             .keyboardShortcut(.defaultAction)
         }
     }
@@ -81,7 +91,7 @@ struct PlatformLoginSheet: View {
         ActionStatusRow(
             icon: "yensign.circle.fill",
             title: "费用补全",
-            message: "神州基础服务费来自官方确认页费用接口；登录官网后点击完成，程序会重新比较并尝试补全这部分费用。",
+            message: "登录完成后读取神州确认页的应付总额与已返回明细，不提交订单。金额对应平台默认方案；另选保障或优惠后需重新核价。",
             tone: .active
         )
         .padding(.horizontal, 18)
@@ -166,7 +176,7 @@ private struct PlatformLoginWebView: NSViewRepresentable {
                 currentURL.wrappedValue = loginURL
                 webView.stopLoading()
                 if platform == .carInc {
-                    await ZucheCookieVault.restore(into: webView.configuration.websiteDataStore.httpCookieStore)
+                    await PlatformSessionPersistence.shared.start()
                 }
                 if let url = URL(string: loginURL) {
                     webView.load(URLRequest(url: url))

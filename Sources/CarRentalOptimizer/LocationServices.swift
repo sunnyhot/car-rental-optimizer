@@ -37,11 +37,11 @@ enum CurrentLocationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .denied:
-            return "定位权限未开启，可手动输入地址。"
+            return "定位权限未开启，请在系统设置中允许本应用使用定位。"
         case .disabled:
-            return "系统定位服务未开启，可手动输入地址。"
+            return "系统定位服务未开启，请开启后重新定位。"
         case .unavailable:
-            return "暂时没有获取到当前位置，可重试定位或手动输入地址。"
+            return "暂时没有获取到当前位置，请点击重新定位。"
         }
     }
 

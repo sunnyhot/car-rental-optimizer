@@ -79,6 +79,12 @@ final class LiveRentalSearchService: NSObject, RentalSearchProviding {
     private let ehiClient = EhiBridgeClient()
 
     func search(request: SearchRequest) async -> [PlatformEvidenceResult] {
+        traceLiveSearch("origin=\(request.origin) dates=\(request.pickupAt)..\(request.returnAt) radius=\(request.radiusKm)")
+        if let issue = validateSearchPreflight(request).issues.first(where: { $0.severity == .blocking }) {
+            return request.platforms.map { platform in
+                PlatformEvidenceResult(platform: platform, status: PlatformEvidenceStatus(platform: platform, kind: .unavailable, message: issue.message, sourceUrl: officialPlatformURL(for: platform)), listings: [])
+            }
+        }
         var results: [PlatformEvidenceResult] = []
 
         if request.platforms.contains(.carInc) {
@@ -190,10 +196,11 @@ private struct ZucheFeeEnrichment {
     let attemptedWithCookies: Bool
     let confirmedFeeCount: Int
     let loginRejected: Bool
+    var confirmedTotalCount: Int = 0
 }
 
 let maxZucheVehicleSearchCityCount = 60
-private let maxConcurrentZucheConfirmationRequests = 4
+private let maxConcurrentZucheConfirmationRequests = 1
 private let zucheGatewayRequestTimeoutSeconds: TimeInterval = 10
 
 func zucheCityQueryConcurrency(for cityCount: Int) -> Int {
@@ -327,6 +334,13 @@ func zucheSelectedStore(from stores: [Store], cityName: String, isCurrentCity: B
     return sortedStores.first { isZucheRailwayStationStore($0, cityName: cityName) }
 }
 
+func zucheAcceptsQuotedStore(_ store: Store, queryStore: Store, isCurrentCity: Bool, radiusKm: Double) -> Bool {
+    guard store.distanceKm <= radiusKm else { return false }
+    // The requested coordinates are only a search center. The server may return
+    // other bookable nearby stores when that center has no stock.
+    return isCurrentCity || isZucheRailwayStationStore(store, cityName: queryStore.city)
+}
+
 private func currentZucheCityID(from cities: [ZucheSearchCity], request: SearchRequest) -> String? {
     if let exact = cities.first(where: { zucheCityNameMatchesOrigin($0.name, request: request) }) {
         return exact.id
@@ -382,6 +396,10 @@ private func normalizedZucheCityName(_ cityName: String) -> String {
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+func nearestPricedStoreBatch(_ batches: [StoreListingsBatch]) -> StoreListingsBatch? {
+    batches.filter { !$0.listings.isEmpty }.min { $0.distanceKm < $1.distanceKm }
+}
+
 func blankVehicleCandidateListings(
     from batches: [StoreListingsBatch],
     minimumVehicleCount: Int = 12,
@@ -389,7 +407,7 @@ func blankVehicleCandidateListings(
 ) -> [RentalListing] {
     _ = minimumVehicleCount
     _ = maxStoreCount
-    guard let nearestPricedStore = batches.sorted(by: { $0.distanceKm < $1.distanceKm }).first(where: { !$0.listings.isEmpty }) else {
+    guard let nearestPricedStore = nearestPricedStoreBatch(batches) else {
         return []
     }
 
@@ -427,11 +445,13 @@ private func isBetterBlankVehicleListing(_ candidate: RentalListing, than curren
 
 // MARK: - Zuche
 
-private final class ZucheAPIClient {
+final class ZucheAPIClient {
     private let session: URLSession
+    private let cookieAccess: ZucheSessionCookieAccess?
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init(session: URLSession? = nil, cookieAccess: ZucheSessionCookieAccess? = nil) {
+        self.session = session ?? URLSession(configuration: .ephemeral, delegate: ZucheSessionRedirectPolicy(), delegateQueue: nil)
+        self.cookieAccess = cookieAccess
     }
 
     func search(request: SearchRequest) async -> PlatformEvidenceResult {
@@ -610,6 +630,7 @@ private final class ZucheAPIClient {
             )
         }
 
+        traceLiveSearch("city=\(city.cityName) stores=\(stores.count) selected=\(selectedStore.id) \(selectedStore.name)")
         let chooseCar: ZucheChooseCarContent
         do {
             chooseCar = try await postCityGateway(
@@ -636,10 +657,10 @@ private final class ZucheAPIClient {
             )
         }
 
+        traceLiveSearch("returned stores=\(chooseCar.deptHangModels.map { ($0.deptId, $0.models.count) })")
         for dept in chooseCar.deptHangModels {
             guard let store = makeStore(from: dept, cityName: city.cityName, request: request) else { continue }
-            guard store.distanceKm <= request.radiusKm else { continue }
-            guard store.id == selectedStore.id else { continue }
+            guard zucheAcceptsQuotedStore(store, queryStore: selectedStore, isCurrentCity: candidate.isCurrentCity, radiusKm: request.radiusKm) else { continue }
 
             let deptListings = listings(from: dept.models, city: city, dept: dept, store: store, request: request, timeRange: timeRange)
             for priced in deptListings {
@@ -647,7 +668,8 @@ private final class ZucheAPIClient {
             }
             let listings = deptListings.map(\.listing)
             if !hasVehicleQuery {
-                nearestStoreBatch = StoreListingsBatch(distanceKm: store.distanceKm, listings: listings)
+                let batch = StoreListingsBatch(distanceKm: store.distanceKm, listings: listings)
+                nearestStoreBatch = nearestPricedStoreBatch([nearestStoreBatch, batch].compactMap { $0 })
                 continue
             }
 
@@ -691,21 +713,31 @@ private final class ZucheAPIClient {
         return content
     }
 
-    private func postGatewayForm<Response: Decodable>(
+    func postGatewayForm<Response: Decodable>(
         uri: String,
         payload: [String: Any],
         cookieHeader: String? = nil
     ) async throws -> ZucheResponse<Response> {
         var transportErrors: [String] = []
+        var lastLoginFailure: ZucheResponse<Response>?
         for endpoint in zucheGatewayEndpoints(for: uri) {
             do {
-                return try await postForm(
+                let envelope: ZucheResponse<Response> = try await postForm(
                     url: endpoint.url,
                     payload: payload,
                     referer: endpoint.referer,
                     cookieHeader: cookieHeader
                 )
+                if cookieHeader != nil && (envelope.code == 5 || envelope.status == "NOT_LOGIN") {
+                    lastLoginFailure = envelope
+                    continue // Desktop and H5 can use different scoped sessions.
+                }
+                return envelope
             } catch let error as PlatformAPIError {
+                if cookieHeader != nil, case .loginRequired = error {
+                    lastLoginFailure = ZucheResponse(code: 5, status: "NOT_LOGIN", msg: "登录未通过", content: nil)
+                    continue
+                }
                 throw error
             } catch {
                 guard isRetryableZucheTransportError(error) else {
@@ -716,6 +748,7 @@ private final class ZucheAPIClient {
             }
         }
 
+        if transportErrors.isEmpty, let lastLoginFailure { return lastLoginFailure }
         throw PlatformAPIError.message("神州 API 网络连接失败：\(transportErrors.joined(separator: "；"))")
     }
 
@@ -732,18 +765,41 @@ private final class ZucheAPIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.httpShouldHandleCookies = false
         request.timeoutInterval = zucheGatewayRequestTimeoutSeconds
         request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue(referer, forHTTPHeaderField: "Referer")
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
-        if let cookieHeader {
-            request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        if cookieHeader != nil {
+            let scopedHeader: String?
+            if let cookieAccess { scopedHeader = await cookieAccess.header(url) }
+            else { scopedHeader = await zucheCookieHeader(for: url) }
+            if let scopedHeader { request.setValue(scopedHeader, forHTTPHeaderField: "Cookie") }
         }
 
         let (responseData, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            throw PlatformAPIError.message("HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        guard let http = response as? HTTPURLResponse else {
+            throw PlatformAPIError.message("神州接口没有返回有效 HTTP 响应")
+        }
+        if http.statusCode == 401 && cookieHeader != nil { throw PlatformAPIError.loginRequired }
+        guard 200..<300 ~= http.statusCode else { throw PlatformAPIError.message("HTTP \(http.statusCode)") }
+        // The official web client also treats content.status == -910 as expired authentication,
+        // even when the envelope itself reports code 1.
+        let sessionMetadata = try JSONDecoder().decode(ZucheSessionResponseMetadata.self, from: responseData)
+        if sessionMetadata.contentStatus == -910 {
+            throw PlatformAPIError.loginRequired
+        }
+        // A rejected gateway can issue a new anonymous session. Do not let it
+        // overwrite the session used by the next official gateway or login page.
+        if cookieHeader != nil, canAdoptZucheSessionCookies(httpStatus: http.statusCode, code: sessionMetadata.code, status: sessionMetadata.status) {
+            let fields = http.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+                result[String(describing: entry.key)] = String(describing: entry.value)
+            }
+            let responseURL = http.url ?? url
+            let updates = HTTPCookie.cookies(withResponseHeaderFields: fields, for: responseURL)
+            if let cookieAccess { await cookieAccess.accept(updates, responseURL) }
+            else { await PlatformSessionPersistence.shared.applyAuthenticatedResponseCookies(updates, for: responseURL) }
         }
         return try JSONDecoder().decode(ZucheResponse<Response>.self, from: responseData)
     }
@@ -827,23 +883,23 @@ private final class ZucheAPIClient {
             )
         }
 
-        var feesByListingID: [String: Double] = [:]
+        var confirmationsByListingID: [String: ZucheConfirmOrderContent] = [:]
         var loginRejected = false
         var nextIndex = 0
 
-        await withTaskGroup(of: (String, Result<Double?, PlatformAPIError>).self) { group in
+        await withTaskGroup(of: (String, Result<ZucheConfirmOrderContent, PlatformAPIError>).self) { group in
             func addNext() {
                 guard nextIndex < confirmationInputs.count else { return }
                 let input = confirmationInputs[nextIndex]
                 nextIndex += 1
                 group.addTask { [weak self] in
-                    guard let self else { return (input.0, .success(nil)) }
+                    guard let self else { return (input.0, .failure(.message("核价已取消"))) }
                     do {
-                        let fee = try await self.confirmationBaseServiceFee(
+                        let content = try await self.confirmationQuoteContent(
                             context: input.1,
                             cookieHeader: cookieHeader
                         )
-                        return (input.0, .success(fee))
+                        return (input.0, .success(content))
                     } catch let error as PlatformAPIError {
                         return (input.0, .failure(error))
                     } catch {
@@ -858,10 +914,8 @@ private final class ZucheAPIClient {
 
             while let (listingID, result) = await group.next() {
                 switch result {
-                case .success(let fee):
-                    if let fee {
-                        feesByListingID[listingID] = fee
-                    }
+                case .success(let content):
+                    confirmationsByListingID[listingID] = content
                 case .failure(.loginRequired):
                     loginRejected = true
                     group.cancelAll()
@@ -875,22 +929,25 @@ private final class ZucheAPIClient {
         }
 
         let enrichedListings = listings.map { listing in
-            guard let serviceFee = feesByListingID[listing.id] else { return listing }
-            return listingWithConfirmedZucheServiceFee(listing, serviceFee: serviceFee)
+            guard let content = confirmationsByListingID[listing.id] else {
+                return zucheUnconfirmedListing(listing, loginRejected: loginRejected)
+            }
+            return listingWithZucheConfirmation(listing, content: content)
         }
 
         return ZucheFeeEnrichment(
             listings: enrichedListings,
             attemptedWithCookies: true,
-            confirmedFeeCount: feesByListingID.count,
-            loginRejected: loginRejected
+            confirmedFeeCount: confirmationsByListingID.values.filter { zucheActualBaseServiceFee(from: $0) != nil }.count,
+            loginRejected: loginRejected,
+            confirmedTotalCount: enrichedListings.filter { $0.confirmedQuote != nil }.count
         )
     }
 
-    private func confirmationBaseServiceFee(
+    private func confirmationQuoteContent(
         context: ZucheConfirmationContext,
         cookieHeader: String
-    ) async throws -> Double? {
+    ) async throws -> ZucheConfirmOrderContent {
         let envelope: ZucheResponse<ZucheConfirmOrderContent> = try await postGatewayForm(
             uri: "/action/carrctapi/order/confirmOrderInfo/v4",
             payload: context.payload,
@@ -902,19 +959,17 @@ private final class ZucheAPIClient {
         guard envelope.code == 1 || envelope.status == "SUCCESS", let content = envelope.content else {
             throw PlatformAPIError.message(envelope.msg ?? "神州确认页接口返回异常")
         }
-        return zucheActualBaseServiceFee(from: content)
+        return content
     }
 
     @MainActor
-    private func zucheCookieHeader() async -> String? {
+    private func zucheCookieHeader(for url: URL? = nil) async -> String? {
         let store = WKWebsiteDataStore.default().httpCookieStore
-        await ZucheCookieVault.restore(into: store)
+        await PlatformSessionPersistence.shared.start()
         return await withCheckedContinuation { continuation in
             store.getAllCookies { cookies in
-                let zucheCookies = cookies.filter { cookie in
-                    let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
-                    return domain == "zuche.com" || domain.hasSuffix(".zuche.com")
-                }
+                let valid = cookies.filter { ZucheCookieVault.isZucheCookie($0) && ($0.expiresDate.map { $0 > Date() } ?? true) }
+                let zucheCookies = url.map { cookiesForRequest(valid, url: $0) } ?? valid
                 guard !zucheCookies.isEmpty else {
                     continuation.resume(returning: nil)
                     return
@@ -924,8 +979,10 @@ private final class ZucheAPIClient {
         }
     }
 
-    private func listingWithConfirmedZucheServiceFee(_ listing: RentalListing, serviceFee: Double) -> RentalListing {
-        RentalListing(
+    private func listingWithZucheConfirmation(_ listing: RentalListing, content: ZucheConfirmOrderContent) -> RentalListing {
+        let quote = zucheConfirmedQuote(from: content)
+        let serviceFee = zucheActualBaseServiceFee(from: content) ?? listing.platformFees
+        return RentalListing(
             id: listing.id,
             platform: listing.platform,
             store: listing.store,
@@ -937,11 +994,18 @@ private final class ZucheAPIClient {
             oneWayFee: listing.oneWayFee,
             sourceUrl: listing.sourceUrl,
             dataCompleteness: 0.90,
-            warnings: listing.warnings.filter { $0 != .loginRequired }
+            warnings: listing.warnings.filter { $0 != .loginRequired && !(quote != nil && $0 == .partialPrice) },
+            confirmedQuote: quote
         )
     }
 
     private func zucheStatusMessage(listingCount: Int, feeEnrichment: ZucheFeeEnrichment) -> String {
+        if feeEnrichment.confirmedTotalCount > 0 {
+            let pendingMessage = feeEnrichment.loginRejected
+                ? "部分后续核价请求未通过登录校验；已核价结果保留，未完成的报价可重新登录后重试。"
+                : "其余报价仍待核实，不代表登录已失效。"
+            return "已读取 \(listingCount) 个候选，\(feeEnrichment.confirmedTotalCount) 个已取得登录后的确认页应付总额；\(pendingMessage)"
+        }
         if feeEnrichment.confirmedFeeCount > 0 {
             return "已从神州 API 读取 \(listingCount) 个真实候选车型，其中 \(feeEnrichment.confirmedFeeCount) 个已补入确认页基础服务费。"
         }
@@ -949,7 +1013,7 @@ private final class ZucheAPIClient {
             return "已从神州 API 读取 \(listingCount) 个真实候选车型；确认页费用接口提示登录未通过，当前仅含车辆租赁费。"
         }
         if feeEnrichment.attemptedWithCookies {
-            return "已从神州 API 读取 \(listingCount) 个真实候选车型；确认页暂未返回基础服务费，当前仅含车辆租赁费。"
+            return "已从神州 API 读取 \(listingCount) 个真实候选车型；本次核价未完成，请重试核价。本次未收到登录失效响应。"
         }
         return "已从神州 API 读取 \(listingCount) 个真实候选车型；未检测到神州登录态，当前仅含车辆租赁费。"
     }
@@ -998,6 +1062,7 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     private var webView: WKWebView?
     private var continuation: CheckedContinuation<Void, Never>?
     private var sessionObserver: NSObjectProtocol?
+    private var queryStartedAt = Date()
 
     override init() {
         super.init()
@@ -1005,7 +1070,7 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
             forName: EhiLoginSession.didChangeNotification,
             object: nil,
             queue: .main
-        ) { _ in
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.resetWebView()
             }
@@ -1019,7 +1084,8 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     }
 
     func search(request: SearchRequest) async -> PlatformEvidenceResult {
-        await platformResultWithTimeout(
+        queryStartedAt = Date()
+        return await platformResultWithTimeout(
             platform: .ehi,
             onTimeout: { [weak self] in
                 self?.resetWebView()
@@ -1044,19 +1110,34 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     private func performSearch(request: SearchRequest) async -> PlatformEvidenceResult {
         do {
             let webView = try await readyWebView()
+            try Task.checkCancellation()
             let timeRange = platformQueryTimeRange(pickupDate: request.pickupAt, returnDate: request.returnAt)
-            let payload = try JSONEncoder().encode(EhiBridgeRequest(request: request, timeRange: timeRange))
+            let payload = try JSONEncoder().encode(EhiBridgeRequest(request: request, timeRange: timeRange, queryBudgetMilliseconds: Int(max(1, min(28000, (32 - Date().timeIntervalSince(queryStartedAt)) * 1000)))))
             let json = String(data: payload, encoding: .utf8) ?? "{}"
             let result = try await webView.callAsyncJavaScript(ehiSearchScript(json: json), arguments: [:], in: nil, contentWorld: .page)
             guard let resultString = result as? String else {
                 return status(.parseFailed, "一嗨 API 桥接返回了无法识别的数据。")
             }
+            if let response = try? JSONSerialization.jsonObject(with: Data(resultString.utf8)) as? [String: Any], let diagnostics = response["diagnostics"] {
+                traceLiveSearch("ehi stages=\(diagnostics)")
+            }
             let decoded = try JSONDecoder().decode(EhiBridgeResponse.self, from: Data(resultString.utf8))
             let kind = PlatformEvidenceStatusKind(rawValue: decoded.statusKind) ?? .parseFailed
             let listings = decoded.listings.map { $0.domainListing(request: request) }
+            var message = decoded.message
+            let query = request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty && !listings.isEmpty {
+                let matched = listings.filter { listing in
+                    let match = matchVehicle(query: query, vehicleName: listing.vehicleName, vehicleClass: listing.vehicleClass)
+                    return isSpecificVehicleModelQuery(query) ? match.kind == .exact : match.kind != .lowConfidence
+                }.count
+                message += matched > 0 ? "其中匹配当前车型 \(matched) 个。" : "已查结果未匹配当前车型，不代表未查门店无车。"
+            }
+            traceLiveSearch("ehi cities=\(decoded.queriedCityCount ?? 0) stores=\(decoded.completedStoreCount ?? 0) unknownCitiesSkipped=\(decoded.skippedUnknownCityCount ?? 0) budgetExpired=\(decoded.budgetExpired ?? false)")
+            if decoded.budgetExpired == true { resetWebView() }
             return PlatformEvidenceResult(
                 platform: .ehi,
-                status: PlatformEvidenceStatus(platform: .ehi, kind: kind, message: decoded.message, sourceUrl: decoded.sourceUrl),
+                status: PlatformEvidenceStatus(platform: .ehi, kind: kind, message: message, sourceUrl: decoded.sourceUrl),
                 listings: listings
             )
         } catch {
@@ -1070,7 +1151,7 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
         }
 
         let dataStore = WKWebsiteDataStore.default()
-        await EhiCookieVault.restore(into: dataStore.httpCookieStore)
+        await PlatformSessionPersistence.shared.start()
 
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
@@ -1102,6 +1183,9 @@ private final class EhiBridgeClient: NSObject, WKNavigationDelegate {
     }
 
     private func resetWebView() {
+        continuation?.resume()
+        continuation = nil
+        webView?.stopLoading()
         webView?.navigationDelegate = nil
         webView = nil
     }
@@ -1123,6 +1207,8 @@ func makeEhiSearchScript(json: String) -> String {
         """
         const request = \(json);
         const sourceUrl = 'https://booking.1hai.cn/order/firstStep';
+        const apiTimeoutMs = 6000;
+        \(makeEhiQueryBudgetScript())
         for (let i = 0; i < 50 && !window.webpackChunkbooking; i += 1) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -1139,27 +1225,10 @@ func makeEhiSearchScript(json: String) -> String {
         window.webpackChunkbooking.push([[reqId], {}, function(r) { requireFn = r; }]);
         const http = requireFn(4211).A;
         const util = requireFn(2780).A;
-        const apiTimeoutMs = 6000;
-        const withAPITimeout = (promise, label) => Promise.race([
-          promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} 超时`)), apiTimeoutMs))
-        ]);
         const days = request.rentalDays || Math.max(1, Math.ceil((Date.parse(request.returnTime.replace(' ', 'T') + ':00+08:00') - Date.parse(request.pickupTime.replace(' ', 'T') + ':00+08:00')) / 86400000));
         const hasVehicleQuery = (request.vehicleQuery || '').trim().length > 0;
-        const ehiProbeConcurrency = 3;
-        const mapWithConcurrency = async (items, limit, worker) => {
-          const workerCount = Math.max(1, Math.min(limit, items.length));
-          const results = new Array(items.length);
-          let nextIndex = 0;
-          await Promise.all(Array.from({ length: workerCount }, async () => {
-            while (nextIndex < items.length) {
-              const currentIndex = nextIndex;
-              nextIndex += 1;
-              results[currentIndex] = await worker(items[currentIndex], currentIndex);
-            }
-          }));
-          return results;
-        };
+        // The official encrypted SDK is kept serial: parallel stock calls can return incomplete bodies.
+        const ehiProbeConcurrency = 1;
         const decodeObfuscatedDigits = (value) => String(value).split('').map(ch => {
           const code = ch.charCodeAt(0);
           return code >= 57345 && code <= 57354 ? String(code - 57345) : ch;
@@ -1193,6 +1262,7 @@ func makeEhiSearchScript(json: String) -> String {
           const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
           return 6371 * 2 * Math.asin(Math.sqrt(h));
         };
+        \(makeEhiResponseFailureScript())
         const responseBody = (resp) => (resp && resp.data && (resp.data.result ?? resp.data.data ?? resp.data)) ?? (resp && (resp.result ?? resp.data)) ?? resp ?? {};
         const hasResponseBody = (value) => {
           if (value === null || value === undefined) return false;
@@ -1219,7 +1289,9 @@ func makeEhiSearchScript(json: String) -> String {
         const originLabel = request.originLabel || '';
         const originCityCandidates = Array.isArray(request.originCityCandidates) ? request.originCityCandidates : [];
 
-        const cityListResp = await withAPITimeout(http.getEncrypt('/Address/City/List', {}), '一嗨城市接口');
+        const cityListResp = await withAPITimeout(() => http.getEncrypt('/Address/City/List', {}), '一嗨城市接口');
+        const cityFailure = ehiResponseFailure(cityListResp);
+        if (cityFailure) return JSON.stringify({ ...cityFailure, sourceUrl, listings: [] });
         const cityResult = responseBody(cityListResp);
         const cities = arraysFrom(cityResult).filter(city => city && typeof city === 'object' && cityId(city) !== undefined);
         if (!cities.length) {
@@ -1259,18 +1331,8 @@ func makeEhiSearchScript(json: String) -> String {
           return JSON.stringify({ statusKind: 'unavailable', message: `一嗨没有识别到“${originLabel}”对应的可租城市。`, sourceUrl, listings: [] });
         }
         const currentCityId = String(cityId(currentCityEntry.city));
-        const ehiCandidateCities = cityEntries
-          .map(entry => ({
-            ...entry,
-            isCurrentCity: String(cityId(entry.city)) === currentCityId,
-            distanceKm: Number.isFinite(entry.distanceKm) ? entry.distanceKm : 0
-          }))
-          .filter(entry => entry.isCurrentCity || (Number.isFinite(entry.distanceKm) && entry.distanceKm <= request.radiusKm))
-          .sort((a, b) => {
-            if (a.isCurrentCity !== b.isCurrentCity) return a.isCurrentCity ? -1 : 1;
-            if (a.distanceKm !== b.distanceKm) return a.distanceKm - b.distanceKm;
-            return cityName(a.city).localeCompare(cityName(b.city), 'zh-Hans-CN');
-          });
+        \(makeEhiCityPlanningScript())
+        const ehiCandidateCities = planEhiCityEntries(cityEntries, currentCityId, request.radiusKm);
         if (!ehiCandidateCities.length) {
           return JSON.stringify({ statusKind: 'unavailable', message: `一嗨没有识别到“${originLabel}”对应的可租城市。`, sourceUrl, listings: [] });
         }
@@ -1312,13 +1374,21 @@ func makeEhiSearchScript(json: String) -> String {
         const queryErrors = [];
         const cityStoreCandidates = [];
         const vehicleStoreCandidates = [];
+        const cityFetchResults = [];
+        const storeCandidates = [];
+        const candidates = [];
+        let citiesCompleted = 0;
+        let storesCompleted = 0;
+        const maxCurrentCityStoreProbes = 4;
         const fetchStoresForCity = async (cityPlan) => {
           let storeResult = null;
           try {
             const storeResp = await withAPITimeout(
-              http.getEncrypt('/Address/ReservationBooking/List', { cityId: cityId(cityPlan.city), operationTime: request.pickupTime }),
+              () => http.getEncrypt('/Address/ReservationBooking/List', { cityId: cityId(cityPlan.city), operationTime: request.pickupTime }),
               `${cityName(cityPlan.city)}一嗨门店接口`
             );
+            const failure = ehiResponseFailure(storeResp);
+            if (failure) return { cityStores: [], selectedStore: null, error: failure.message, failure };
             storeResult = responseBody(storeResp);
           } catch (error) {
             return {
@@ -1347,29 +1417,17 @@ func makeEhiSearchScript(json: String) -> String {
             .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng))
             .map(s => ({ ...s, distanceKm: distanceKm(origin, { lat: s.lat, lng: s.lng }) }))
             .sort((a, b) => a.distanceKm - b.distanceKm);
+          if (!cityStores.length && hasResponseBody(storeResult)) {
+            const failure = { statusKind: 'parse-failed', message: '门店接口返回了内容，但未解析到有效坐标：' + shape(storeResult) };
+            return { cityStores: [], selectedStore: null, error: failure.message, failure };
+          }
           const storesInsideRadiusForCity = cityStores.filter(s => s.distanceKm <= request.radiusKm);
           const selectedStore = selectedStoreForCity(cityPlan, storesInsideRadiusForCity);
-          return { cityStores, selectedStore, error: null };
+          const selectedStores = cityPlan.isCurrentCity ? storesInsideRadiusForCity.slice(0, maxCurrentCityStoreProbes) : (selectedStore ? [selectedStore] : []);
+          return { cityStores, selectedStore, selectedStores, error: null,
+            diagnostic: { city: cityName(cityPlan.city), code: storeResult?.code, message: storeResult?.message, shape: shape(storeResult), children: Object.entries(storeResult || {}).slice(0, 6).map(([key, value]) => [key, shape(value)]), parsed: cityStores.length }
+          };
         };
-        const cityFetchResults = await mapWithConcurrency(storeCityPlans, ehiProbeConcurrency, fetchStoresForCity);
-        for (const cityFetchResult of cityFetchResults) {
-          if (cityFetchResult.error) queryErrors.push(cityFetchResult.error);
-          cityStoreCandidates.push(...cityFetchResult.cityStores);
-          if (cityFetchResult.selectedStore) vehicleStoreCandidates.push(cityFetchResult.selectedStore);
-        }
-        const storeCandidates = cityStoreCandidates.sort((a, b) => a.distanceKm - b.distanceKm);
-        const blankStoreProbeLimit = 40;
-        const blankStoreCandidates = storeCandidates.filter(s => s.distanceKm <= request.radiusKm);
-        const candidates = hasVehicleQuery
-          ? vehicleStoreCandidates
-          : blankStoreCandidates.slice(0, blankStoreProbeLimit);
-        if (!candidates.length) {
-          const message = hasVehicleQuery
-            ? '一嗨在当前范围内没有可用取车点。'
-            : `一嗨在当前 ${Math.round(request.radiusKm)}km 内没有可用取车点。`;
-          return JSON.stringify({ statusKind: 'unavailable', message, sourceUrl, listings: [] });
-        }
-
         const carName = (item, car) => firstText(car.name, car.carTypeName, car.modelName, car.vehicleName, item.carTypeName, item.modelName, item.vehicleName, item.name);
         const carId = (item, car, name) => firstText(car.id, car.carTypeId, car.modelId, item.carTypeId, item.modelId, item.id, name);
         const collectCarItems = (value, output = []) => {
@@ -1433,15 +1491,16 @@ func makeEhiSearchScript(json: String) -> String {
             }
           });
           const stockPayloads = [
-            { label: '个人匿名', isEnterprise: false },
+            { label: '个人方案', isEnterprise: false },
             { label: '默认上下文', isEnterprise: true }
           ];
 
           let stockResult = null;
           for (const { label, isEnterprise } of stockPayloads) {
+            if (remainingQueryBudget() <= 0) { queryBudgetExpired = true; break; }
             const payload = makeStockPayload(isEnterprise);
             try {
-              const verifyResp = await withAPITimeout(http.postEncrypt('/Verify/Step1', '', payload), `${store.name} ${label} 校验接口`);
+              const verifyResp = await withAPITimeout(() => http.postEncrypt('/Verify/Step1', '', payload), `${store.name} ${label} 校验接口`);
               const verify = responseBody(verifyResp);
               if (!hasResponseBody(verify)) {
                 storeSkips.push(`${store.name} ${label}: 校验接口没有返回内容`);
@@ -1452,7 +1511,7 @@ func makeEhiSearchScript(json: String) -> String {
                 continue;
               }
               storeStockAttemptCount += 1;
-              const stockResp = await withAPITimeout(http.postEncrypt('/Stock/Step2', '', payload), `${store.name} ${label} 报价接口`);
+              const stockResp = await withAPITimeout(() => http.postEncrypt('/Stock/Step2', '', payload), `${store.name} ${label} 报价接口`);
               const code = stockResp?.code ?? stockResp?.status ?? stockResp?.data?.code ?? stockResp?.data?.status;
               if (code === 401) {
                 storeStock401Count += 1;
@@ -1526,23 +1585,61 @@ func makeEhiSearchScript(json: String) -> String {
             if (!listingsByKey[key] || listingsByKey[key].basePrice > listing.basePrice) listingsByKey[key] = listing;
           }
         };
-        const quoteResults = hasVehicleQuery
-          ? await mapWithConcurrency(candidates, ehiProbeConcurrency, quoteStore)
-          : [];
+        const recordCityResult = result => {
+          citiesCompleted += 1;
+          cityFetchResults.push(result);
+          if (result.error) queryErrors.push(result.error);
+          cityStoreCandidates.push(...result.cityStores);
+        };
         if (hasVehicleQuery) {
-          for (const quoteResult of quoteResults) {
-            applyQuoteResult(quoteResult);
+          const queue = createEhiQueryQueue(ehiProbeConcurrency, error => queryErrors.push(String(error)));
+          for (const cityPlan of storeCityPlans) {
+            queue.add(async () => {
+              const result = await fetchStoresForCity(cityPlan);
+              recordCityResult(result);
+              const targets = result.selectedStores || [];
+              vehicleStoreCandidates.push(...targets);
+              candidates.push(...targets);
+              queue.addAll(targets.map(store => async () => {
+                const quote = await quoteStore(store);
+                applyQuoteResult(quote);
+                storesCompleted += 1;
+              }), cityPlan.isCurrentCity);
+            });
           }
+          await withEhiQueryBudget(() => queue.run());
+          storeCandidates.push(...cityStoreCandidates.sort((a, b) => a.distanceKm - b.distanceKm));
         } else {
-          for (const store of candidates) {
-            if (!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId) break;
-            const quoteResult = await quoteStore(store);
-            applyQuoteResult(quoteResult);
-            if (quoteResult.storeListings.length) {
-              selectedBlankStoreId = store.id;
-              break;
+          await withEhiQueryBudget(async () => {
+            const result = await fetchStoresForCity(storeCityPlans[0]);
+            recordCityResult(result);
+            storeCandidates.push(...result.cityStores.sort((a, b) => a.distanceKm - b.distanceKm));
+            const blankStoreProbeLimit = 40;
+            const blankStoreCandidates = storeCandidates.filter(s => s.distanceKm <= request.radiusKm);
+            candidates.push(...blankStoreCandidates.slice(0, blankStoreProbeLimit));
+            for (const store of candidates) {
+              if (remainingQueryBudget() <= 0) { queryBudgetExpired = true; break; }
+              if (!hasVehicleQuery && selectedBlankStoreId && store.id !== selectedBlankStoreId) break;
+              const quote = await quoteStore(store);
+              applyQuoteResult(quote);
+              storesCompleted += 1;
+              if (quote.storeListings.length) { selectedBlankStoreId = store.id; break; }
             }
-          }
+          });
+        }
+        const coverage = '已查 ' + citiesCompleted + '/' + storeCityPlans.length + ' 个可定位城市，完成 ' + storesCompleted + ' 个门店报价';
+        if (queryBudgetExpired && !Object.keys(listingsByKey).length) {
+          return JSON.stringify({statusKind: 'parse-failed', message: '一嗨查询达到本次时限，' + coverage + '，尚未取得可用报价；请缩小范围或重试。', sourceUrl, listings: [], budgetExpired: true});
+        }
+        if (!candidates.length) {
+          const failures = cityFetchResults.map(item => item.failure).filter(Boolean);
+          const failure = failures.find(item => item.statusKind === 'login-required') || failures[0];
+          if (failure) return JSON.stringify({ ...failure, message: '一嗨门店接口：' + failure.message, sourceUrl, listings: [] });
+          if (queryErrors.length) return JSON.stringify({ statusKind: 'parse-failed', message: '一嗨门店查询失败：' + queryErrors.slice(0, 2).join('；'), sourceUrl, listings: [] });
+          const message = hasVehicleQuery
+            ? '一嗨在当前范围内没有可用取车点。'
+            : `一嗨在当前 ${Math.round(request.radiusKm)}km 内没有可用取车点。`;
+          return JSON.stringify({ statusKind: 'unavailable', message, sourceUrl, listings: [], diagnostics: request.includeDiagnostics ? cityFetchResults.map(item => item.diagnostic || item.error) : undefined });
         }
         const listings = Object.values(listingsByKey);
         if (!listings.length && stockAttemptCount > 0 && stock401Count === stockAttemptCount) {
@@ -1581,21 +1678,25 @@ func makeEhiSearchScript(json: String) -> String {
           });
         }
         const blankUnavailableMessage = `一嗨真实接口返回成功，但半径 ${Math.round(request.radiusKm)}km 内已探测 ${candidates.length} 个候选门店没有可订车型。`;
-        const vehicleUnavailableMessage = `一嗨真实接口返回成功，但为避免超时已按每个城市最多探测 1 个候选门店，没有找到匹配车型。`;
+        const vehicleUnavailableMessage = '一嗨' + coverage + '，当前已查门店未返回可订车型；不代表范围内所有门店均无车。';
         return JSON.stringify({
           statusKind: listings.length ? 'ready' : 'unavailable',
           message: listings.length
-            ? `已从一嗨 API 读取 ${listings.length} 个真实候选车型。`
+            ? ('已从一嗨 API 读取 ' + listings.length + ' 个真实候选车型；' + coverage + (queryBudgetExpired ? '，达到时限，已保留返回结果。' : '。'))
             : (hasVehicleQuery ? vehicleUnavailableMessage : blankUnavailableMessage),
           sourceUrl,
-          listings
+          listings,
+          budgetExpired: queryBudgetExpired,
+          queriedCityCount: citiesCompleted,
+          completedStoreCount: storesCompleted,
+          skippedUnknownCityCount: cityEntries.filter(e => String(cityId(e.city)) !== currentCityId && !Number.isFinite(e.distanceKm)).length
         });
         """
 }
 
 // MARK: - Shared Models
 
-private struct ZucheResponse<Content: Decodable>: Decodable {
+struct ZucheResponse<Content: Decodable>: Decodable {
     let code: Int?
     let status: String?
     let msg: String?
@@ -1723,6 +1824,22 @@ struct ZucheConfirmBottomInfo: Decodable {
     }
 }
 
+func zucheConfirmedQuote(from content: ZucheConfirmOrderContent, checkedAt: Date = Date()) -> ConfirmedRentalQuote? {
+    guard let total = content.bottomInfo?.totalPrice, total.isFinite, total >= 0 else { return nil }
+    let items = (content.feeInfos?.baseFeeInfo ?? []).compactMap { item -> ConfirmedRentalFee? in
+        guard let name = item.itemName, !name.isEmpty else { return nil }
+        let amount = item.itemPrice.flatMap { $0.isFinite ? $0 : nil }
+        return ConfirmedRentalFee(name: name, amount: amount, detail: item.itemDesc)
+    }
+    return ConfirmedRentalQuote(
+        payableTotal: total,
+        items: items,
+        checkedAt: checkedAt,
+        sourceURL: "https://www.zuche.com/",
+        scope: "同店取还、平台默认预订方案；改变保障、优惠或取还条件后需重新核价。押金/预授权及退订规则以官方页面为准。"
+    )
+}
+
 func zucheActualBaseServiceFee(from content: ZucheConfirmOrderContent) -> Double? {
     let feeItems = content.feeInfos?.baseFeeInfo ?? []
     let serviceFee = feeItems
@@ -1806,10 +1923,13 @@ private struct EhiBridgeRequest: Encodable {
     let pickupTime: String
     let returnTime: String
     let rentalDays: Int
+    let includeDiagnostics: Bool
+    let queryBudgetMilliseconds: Int
     let radiusKm: Double
     let vehicleQuery: String
 
-    init(request: SearchRequest, timeRange: PlatformQueryTimeRange) {
+    init(request: SearchRequest, timeRange: PlatformQueryTimeRange, queryBudgetMilliseconds: Int = 28000) {
+        self.queryBudgetMilliseconds = queryBudgetMilliseconds
         origin = request.origin
         originLabel = localizedChineseLocationText(request.originLabel)
         originCityCandidates = CarRentalOptimizer.originCityCandidates(from: request.originLabel)
@@ -1818,6 +1938,7 @@ private struct EhiBridgeRequest: Encodable {
         pickupTime = timeRange.pickupTime
         returnTime = timeRange.returnTime
         rentalDays = CarRentalOptimizer.rentalDays(request)
+        includeDiagnostics = ProcessInfo.processInfo.environment["CAR_RENTAL_LIVE_PROBE"] == "1"
         radiusKm = request.radiusKm
         vehicleQuery = request.vehicleQuery
     }
@@ -1828,6 +1949,10 @@ private struct EhiBridgeResponse: Decodable {
     let message: String
     let sourceUrl: String
     let listings: [EhiBridgeListing]
+    let budgetExpired: Bool?
+    let queriedCityCount: Int?
+    let completedStoreCount: Int?
+    let skippedUnknownCityCount: Int?
 }
 
 private struct EhiBridgeListing: Decodable {
@@ -1965,12 +2090,5 @@ private func roundUpToNextHour(_ value: Date) -> Date {
 }
 
 private func rentalDays(_ request: SearchRequest) -> Int {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd"
-    formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-    guard let pickup = formatter.date(from: request.pickupAt),
-          let returnDate = formatter.date(from: request.returnAt)
-    else { return 1 }
-    let days = Calendar(identifier: .gregorian).dateComponents([.day], from: pickup, to: returnDate).day ?? 1
-    return max(1, days)
+    calculateRentalDays(pickupAt: request.pickupAt, returnAt: request.returnAt)
 }

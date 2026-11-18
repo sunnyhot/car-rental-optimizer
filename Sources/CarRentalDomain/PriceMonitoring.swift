@@ -188,6 +188,9 @@ public struct PriceSnapshot: Codable, Equatable, Identifiable {
     public let warnings: [ResultWarning]
     public let sourceURL: String?
     public let message: String
+    public let listingSignature: ListingSignature?
+    public let priceIsComplete: Bool?
+    public let confirmedQuote: ConfirmedRentalQuote?
 
     public init(
         id: String,
@@ -202,6 +205,9 @@ public struct PriceSnapshot: Codable, Equatable, Identifiable {
         dataCompleteness: Double? = nil,
         warnings: [ResultWarning] = [],
         sourceURL: String? = nil,
+        listingSignature: ListingSignature? = nil,
+        priceIsComplete: Bool? = nil,
+        confirmedQuote: ConfirmedRentalQuote? = nil,
         message: String
     ) {
         self.id = id
@@ -216,6 +222,9 @@ public struct PriceSnapshot: Codable, Equatable, Identifiable {
         self.dataCompleteness = dataCompleteness
         self.warnings = warnings
         self.sourceURL = sourceURL
+        self.listingSignature = listingSignature
+        self.priceIsComplete = priceIsComplete
+        self.confirmedQuote = confirmedQuote
         self.message = message
     }
 

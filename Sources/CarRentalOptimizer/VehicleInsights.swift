@@ -101,6 +101,9 @@ struct VehicleInsight: Codable, Equatable {
     var fetchedAt: Date?
     var confidence: VehicleInsightConfidence
     var origin: VehicleInsightOrigin
+    var cacheState: VehicleInsightCacheState? = nil
+    var referenceRetryAfter: Date? = nil
+    var referenceSourceURLs: [String]? = nil
 
     var platformFeatures: [VehicleFeature] {
         specSheet.features.filter { $0.appliesTo == .platformListing }
@@ -131,9 +134,9 @@ struct VehicleInsight: Codable, Equatable {
                 scopeLabel: mergedScopeLabel([length.appliesTo, width.appliesTo, height.appliesTo])
             ))
         } else {
-            appendIntFact(&facts, label: "车长", value: specSheet.lengthMm, suffix: "mm")
-            appendIntFact(&facts, label: "车宽", value: specSheet.widthMm, suffix: "mm")
-            appendIntFact(&facts, label: "车高", value: specSheet.heightMm, suffix: "mm")
+            appendIntFact(&facts, label: "车长", value: specSheet.lengthMm, suffix: "mm", unknown: "未确认")
+            appendIntFact(&facts, label: "车宽", value: specSheet.widthMm, suffix: "mm", unknown: "未确认")
+            appendIntFact(&facts, label: "车高", value: specSheet.heightMm, suffix: "mm", unknown: "未确认")
         }
         appendIntFact(&facts, label: "轴距", value: specSheet.wheelbaseMm, suffix: "mm", unknown: "未确认")
         appendIntFact(&facts, label: "座位数", value: specSheet.seats, suffix: "座")
@@ -245,17 +248,14 @@ enum VehicleInsightLocalInferencer {
     static func normalizedSeriesName(_ value: String) -> String {
         var result = value
         let patterns = [
+            #"^(?:19|20)\d{2}(?:款)?\s*"#,
             #"\d{4}款"#,
             #"\d+(?:\.\d+)?\s*kWh"#,
-            #"\d+(?:\.\d+)?T"#,
-            #"\d+(?:\.\d+)?L"#,
+            #"(?<![A-Za-z0-9])\d+(?:\.\d+)?T\b"#,
+            #"(?<![A-Za-z0-9])\d+(?:\.\d+)?L\b"#,
             #"\d+\s*座"#,
             #"自动"#,
-            #"手动"#,
-            #"新能源"#,
-            #"纯电"#,
-            #"插电混"#,
-            #"混动"#
+            #"手动"#
         ]
         for pattern in patterns {
             result = result.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
@@ -401,15 +401,30 @@ func formatVehicleInsightNumber(_ value: Double) -> String {
     value.rounded() == value ? "\(Int(value))" : String(format: "%.1f", value)
 }
 
+@MainActor
 protocol VehicleInsightProviding: AnyObject {
     func localInsight(for listing: RentalListing) -> VehicleInsight
     func insight(for listing: RentalListing) async -> VehicleInsight
+    func refreshInsight(for listing: RentalListing) async -> VehicleInsight
+}
+
+extension VehicleInsightProviding {
+    func refreshInsight(for listing: RentalListing) async -> VehicleInsight { await insight(for: listing) }
+}
+
+final class LocalOnlyVehicleInsightService: VehicleInsightProviding {
+    func localInsight(for listing: RentalListing) -> VehicleInsight { VehicleInsightLocalInferencer.localInsight(for: listing) }
+    func insight(for listing: RentalListing) async -> VehicleInsight { localInsight(for: listing) }
 }
 
 final class VehicleInsightService: VehicleInsightProviding {
     private let store: VehicleInsightStore
     private let networkProvider: VehicleInsightNetworkProvider
     private let now: () -> Date
+    private var inFlight: [String: Task<VehicleInsight?, Never>] = [:]
+    private var lastAttempts: [String: Date] = [:]
+    private var rateLimitedKeys = Set<String>()
+    private let requestGate = VehicleReferenceRequestGate(limit: 2)
 
     init(
         store: VehicleInsightStore = VehicleInsightStore(),
@@ -422,39 +437,69 @@ final class VehicleInsightService: VehicleInsightProviding {
     }
 
     func localInsight(for listing: RentalListing) -> VehicleInsight {
-        VehicleInsightLocalInferencer.localInsight(for: listing, now: now())
-    }
-
-    func insight(for listing: RentalListing) async -> VehicleInsight {
         let key = VehicleInsightLocalInferencer.normalizedQuery(for: listing)
         if let cached = store.cachedInsight(forKey: key, now: now()) {
             return merge(cached, withLocalConfigurationFrom: listing)
         }
-        if let network = await networkProvider.networkInsight(for: listing, now: now()) {
+        return VehicleInsightLocalInferencer.localInsight(for: listing, now: now())
+    }
+
+    func insight(for listing: RentalListing) async -> VehicleInsight {
+        await loadInsight(for: listing, forceRefresh: false)
+    }
+
+    func refreshInsight(for listing: RentalListing) async -> VehicleInsight {
+        await loadInsight(for: listing, forceRefresh: true)
+    }
+
+    private func loadInsight(for listing: RentalListing, forceRefresh: Bool) async -> VehicleInsight {
+        let query = VehicleInsightLocalInferencer.normalizedQuery(for: listing)
+        let key = VehicleInsightStore.normalizedCacheKey(query)
+        if let pending = inFlight[key] {
+            if let result = await pending.value { return merge(result, withLocalConfigurationFrom: listing) }
+            return localInsight(for: listing)
+        }
+        if !forceRefresh, !rateLimitedKeys.contains(key), let cached = store.cachedInsight(forKey: key, now: now()), !store.needsRefresh(forKey: key, now: now()) {
+            return merge(cached, withLocalConfigurationFrom: listing)
+        }
+        if !forceRefresh, !rateLimitedKeys.contains(key), let last = lastAttempts[key], now().timeIntervalSince(last) < 300 { return localInsight(for: listing) }
+        rateLimitedKeys.remove(key)
+        lastAttempts[key] = now()
+        store.recordRefreshAttempt(forKey: key, now: now())
+        let provider = networkProvider
+        let timestamp = now()
+        let gate = requestGate
+        let task = Task {
+            await gate.acquire()
+            var value = await provider.networkInsight(for: listing, now: timestamp)
+            if value == nil, let retry = await provider.httpClient.retryAfterDate() {
+                var deferred = VehicleInsightLocalInferencer.localInsight(for: listing, now: timestamp)
+                deferred.referenceRetryAfter = retry
+                value = deferred
+            }
+            await gate.release()
+            return value
+        }
+        inFlight[key] = task
+        defer { inFlight[key] = nil }
+        if let network = await task.value {
+            if let retry = network.referenceRetryAfter {
+                rateLimitedKeys.insert(key)
+                var fallback = localInsight(for: listing)
+                fallback.referenceRetryAfter = retry
+                return fallback
+            }
             store.save(network, forKey: key, now: now())
-            return network
+            store.recordRefreshAttempt(forKey: key, now: now())
+            if let persisted = store.cachedInsight(forKey: key, now: now()) {
+                return merge(persisted, withLocalConfigurationFrom: listing)
+            }
+            return merge(network, withLocalConfigurationFrom: listing)
         }
         return localInsight(for: listing)
     }
 
     private func merge(_ cached: VehicleInsight, withLocalConfigurationFrom listing: RentalListing) -> VehicleInsight {
-        let local = localInsight(for: listing)
-        var merged = cached
-        merged.vehicleName = listing.vehicleName
-        merged.configurationSummary = local.configurationSummary
-        merged.trimConfidence = local.trimConfidence
-        merged.shortSummary = local.shortSummary
-        merged.specSheet.features = local.specSheet.features
-        if let seats = local.specSheet.seats {
-            merged.specSheet.seats = seats
-        }
-        if let bodyStyle = local.specSheet.bodyStyle {
-            merged.specSheet.bodyStyle = bodyStyle
-        }
-        if let battery = local.specSheet.batteryKWh {
-            merged.specSheet.batteryKWh = battery
-        }
-        merged.longSummary = "\(cached.longSummary) 当前租赁车辆配置以平台返回为准：\(local.configurationSummary ?? "配置以平台返回为准")。"
-        return merged
+        mergeVehicleReference(cached, for: listing, now: now())
     }
 }

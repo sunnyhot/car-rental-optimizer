@@ -25,7 +25,7 @@ struct ComparisonPresentationTests {
 
         let rows = ComparisonPresentation.sections(candidates: candidates, insightStates: [:], onlyDifferences: false).flatMap(\.rows)
 
-        #expect(rows.first { $0.id == "best-total" }?.cells.first { $0.candidateID == "cheap" }?.tone == .advantage)
+        #expect(rows.first { $0.id == "best-total" }?.cells.first { $0.candidateID == "cheap" }?.tone == .warning)
         #expect(rows.first { $0.id == "store-distance" }?.cells.first { $0.candidateID == "near" }?.tone == .advantage)
         #expect(rows.first { $0.id == "completeness" }?.cells.first { $0.candidateID == "near" }?.tone == .advantage)
     }

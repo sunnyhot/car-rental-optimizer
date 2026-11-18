@@ -269,11 +269,13 @@ private struct MonitorTrendChart: View {
     let snapshots: [PriceSnapshot]
 
     private var points: [PriceSnapshot] {
-        snapshots.filter { $0.status == .successful }
+        comparableMonitorSnapshots(snapshots)
     }
 
     var body: some View {
         MonitorCommandSurface(title: "价格趋势", icon: "chart.xyaxis.line", step: "TREND") {
+            Text("仅展示最近方案的同门店同车型完整报价；未确认费用仍保留在历史快照中。")
+                .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
             Chart {
                 ForEach(points) { snapshot in
                     if let price = snapshot.platformRentalPrice {
@@ -282,14 +284,14 @@ private struct MonitorTrendChart: View {
                     }
                     if let total = snapshot.recommendationTotalCost {
                         LineMark(x: .value("时间", snapshot.checkedAt), y: .value("价格", total))
-                            .foregroundStyle(by: .value("口径", "推荐总成本"))
+                            .foregroundStyle(by: .value("口径", "租车+到店估算"))
                     }
                 }
             }
             .chartLegend(position: .bottom)
             .chartForegroundStyleScale([
                 "平台租车价": WorkbenchStyle.decisionBlue,
-                "推荐总成本": WorkbenchStyle.signalTeal,
+                "租车+到店估算": WorkbenchStyle.signalTeal,
             ])
         }
     }
@@ -332,7 +334,7 @@ private struct MonitorSnapshotTable: View {
                                 Text(DateFormatter.localizedString(from: snapshot.checkedAt, dateStyle: .short, timeStyle: .short))
                                 Spacer()
                                 Text(snapshot.platformRentalPrice.map(formatMoney) ?? snapshot.status.label)
-                                Text(snapshot.status == .successful ? "历史快照，可能已失效" : snapshot.message)
+                                Text(snapshot.status == .successful && snapshot.priceIsComplete == true ? "历史完整报价，可能已失效" : snapshot.message)
                                     .font(.caption2)
                                     .foregroundStyle(snapshot.status == .successful ? WorkbenchStyle.amberAlert : WorkbenchStyle.muted)
                                     .lineLimit(1)

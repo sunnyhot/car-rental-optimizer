@@ -3,10 +3,16 @@ import Foundation
 
 protocol VehicleInsightHTTPClient {
     func data(from url: URL) async throws -> (Data, URLResponse)
+    func retryAfterDate() async -> Date?
+}
+
+extension VehicleInsightHTTPClient {
+    func retryAfterDate() async -> Date? { nil }
 }
 
 struct URLSessionVehicleInsightHTTPClient: VehicleInsightHTTPClient {
     private let session: URLSession
+    private let pacer = VehicleReferenceRequestPacer()
 
     init(timeoutInterval: TimeInterval = 5) {
         let configuration = URLSessionConfiguration.ephemeral
@@ -16,8 +22,19 @@ struct URLSessionVehicleInsightHTTPClient: VehicleInsightHTTPClient {
     }
 
     func data(from url: URL) async throws -> (Data, URLResponse) {
-        try await session.data(from: url)
+        try await pacer.waitForPermit()
+        let result = try await session.data(from: url)
+        if let response = result.1 as? HTTPURLResponse, response.statusCode == 429 {
+            let retry = vehicleReferenceRetryDate(response.value(forHTTPHeaderField: "Retry-After"))
+            await pacer.registerRateLimit(until: retry)
+            throw VehicleReferenceRateLimitError(retryAfter: retry)
+        }
+        return result
     }
+}
+
+extension URLSessionVehicleInsightHTTPClient {
+    func retryAfterDate() async -> Date? { await pacer.retryAfterDate() }
 }
 
 struct VehicleInsightNetworkProvider {
@@ -40,7 +57,9 @@ struct VehicleInsightNetworkProvider {
     }
 
     private func sohuModelLibraryInsight(for query: String, local: VehicleInsight, now: Date) async -> VehicleInsight? {
-        guard let model = await sohuModelResult(for: query),
+        let candidates = await sohuModelCandidates(for: query)
+        if candidates.count > 1 { return await commonVariantInsight(candidates, query: query, local: local, now: now) }
+        guard let model = candidates.first,
               acceptsNetworkTitle(model.content, for: query),
               let modelURL = URL(string: "https://db.auto.sohu.com/model_\(model.modelID)"),
               let html = try? await htmlString(from: modelURL)
@@ -74,13 +93,48 @@ struct VehicleInsightNetworkProvider {
         return enriched
     }
 
-    private func sohuModelResult(for query: String) async -> SohuModelSearchResult? {
-        guard let url = sohuAssociateURL(for: query),
-              let results = try? await sohuAssociateResults(from: url)
-        else { return nil }
-        return results.first { result in
-            result.type == nil || result.type == 2
+    private func sohuModelCandidates(for query: String) async -> [SohuModelSearchResult] {
+        for candidateQuery in VehicleModelIdentity.lookupQueries(query) {
+            guard let url = sohuAssociateURL(for: candidateQuery),
+                  let results = try? await sohuAssociateResults(from: url) else { continue }
+            if let matched = results.first(where: {
+                ($0.type == nil || $0.type == 2) && acceptsNetworkTitle($0.content, for: query)
+            }) { return [matched] }
+            var variantIDs = Set<Int>()
+            let variants = results.filter { ($0.type == nil || $0.type == 2) && VehicleModelIdentity.isEnergyVariant($0.content, of: query) && variantIDs.insert($0.modelID).inserted }
+            if (2...3).contains(variants.count) { return variants }
         }
+        return []
+    }
+
+    private func commonVariantInsight(_ variants: [SohuModelSearchResult], query: String, local: VehicleInsight, now: Date) async -> VehicleInsight? {
+        var sheets: [VehicleSpecSheet] = []
+        var urls: [String] = []
+        for variant in variants {
+            guard let url = URL(string: "https://db.auto.sohu.com/model_\(variant.modelID)"), let html = try? await htmlString(from: url) else { return nil }
+            sheets.append(sohuSpecSheet(from: html, sourceName: "搜狐车型库（多版本对照）", sourceURL: url.absoluteString).sanitizedDimensions())
+            urls.append(url.absoluteString)
+        }
+        func common(_ value: (VehicleSpecSheet) -> VehicleSpecValue<Int>?) -> VehicleSpecValue<Int>? {
+            let values = sheets.compactMap(value)
+            guard values.count == sheets.count, let first = values.first, values.allSatisfy({ $0.value == first.value }) else { return nil }
+            return first
+        }
+        var result = local
+        result.specSheet.lengthMm = common { $0.lengthMm }
+        result.specSheet.widthMm = common { $0.widthMm }
+        result.specSheet.heightMm = common { $0.heightMm }
+        result.specSheet.wheelbaseMm = common { $0.wheelbaseMm }
+        guard result.specSheet.hasReferenceDimensions else { return nil }
+        result.origin = .network
+        result.sourceName = "搜狐车型库（多版本对照）"
+        result.sourceURL = urls.first
+        result.referenceSourceURLs = urls
+        result.fetchedAt = now
+        result.confidence = .medium
+        result.seriesName = query
+        result.longSummary = "车系参考：已对照本次匹配到的 \(variants.count) 个能源版本，仅采用这些版本一致的尺寸；能源、续航和具体年款配置不据此推断。"
+        return result
     }
 
     private func sohuAssociateResults(from url: URL) async throws -> [SohuModelSearchResult] {
@@ -255,18 +309,7 @@ struct VehicleInsightNetworkProvider {
     }
 
     func acceptsNetworkTitle(_ title: String, for query: String) -> Bool {
-        let titleKey = normalizedNetworkKey(title)
-        let queryKey = normalizedNetworkKey(query)
-        let titleCompactKey = titleKey.replacingOccurrences(of: " ", with: "")
-        let queryCompactKey = queryKey.replacingOccurrences(of: " ", with: "")
-        guard !titleKey.isEmpty, !queryKey.isEmpty else { return false }
-        if titleCompactKey == queryCompactKey { return true }
-        if titleCompactKey.contains(queryCompactKey) || queryCompactKey.contains(titleCompactKey) { return true }
-
-        let queryTokens = Set(queryKey.split(separator: " ").map(String.init))
-        let titleTokens = Set(titleKey.split(separator: " ").map(String.init))
-        guard !queryTokens.isEmpty else { return false }
-        return queryTokens.isSubset(of: titleTokens)
+        VehicleModelIdentity.matches(title, query: query)
     }
 
     private func wikipediaSummary(from url: URL) async throws -> WikipediaSummaryResponse {
@@ -370,11 +413,10 @@ struct VehicleInsightNetworkProvider {
     }
 
     private func quantityClaim(_ claims: [WikidataClaim]?) -> Int? {
-        guard let quantity = claims?.compactMap({ $0.mainsnak.datavalue?.quantity }).first else { return nil }
-        let amount = quantity.amount.replacingOccurrences(of: "+", with: "")
-        guard let value = Double(amount) else { return nil }
-        let rounded = Int(value.rounded())
-        return rounded > 0 ? rounded : nil
+        claims?.compactMap { claim in
+            guard let quantity = claim.mainsnak.datavalue?.quantity else { return nil }
+            return vehicleDimensionMillimeters(amount: quantity.amount, unit: quantity.unit)
+        }.first
     }
 
     private func localizedValue(_ values: [String: WikidataLanguageValue]) -> String? {
@@ -514,6 +556,21 @@ private struct WikidataDataValue: Decodable {
 
 private struct WikidataQuantity: Decodable {
     var amount: String
+    var unit: String?
+}
+
+func vehicleDimensionMillimeters(amount: String, unit: String?) -> Int? {
+    guard let number = Double(amount), number.isFinite, let unit else { return nil }
+    let scale: Double
+    switch unit.split(separator: "/").last {
+    case "Q174789": scale = 1 // millimetre
+    case "Q174728": scale = 10 // centimetre
+    case "Q11573": scale = 1000 // metre
+    default: return nil
+    }
+    let millimeters = number * scale
+    guard (500...15000).contains(millimeters) else { return nil }
+    return Int(millimeters.rounded())
 }
 
 private func normalizedNetworkKey(_ value: String) -> String {

@@ -81,7 +81,7 @@ struct CreateMonitorSheet: View {
                 MonitorSheetFactLine(icon: "mappin.circle.fill", text: request.originLabel)
                 MonitorSheetFactLine(icon: "car.fill", text: vehicleQuery.isEmpty ? "未指定车型" : vehicleQuery)
                 if let recommendation {
-                    MonitorSheetFactLine(icon: "yensign.circle", text: "租车价 \(formatMoney(recommendation.rentalTotal)) · 总成本 \(formatMoney(recommendation.bestTotal))")
+                    MonitorSheetFactLine(icon: "yensign.circle", text: "租车价 \(formatMoney(recommendation.rentalTotal)) · 总成本 \(QuotePresentation.totalValue(recommendation))")
                     MonitorSheetFactLine(icon: "building.2.fill", text: "\(recommendation.listing.platform.label) · \(recommendation.listing.store.name)")
                 }
             }
@@ -103,7 +103,11 @@ struct CreateMonitorSheet: View {
                 }
             }
 
-            Toggle("只要平台租车价下降就提醒", isOn: $notifyOnAnyDecrease)
+            Text("只比较同平台、同门店、同车型且费用完整的报价。替代方案、未确认费用不触发降价；历史报价不能保证可订。")
+                .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
+            Text("仅应用运行且开启后台巡查时持续检查；退出应用后停止。降价不等于重订划算，请另行确认退订费。")
+                .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
+            Toggle("同口径租车价下降就提醒", isOn: $notifyOnAnyDecrease)
             TextField("固定金额阈值，例如 20", text: $minimumDropAmount)
                 .textFieldStyle(.roundedBorder)
             TextField("百分比阈值，例如 5", text: $minimumDropPercent)

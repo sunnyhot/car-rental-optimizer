@@ -8,15 +8,19 @@ extension Notification.Name {
 }
 
 enum AppDefaults {
-    static var searchRequest: SearchRequest {
-        let pickupDate = AppDateRules.today
-        let returnDate = AppDateRules.addingDays(1, to: pickupDate)
+    static var searchRequest: SearchRequest { searchRequest(now: Date()) }
+
+    static func searchRequest(now: Date) -> SearchRequest {
+        let initialPickup = AppDateRules.defaultPickupDate(now: now)
+        let times = RentalDateTimeSelection(pickup: initialPickup, returnDate: initialPickup.addingTimeInterval(24 * 3600)).applyingDefaultTimes(now: now)
+        let pickupDate = times.pickup
+        let returnDate = times.returnDate
 
         return SearchRequest(
             origin: GeoPoint(lat: 39.9169, lng: 116.6462),
             originLabel: "北京通州",
-            pickupAt: AppDateRules.formatRequestDate(pickupDate),
-            returnAt: AppDateRules.formatRequestDate(returnDate),
+            pickupAt: AppDateRules.formatRequestDateTime(pickupDate),
+            returnAt: AppDateRules.formatRequestDateTime(returnDate),
             returnMode: .sameStore,
             radiusKm: 100,
             vehicleQuery: "瑞虎8",
@@ -101,11 +105,24 @@ enum AppDateRules {
         return max(1, days)
     }
 
-    static func parseRequestDate(_ value: String) -> Date? {
+    static var defaultPickupDate: Date { defaultPickupDate(now: Date()) }
+
+    static func defaultPickupDate(now: Date) -> Date {
+        let lead = now.addingTimeInterval(2 * 3600)
+        let hour = calendar.dateInterval(of: .hour, for: lead)?.end ?? lead
+        return hour
+    }
+
+    static func formatRequestDateTime(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        return formatter.date(from: value)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
+
+    static func parseRequestDate(_ value: String) -> Date? {
+        parseRentalDate(value)
     }
 
     private static func maxDay(_ lhs: Date, _ rhs: Date) -> Date {

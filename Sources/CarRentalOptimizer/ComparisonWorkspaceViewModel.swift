@@ -27,8 +27,8 @@ final class ComparisonWorkspaceViewModel: ObservableObject {
     private let vehicleInsightService: VehicleInsightProviding
     private var insightTasks: [String: Task<Void, Never>] = [:]
 
-    init(vehicleInsightService: VehicleInsightProviding = VehicleInsightService()) {
-        self.vehicleInsightService = vehicleInsightService
+    init(vehicleInsightService: VehicleInsightProviding? = nil) {
+        self.vehicleInsightService = vehicleInsightService ?? VehicleInsightService()
     }
 
     var selectedIDs: [String] {
@@ -99,6 +99,15 @@ final class ComparisonWorkspaceViewModel: ObservableObject {
         selectedRecommendations = retained
         if selectedRecommendations.count < 2 {
             isComparing = false
+        }
+    }
+
+    func refreshCachedReferences(from loader: VehicleReferenceBatchLoader) {
+        for candidate in selectedRecommendations {
+            let insight = loader.reference(for: candidate.listing)
+            if insight.specSheet.hasReferenceDimensions {
+                insightStates[candidate.id] = .loaded(insight)
+            }
         }
     }
 

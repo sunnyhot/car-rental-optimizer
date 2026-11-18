@@ -90,16 +90,17 @@ enum ZucheCookieVault {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         guard let persisted = try? JSONDecoder().decode([PersistedZucheCookie].self, from: data) else { return }
 
-        for cookie in restoredCookies(from: persisted) {
+        let current = await store.allCookiesAsync()
+        for cookie in missingSessionCookies(saved: restoredCookies(from: persisted), current: current) {
             await store.setCookieAsync(cookie)
         }
     }
 
-    @MainActor
-    static func save(from store: WKHTTPCookieStore, fileURL: URL = defaultCookieFileURL) async {
+    @MainActor @discardableResult
+    static func save(from store: WKHTTPCookieStore, fileURL: URL = defaultCookieFileURL, allowEmpty: Bool = false) async -> Bool {
         let cookies = await store.allCookiesAsync()
         let persisted = persistableCookies(from: cookies)
-        guard !persisted.isEmpty else { return }
+        if persisted.isEmpty && !allowEmpty { return true }
 
         do {
             try FileManager.default.createDirectory(
@@ -110,8 +111,10 @@ enum ZucheCookieVault {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(persisted)
             try data.write(to: fileURL, options: [.atomic])
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            return true
         } catch {
-            assertionFailure("Failed to persist CAR Inc cookies: \(error.localizedDescription)")
+            return false
         }
     }
 }

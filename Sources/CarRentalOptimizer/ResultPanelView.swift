@@ -34,6 +34,13 @@ struct ResultPanelView: View {
                             }
 
                             SearchDiagnosticSummaryView(summary: viewModel.searchDiagnosticSummary)
+                            Text("实际查询：\(viewModel.resultsRequest.pickupAt) 至 \(viewModel.resultsRequest.returnAt)（北京时间）")
+                                .font(.caption).foregroundStyle(WorkbenchStyle.ink)
+                            Text(QuotePresentation.scopeNotice)
+                                .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
+                            VehicleReferenceProgressView(loader: viewModel.vehicleReferences) {
+                                viewModel.retryMissingVehicleReferences()
+                            }
                             RecommendationFilterBar()
 
                             let displayedResults = viewModel.displayedResults
@@ -47,6 +54,7 @@ struct ResultPanelView: View {
                                         ResultSignalCard(
                                             rank: index + 1,
                                             recommendation: result,
+                                            referenceLoader: viewModel.vehicleReferences,
                                             isSelected: viewModel.selected?.id == result.id,
                                             isComparisonSelected: comparisonViewModel.isSelected(result.id),
                                             isComparisonSelectionEnabled: comparisonViewModel.canSelect(result.id),
@@ -73,11 +81,11 @@ struct ResultPanelView: View {
         .sheet(item: $pendingMonitorRecommendation) { recommendation in
             CreateMonitorSheet(
                 recommendation: recommendation,
-                request: viewModel.request,
+                request: viewModel.resultsRequest,
                 onSaveFromRecommendation: { frequency, rule, notifications in
                     try await monitorViewModel.createMonitor(
                         from: recommendation,
-                        request: viewModel.request,
+                        request: viewModel.resultsRequest,
                         frequency: frequency,
                         alertRule: rule,
                         systemNotificationsEnabled: notifications
@@ -130,7 +138,7 @@ struct ResultPanelView: View {
         if viewModel.hasActiveRecommendationFilters {
             return "\(viewModel.filteredResultCount)/\(viewModel.results.count) 个候选已筛选"
         }
-        return "\(viewModel.results.count) 个真实候选，同车型取优后按总成本升序"
+        return "\(viewModel.results.count) 个真实候选，费用完整优先，组内按估算成本排序"
     }
 }
 
@@ -279,7 +287,7 @@ private struct RecommendationFilterBar: View {
                             viewModel.showsAllVehicleMatches.toggle()
                         } label: {
                             Label(
-                                viewModel.showsAllVehicleMatches ? "只看最低价" : "显示全部匹配",
+                                viewModel.showsAllVehicleMatches ? "收起匹配" : "显示全部匹配",
                                 systemImage: viewModel.showsAllVehicleMatches ? "line.3.horizontal.decrease.circle" : "list.bullet.rectangle"
                             )
                         }
@@ -350,8 +358,8 @@ private struct RecommendationFilterBar: View {
     private var filterToggles: some View {
         Group {
             Toggle("费用完整", isOn: $viewModel.recommendationFilter.hideIncompleteFees)
-            Toggle("门店最低", isOn: $viewModel.recommendationFilter.deduplicateByStore)
-            Toggle("车型最低", isOn: $viewModel.recommendationFilter.deduplicateByVehicle)
+            Toggle("合并门店", isOn: $viewModel.recommendationFilter.deduplicateByStore)
+            Toggle("合并车型", isOn: $viewModel.recommendationFilter.deduplicateByVehicle)
         }
     }
 
@@ -509,6 +517,7 @@ private struct MonitorSectionLikeTitle: View {
 private struct ResultSignalCard: View {
     let rank: Int
     let recommendation: Recommendation
+    @ObservedObject var referenceLoader: VehicleReferenceBatchLoader
     let isSelected: Bool
     let isComparisonSelected: Bool
     let isComparisonSelectionEnabled: Bool
@@ -614,7 +623,9 @@ private struct ResultSignalCard: View {
                     .fixedSize()
                 }
 
-                VehicleInsightLine(insight: VehicleInsightLocalInferencer.localInsight(for: recommendation.listing))
+                VehicleInsightLine(insight: referenceLoader.reference(for: recommendation.listing))
+                Text(referenceLoader.dimensionSummary(for: recommendation.listing))
+                    .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
 
                 HStack(spacing: 14) {
                     Label("\(recommendation.listing.store.distanceKm, specifier: "%.1f") km", systemImage: "location.fill")
@@ -628,10 +639,10 @@ private struct ResultSignalCard: View {
             Spacer(minLength: 10)
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text("总成本")
+                Text(QuotePresentation.rentalLabel(recommendation))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(WorkbenchStyle.muted)
-                Text(formatMoney(recommendation.bestTotal))
+                Text(formatMoney(recommendation.rentalTotal))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(WorkbenchStyle.ink)
                     .monospacedDigit()
@@ -645,13 +656,13 @@ private struct ResultSignalCard: View {
     private var cardMetrics: some View {
         HStack(spacing: 7) {
             BlueprintMetricTile(
-                title: "租车小计",
+                title: QuotePresentation.rentalLabel(recommendation),
                 value: formatMoney(recommendation.rentalTotal),
                 icon: "car.fill",
                 tone: .active
             )
             BlueprintMetricTile(
-                title: "最优到店",
+                title: "较低到店估价",
                 value: formatMoney(bestRouteCost),
                 icon: recommendation.bestRouteMode == .taxi ? "car.side" : "bus.fill",
                 tone: .success
@@ -672,7 +683,7 @@ private struct ResultSignalCard: View {
     }
 
     private var rankingReason: String {
-        var reason = "排序依据：总成本 \(formatMoney(recommendation.bestTotal)) = 租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost))"
+        var reason = "排序依据：总成本 \(QuotePresentation.totalValue(recommendation)) = 租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost))"
         if let matchLabel = recommendation.match.displayLabel {
             reason += " · \(matchLabel)"
         }
@@ -708,7 +719,7 @@ private struct ResultSignalCard: View {
     }
 
     private var accessibilitySummary: String {
-        "\(rank)号方案，\(recommendation.listing.platform.label)，\(recommendation.listing.vehicleName)，总成本\(formatMoney(recommendation.bestTotal))"
+        "\(rank)号方案，\(recommendation.listing.platform.label)，\(recommendation.listing.vehicleName)，总成本\(QuotePresentation.totalValue(recommendation))，\(referenceLoader.dimensionSummary(for: recommendation.listing))"
     }
 
     private var rankBadge: some View {

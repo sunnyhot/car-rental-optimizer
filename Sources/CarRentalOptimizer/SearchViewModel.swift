@@ -251,6 +251,7 @@ final class SearchViewModel: ObservableObject {
     @Published var isLoadingSelectedVehicleInsight = false
     @Published var isSearching = false
     @Published var isLocatingOrigin = false
+    @Published private(set) var resolvedCurrentLocation: ResolvedLocation?
     /// Advances once per validated (non-blocked) search so observers can reset
     /// derived state (e.g. the comparison workspace) when a new result set begins.
     @Published private(set) var searchGeneration = 0
@@ -272,10 +273,20 @@ final class SearchViewModel: ObservableObject {
     private let geocoder: AddressGeocoding
     private let mapService: MapService
     private let currentLocationProvider: CurrentLocationProviding
+    private let requiresCurrentLocation: Bool
     private let addressSuggestionProvider: AddressSuggestionProviding
     private let railStationSuggestionProvider: RailStationSuggestionProviding
     private let vehicleSuggestionStore: VehicleSuggestionStore
     private let vehicleInsightService: VehicleInsightProviding
+    lazy var vehicleReferences: VehicleReferenceBatchLoader = {
+        let loader = VehicleReferenceBatchLoader(service: vehicleInsightService)
+        loader.onUpdate = { [weak self] key, reference in
+            guard let self, let listing = self.selected?.listing, VehicleReferenceBatchLoader.key(for: listing) == key else { return }
+            self.selectedVehicleInsight = mergeVehicleReference(reference, for: listing, now: self.now())
+            self.isLoadingSelectedVehicleInsight = false
+        }
+        return loader
+    }()
     private let initialLocationRetryDelayNanoseconds: UInt64
     private let now: () -> Date
     private var hasRequestedInitialLocation = false
@@ -294,29 +305,33 @@ final class SearchViewModel: ObservableObject {
         self.geocoder = AppleAddressGeocoder()
         self.mapService = AppleMapService()
         self.currentLocationProvider = AppleCurrentLocationProvider()
-        self.addressSuggestionProvider = AppleAddressSuggestionProvider()
-        self.railStationSuggestionProvider = AppleRailStationSuggestionProvider()
+        self.requiresCurrentLocation = true
+        self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
+        self.railStationSuggestionProvider = EmptyRailStationSuggestionProvider()
         self.vehicleSuggestionStore = VehicleSuggestionStore()
         self.vehicleInsightService = VehicleInsightService()
         self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
+        if requiresCurrentLocation { resetUnresolvedCurrentLocation() }
     }
 
     /// Live initializer that shares a vehicle-insight service with another
     /// workspace (e.g. comparison) so both fetch through one cache.
-    init(vehicleInsightService: VehicleInsightProviding = VehicleInsightService()) {
+    init(vehicleInsightService: VehicleInsightProviding? = nil) {
         self.searchProvider = LiveRentalSearchService()
         self.geocoder = AppleAddressGeocoder()
         self.mapService = AppleMapService()
         self.currentLocationProvider = AppleCurrentLocationProvider()
-        self.addressSuggestionProvider = AppleAddressSuggestionProvider()
-        self.railStationSuggestionProvider = AppleRailStationSuggestionProvider()
+        self.requiresCurrentLocation = true
+        self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
+        self.railStationSuggestionProvider = EmptyRailStationSuggestionProvider()
         self.vehicleSuggestionStore = VehicleSuggestionStore()
-        self.vehicleInsightService = vehicleInsightService
+        self.vehicleInsightService = vehicleInsightService ?? VehicleInsightService()
         self.initialLocationRetryDelayNanoseconds = defaultInitialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
+        if requiresCurrentLocation { resetUnresolvedCurrentLocation() }
     }
 
     init(snapshotProvider: PlatformSnapshotProviding) {
@@ -324,13 +339,15 @@ final class SearchViewModel: ObservableObject {
         self.geocoder = CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin)
         self.mapService = EstimatedMapService()
         self.currentLocationProvider = UnavailableCurrentLocationProvider()
+        self.requiresCurrentLocation = false
         self.addressSuggestionProvider = EmptyAddressSuggestionProvider()
         self.railStationSuggestionProvider = EmptyRailStationSuggestionProvider()
         self.vehicleSuggestionStore = VehicleSuggestionStore()
-        self.vehicleInsightService = VehicleInsightService()
+        self.vehicleInsightService = LocalOnlyVehicleInsightService()
         self.initialLocationRetryDelayNanoseconds = 0
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = Date.init
+        if requiresCurrentLocation { resetUnresolvedCurrentLocation() }
     }
 
     init(
@@ -341,22 +358,46 @@ final class SearchViewModel: ObservableObject {
         addressSuggestionProvider: AddressSuggestionProviding = EmptyAddressSuggestionProvider(),
         railStationSuggestionProvider: RailStationSuggestionProviding = EmptyRailStationSuggestionProvider(),
         vehicleSuggestionStore: VehicleSuggestionStore = VehicleSuggestionStore(),
-        vehicleInsightService: VehicleInsightProviding = VehicleInsightService(),
+        vehicleInsightService: VehicleInsightProviding? = nil,
         initialLocationRetryDelayNanoseconds: UInt64 = defaultInitialLocationRetryDelayNanoseconds,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        requiresCurrentLocation: Bool = false
     ) {
         self.searchProvider = searchProvider
         self.geocoder = geocoder
         self.mapService = mapService
         self.currentLocationProvider = currentLocationProvider
+        self.requiresCurrentLocation = requiresCurrentLocation
         self.addressSuggestionProvider = addressSuggestionProvider
         self.railStationSuggestionProvider = railStationSuggestionProvider
         self.vehicleSuggestionStore = vehicleSuggestionStore
-        self.vehicleInsightService = vehicleInsightService
+        self.vehicleInsightService = vehicleInsightService ?? LocalOnlyVehicleInsightService()
         self.initialLocationRetryDelayNanoseconds = initialLocationRetryDelayNanoseconds
         self.resolvedOriginLabel = AppDefaults.searchRequest.originLabel
         self.now = now
+        self.request = AppDefaults.searchRequest(now: now())
+        if requiresCurrentLocation { resetUnresolvedCurrentLocation() }
     }
+
+    private func resetUnresolvedCurrentLocation() {
+        resolvedCurrentLocation = nil
+        resolvedOriginLabel = nil
+        request.originLabel = ""
+        request.origin = GeoPoint(lat: 0, lng: 0)
+        refreshPreflightIssues()
+    }
+
+    var isCurrentLocationReady: Bool {
+        guard let location = resolvedCurrentLocation, !isLocatingOrigin else { return false }
+        return request.origin == location.point && request.originLabel == location.label
+    }
+
+    var currentLocationLabel: String {
+        if isLocatingOrigin { return "正在定位…" }
+        return resolvedCurrentLocation?.label ?? "未取得当前位置"
+    }
+
+    var resultsRequest: SearchRequest { latestSuccessfulRequest ?? request }
 
     var selected: Recommendation? {
         results.first { $0.id == selectedId } ?? displayedResults.first
@@ -387,7 +428,7 @@ final class SearchViewModel: ObservableObject {
         if showsAllVehicleMatches {
             return "\(count) 个匹配已展开"
         }
-        return "1/\(count) 个匹配，显示最低价"
+        return "1/\(count) 个匹配，优先显示费用完整方案"
     }
 
     var hasActiveRecommendationFilters: Bool {
@@ -400,6 +441,9 @@ final class SearchViewModel: ObservableObject {
             return recommendations.sorted(by: isLowerCost)
         case .rentalSubtotal:
             return recommendations.sorted {
+                if $0.listing.hasCompleteRentalPrice != $1.listing.hasCompleteRentalPrice {
+                    return $0.listing.hasCompleteRentalPrice
+                }
                 if $0.rentalTotal != $1.rentalTotal {
                     return $0.rentalTotal < $1.rentalTotal
                 }
@@ -494,6 +538,9 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func isLowerCost(_ lhs: Recommendation, than rhs: Recommendation) -> Bool {
+        if lhs.listing.hasCompleteRentalPrice != rhs.listing.hasCompleteRentalPrice {
+            return lhs.listing.hasCompleteRentalPrice
+        }
         if lhs.bestTotal != rhs.bestTotal {
             return lhs.bestTotal < rhs.bestTotal
         }
@@ -589,7 +636,13 @@ final class SearchViewModel: ObservableObject {
     }
 
     func refreshPreflightIssues() {
-        var issues = validateSearchPreflight(request).issues
+        var issues = validateSearchPreflight(request, now: now()).issues
+        if requiresCurrentLocation {
+            issues.removeAll { $0.id == "origin-empty" }
+            if !isCurrentLocationReady {
+                issues.append(SearchPreflightIssue(id: "current-location-required", severity: .blocking, title: isLocatingOrigin ? "正在定位" : "请先取得当前位置", message: originStatus))
+            }
+        }
         if requiresOriginCandidateSelection {
             issues.append(SearchPreflightIssue(
                 id: "origin-selection-required",
@@ -606,6 +659,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func performSearch(retryingFailedPlatformsOnly: Bool) async {
+        guard !isSearching else { return }
         dismissOriginSuggestions()
         refreshPreflightIssues()
         if hasBlockingPreflightIssues {
@@ -620,6 +674,7 @@ final class SearchViewModel: ObservableObject {
         }
 
         searchGeneration += 1
+        vehicleReferences.cancel()
 
         if !retryingFailedPlatformsOnly {
             clearRecommendationFilters()
@@ -691,9 +746,20 @@ final class SearchViewModel: ObservableObject {
         selectFirstDisplayedResult()
         recordSuccessfulResults(recommendations, request: liveRequest)
         recordVehicleSuggestions(from: recommendations)
+        startVehicleReferenceEnrichment()
         searchDiagnosticSummary = SearchDiagnosticSummary.make(evidenceResults: evidenceResults, recommendations: recommendations)
         status = formatSearchCompletionStatus(request: liveRequest, resultCount: recommendations.count)
         searchProgressPhase = .completed
+    }
+
+    private func startVehicleReferenceEnrichment(forceMissing: Bool = false) {
+        let listings = results.flatMap { [$0.listing] + $0.comparisonQuotes.map(\.listing) }
+        vehicleReferences.start(listings: listings, forceMissing: forceMissing)
+    }
+
+    func retryMissingVehicleReferences() {
+        guard !vehicleReferences.isLoading else { return }
+        startVehicleReferenceEnrichment(forceMissing: true)
     }
 
     func retrySearch() async {
@@ -722,6 +788,7 @@ final class SearchViewModel: ObservableObject {
             await MainActor.run {
                 guard let self, requestID == self.selectedVehicleInsightRequestID else { return }
                 self.selectedVehicleInsight = insight
+                self.vehicleReferences.acceptReference(insight, for: listing)
                 self.isLoadingSelectedVehicleInsight = false
             }
         }
@@ -761,6 +828,11 @@ final class SearchViewModel: ObservableObject {
 
     private func displayPlatformStatuses(from evidenceResults: [PlatformEvidenceResult]) -> [PlatformEvidenceStatus] {
         evidenceResults.map { result in
+            // A pending candidate is not evidence that the whole session expired.
+            if result.status.kind == .ready,
+               result.listings.contains(where: { $0.platform == result.platform && $0.confirmedQuote?.isValid == true }) {
+                return result.status
+            }
             guard result.status.kind == .ready,
                   result.listings.contains(where: { $0.platform == result.platform && $0.warnings.contains(.loginRequired) }) else {
                 return result.status
@@ -845,9 +917,8 @@ final class SearchViewModel: ObservableObject {
     }
 
     func applyDates(pickup: Date, returnDate: Date) {
-        let normalized = AppDateRules.normalizedRange(pickup: pickup, returnDate: returnDate)
-        request.pickupAt = AppDateRules.formatRequestDate(normalized.pickup)
-        request.returnAt = AppDateRules.formatRequestDate(normalized.returnDate)
+        request.pickupAt = AppDateRules.formatRequestDateTime(pickup)
+        request.returnAt = AppDateRules.formatRequestDateTime(returnDate)
         refreshPreflightIssues()
     }
 
@@ -866,6 +937,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     func refreshCurrentLocation() async {
+        hasRequestedInitialLocation = true
         _ = await refreshCurrentLocationOutcome()
     }
 
@@ -882,15 +954,22 @@ final class SearchViewModel: ObservableObject {
     }
 
     private func refreshCurrentLocationOutcome() async -> CurrentLocationRefreshOutcome {
+        guard !isLocatingOrigin, !isSearching else { return .blockedFailure }
         dismissOriginSuggestions()
         isLocatingOrigin = true
         originStatus = "正在获取当前位置。"
+        if requiresCurrentLocation { resetUnresolvedCurrentLocation() }
         defer {
             isLocatingOrigin = false
+            refreshPreflightIssues()
         }
 
         do {
             let location = try await currentLocationProvider.currentLocation()
+            guard location.point.lat.isFinite, location.point.lng.isFinite,
+                  (-90...90).contains(location.point.lat), (-180...180).contains(location.point.lng),
+                  !location.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CurrentLocationError.unavailable }
+            resolvedCurrentLocation = location
             request.originLabel = location.label
             request.origin = location.point
             resolvedOriginLabel = location.label
@@ -907,6 +986,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     func updateOriginInput(_ value: String) async {
+        guard !requiresCurrentLocation else { return }
         request.originLabel = value
         resolvedOriginLabel = nil
         requiresOriginCandidateSelection = false
@@ -967,6 +1047,7 @@ final class SearchViewModel: ObservableObject {
     }
 
     func selectOriginSuggestion(_ suggestion: OriginSuggestion) async {
+        guard !requiresCurrentLocation else { return }
         originSuggestionRequestID += 1
         request.originLabel = suggestion.displayName
         request.origin = suggestion.point
@@ -1039,6 +1120,7 @@ final class SearchViewModel: ObservableObject {
         selectFirstDisplayedResult()
         isShowingStaleResults = true
         retainedResultsNotice = RetainedResultsNotice.make(lastSuccessfulSearchAt: lastSuccessfulSearchAt)
+        startVehicleReferenceEnrichment()
     }
 }
 

@@ -13,7 +13,7 @@ struct DetailPanelView: View {
                 if let recommendation = viewModel.selected {
                     RecommendationDetailView(
                         recommendation: recommendation,
-                        originLabel: viewModel.request.originLabel,
+                        originLabel: viewModel.resultsRequest.originLabel,
                         vehicleInsight: viewModel.selectedVehicleInsight,
                         isLoadingVehicleInsight: viewModel.isLoadingSelectedVehicleInsight
                     ) {
@@ -31,11 +31,11 @@ struct DetailPanelView: View {
         .sheet(item: $pendingMonitorRecommendation) { recommendation in
             CreateMonitorSheet(
                 recommendation: recommendation,
-                request: viewModel.request,
+                request: viewModel.resultsRequest,
                 onSaveFromRecommendation: { frequency, rule, notifications in
                     try await monitorViewModel.createMonitor(
                         from: recommendation,
-                        request: viewModel.request,
+                        request: viewModel.resultsRequest,
                         frequency: frequency,
                         alertRule: rule,
                         systemNotificationsEnabled: notifications
@@ -58,9 +58,11 @@ private struct RecommendationDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 DecisionReceiptHeader(recommendation: recommendation)
+                Text(QuotePresentation.scopeNotice)
+                    .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
 
                 HStack(spacing: 8) {
-                    BlueprintMetricTile(title: "租车小计", value: formatMoney(recommendation.rentalTotal), icon: "car.fill", tone: .active)
+                    BlueprintMetricTile(title: QuotePresentation.rentalLabel(recommendation), value: formatMoney(recommendation.rentalTotal), icon: "car.fill", tone: .active)
                     BlueprintMetricTile(title: "到店成本", value: formatMoney(bestRouteCost), icon: recommendation.bestRouteMode == .taxi ? "car.side" : "bus.fill", tone: .success)
                 }
 
@@ -95,15 +97,25 @@ private struct RecommendationDetailView: View {
                         DetailTitleRow(icon: "list.bullet.clipboard", title: "费用拆分")
 
                         VStack(spacing: 0) {
-                            CostLineView(label: "平台返回租车价", value: recommendation.listing.basePrice)
-                            CostLineView(label: "平台服务费", value: recommendation.listing.platformFees)
-                            CostLineView(label: "保险/保障", value: recommendation.listing.insuranceFees)
-                            CostLineView(label: "异店还车费", value: recommendation.listing.oneWayFee)
+                            if let quote = recommendation.listing.confirmedQuote, quote.isValid {
+                                ForEach(Array(quote.items.enumerated()), id: \.offset) { _, item in
+                                    CostLineView(label: item.name, value: item.amount ?? 0, displayValue: item.amount.map(formatMoney) ?? item.detail ?? "未单列金额")
+                                }
+                                Text("以上为接口返回的明细，可能未列全优惠/费用；不据此重新相加，总额以确认页应付为准。")
+                                    .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
+                                Text("核价时间：\(AppDateRules.formatRequestDateTime(quote.checkedAt))（北京时间）")
+                                    .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
+                            } else {
+                                CostLineView(label: "平台返回租车价", value: recommendation.listing.basePrice)
+                                CostLineView(label: "平台服务费", value: recommendation.listing.platformFees, displayValue: QuotePresentation.feeText(recommendation.listing.platformFees, listing: recommendation.listing))
+                                CostLineView(label: "保险/保障", value: recommendation.listing.insuranceFees, displayValue: QuotePresentation.feeText(recommendation.listing.insuranceFees, listing: recommendation.listing))
+                                CostLineView(label: "异店还车费", value: recommendation.listing.oneWayFee, displayValue: QuotePresentation.feeText(recommendation.listing.oneWayFee, listing: recommendation.listing))
+                            }
 
                             Divider()
                                 .padding(.vertical, 5)
 
-                            CostLineView(label: "租车小计", value: recommendation.rentalTotal, bold: true)
+                            CostLineView(label: QuotePresentation.rentalLabel(recommendation), value: recommendation.rentalTotal, bold: true)
 
                             QuoteCredibilityDetail(credibility: QuoteCredibility.make(for: recommendation))
                                 .padding(.top, 6)
@@ -194,7 +206,7 @@ private struct VehicleInsightSection: View {
                 DetailTitleRow(
                     icon: insight.origin == .network ? "network" : "sparkle.magnifyingglass",
                     title: "车型介绍",
-                    badge: isLoading ? "更新中" : insight.origin.label
+                    badge: isLoading ? "更新中" : insight.sourceLabel
                 )
 
                 Text(insight.longSummary)
@@ -215,10 +227,15 @@ private struct VehicleInsightSection: View {
                         Link("来源", destination: url)
                             .font(.caption2.weight(.semibold))
                     }
+                    ForEach(Array((insight.referenceSourceURLs ?? []).dropFirst().enumerated()), id: \.offset) { index, link in
+                        if let url = URL(string: link) { Link("对照来源\(index + 2)", destination: url).font(.caption2) }
+                    }
                     Spacer(minLength: 0)
                 }
 
                 VehicleInsightFactGrid(title: "基础参数", facts: insight.formattedBasicSpecs)
+                Text("车系参考参数会保存在本机，离线仍可查看；不同年款的尺寸可能不同，不代表平台保证交付该年款。")
+                    .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
 
                 VStack(alignment: .leading, spacing: 7) {
                     VehicleInsightFactGrid(title: "配置参考", facts: insight.formattedConfigurationFacts)
@@ -339,7 +356,7 @@ private struct PlatformQuoteRowView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(WorkbenchStyle.ink)
                     .monospacedDigit()
-                Text("含到店 \(formatMoney(quote.bestTotal)) · \(quote.bestRouteMode.label)")
+                Text("\(QuotePresentation.totalValue(quote)) · \(quote.bestRouteMode.label)")
                     .font(.caption2)
                     .foregroundStyle(WorkbenchStyle.muted)
                     .monospacedDigit()
@@ -396,15 +413,15 @@ private struct DecisionReceiptHeader: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("推荐总成本")
+                    Text(QuotePresentation.rentalLabel(recommendation))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(WorkbenchStyle.muted)
-                    Text(formatMoney(recommendation.bestTotal))
+                    Text(formatMoney(recommendation.rentalTotal))
                         .font(.system(size: 34, weight: .bold, design: .default))
                         .foregroundStyle(WorkbenchStyle.ink)
                         .monospacedDigit()
                         .contentTransition(.numericText())
-                    Text("租车 \(formatMoney(recommendation.rentalTotal)) + 到店 \(formatMoney(bestRouteCost))")
+                    Text("另计到店估算 \(formatMoney(bestRouteCost)) · 含到店约 \(formatMoney(recommendation.bestTotal))")
                         .font(.caption)
                         .foregroundStyle(WorkbenchStyle.muted)
                         .lineLimit(1)
@@ -470,6 +487,7 @@ private struct CostLineView: View {
     let label: String
     let value: Double
     var bold = false
+    var displayValue: String? = nil
 
     var body: some View {
         HStack {
@@ -477,7 +495,7 @@ private struct CostLineView: View {
                 .font(bold ? .caption.weight(.semibold) : .caption)
                 .foregroundStyle(bold ? WorkbenchStyle.ink : WorkbenchStyle.muted)
             Spacer()
-            Text(formatMoney(value))
+            Text(displayValue ?? formatMoney(value))
                 .font(bold ? .caption.weight(.semibold) : .caption)
                 .foregroundStyle(WorkbenchStyle.ink)
                 .monospacedDigit()
@@ -506,12 +524,14 @@ private struct RouteDecisionCard: View {
                         .foregroundStyle(WorkbenchStyle.ink)
                     Spacer()
                     if isBest {
-                        Text("推荐")
+                        Text("到店估价较低")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(WorkbenchStyle.routeGreen)
                     }
                 }
 
+                Text("已知费用 + 到店估算")
+                    .font(.caption2).foregroundStyle(WorkbenchStyle.muted)
                 Text(formatMoney(total))
                     .font(.headline.weight(.bold))
                     .foregroundStyle(WorkbenchStyle.ink)

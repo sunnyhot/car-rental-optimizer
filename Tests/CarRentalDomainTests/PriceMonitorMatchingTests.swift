@@ -12,23 +12,23 @@ final class PriceMonitorMatchingTests: XCTestCase {
         XCTAssertEqual(selected?.id, "original")
     }
 
-    func testFallsBackToSamePlatformVehicleWhenStoreChanges() {
+    func testRejectsSameVehicleAtChangedStore() {
         let oldStore = recommendation(id: "old", platform: .ehi, storeID: "store-a", storeName: "一嗨通州万达店", vehicleName: "奇瑞 瑞虎8")
         let newStore = recommendation(id: "new", platform: .ehi, storeID: "store-c", storeName: "一嗨北苑店", vehicleName: "奇瑞瑞虎8")
         let crossPlatform = recommendation(id: "cross", platform: .carInc, storeID: "store-d", storeName: "神州门店", vehicleName: "奇瑞 瑞虎8")
 
         let selected = selectMonitoredRecommendation(from: [crossPlatform, newStore], signature: ListingSignature(recommendation: oldStore), targetVehicleQuery: "瑞虎8", targetPlatform: .ehi)
 
-        XCTAssertEqual(selected?.id, "new")
+        XCTAssertNil(selected)
     }
 
-    func testFallsBackAcrossPlatformsForSameVehicle() {
+    func testRejectsChangedPlatform() {
         let original = recommendation(id: "original", platform: .ehi, storeID: "store-a", storeName: "一嗨通州万达店", vehicleName: "奇瑞 瑞虎8")
         let crossPlatform = recommendation(id: "cross", platform: .carInc, storeID: "store-d", storeName: "神州门店", vehicleName: "奇瑞 瑞虎8")
 
         let selected = selectMonitoredRecommendation(from: [crossPlatform], signature: ListingSignature(recommendation: original), targetVehicleQuery: "瑞虎8", targetPlatform: .ehi)
 
-        XCTAssertEqual(selected?.id, "cross")
+        XCTAssertNil(selected)
     }
 
     func testManualMonitorUsesRankedRecommendationForTargetQuery() {
@@ -82,14 +82,11 @@ final class PriceMonitorMatchingTests: XCTestCase {
         XCTAssertEqual(exactSelection?.recommendation.id, "original")
         XCTAssertEqual(exactSelection?.strategy, .exactSignature)
         XCTAssertEqual(exactSelection?.summary, "原门店与车型完全一致")
-        XCTAssertEqual(samePlatformSelection?.strategy, .samePlatformVehicle)
-        XCTAssertEqual(samePlatformSelection?.summary, "同平台同车型，门店已变化")
-        XCTAssertEqual(sameVehicleSelection?.strategy, .sameVehicle)
-        XCTAssertEqual(sameVehicleSelection?.summary, "跨平台同车型匹配")
+        XCTAssertNil(samePlatformSelection)
+        XCTAssertNil(sameVehicleSelection)
         XCTAssertEqual(querySelection?.strategy, .targetPlatformQuery)
         XCTAssertEqual(querySelection?.summary, "目标平台内按车型关键词匹配")
-        XCTAssertEqual(fallbackSelection?.strategy, .fallbackRanked)
-        XCTAssertEqual(fallbackSelection?.summary, "未命中原车型，使用当前排序最优结果")
+        XCTAssertNil(fallbackSelection)
     }
 
     private func recommendation(

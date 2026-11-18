@@ -62,6 +62,9 @@ struct AppShellView: View {
         .onChange(of: searchViewModel.searchGeneration) { _, _ in
             comparisonViewModel.resetForNewSearch()
         }
+        .onReceive(searchViewModel.vehicleReferences.$revision) { _ in
+            comparisonViewModel.refreshCachedReferences(from: searchViewModel.vehicleReferences)
+        }
         .onChange(of: searchViewModel.results) { _, results in
             comparisonViewModel.reconcile(with: results)
         }
@@ -232,7 +235,7 @@ struct BlueprintStatusBar: View {
 
     private var selectedTotal: String {
         guard let selected = searchViewModel.selected else { return "--" }
-        return formatMoney(selected.bestTotal)
+        return "\(QuotePresentation.rentalLabel(selected)) \(formatMoney(selected.rentalTotal))"
     }
 
     private var lastSuccessfulSearch: String {

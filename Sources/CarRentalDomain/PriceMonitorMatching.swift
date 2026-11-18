@@ -15,11 +15,13 @@ public extension ListingSignature {
         recommendation.listing.platform == platform
             && recommendation.listing.store.id == storeID
             && normalizeMonitorToken(recommendation.listing.vehicleName) == normalizedVehicleName
+            && normalizeMonitorToken(recommendation.listing.vehicleClass) == normalizedVehicleClass
     }
 
     func samePlatformVehicle(_ recommendation: Recommendation) -> Bool {
         recommendation.listing.platform == platform
             && normalizeMonitorToken(recommendation.listing.vehicleName) == normalizedVehicleName
+            && normalizeMonitorToken(recommendation.listing.vehicleClass) == normalizedVehicleClass
     }
 
     func sameVehicle(_ recommendation: Recommendation) -> Bool {
@@ -79,33 +81,21 @@ public func selectMonitoredRecommendationWithExplanation(
     targetVehicleQuery: String,
     targetPlatform: PlatformId?
 ) -> MonitoredRecommendationSelection? {
-    let ranked = rankRecommendations(recommendations)
-
+    let candidates = recommendations.flatMap { [$0] + $0.comparisonQuotes }
+    let ranked = rankRecommendations(candidates)
     if let signature {
-        if let exact = ranked.first(where: { signature.exactMatch($0) }) {
-            return MonitoredRecommendationSelection(recommendation: exact, strategy: .exactSignature)
-        }
-        if let samePlatformVehicle = ranked.first(where: { signature.samePlatformVehicle($0) }) {
-            return MonitoredRecommendationSelection(recommendation: samePlatformVehicle, strategy: .samePlatformVehicle)
-        }
-        if let sameVehicle = ranked.first(where: { signature.sameVehicle($0) }) {
-            return MonitoredRecommendationSelection(recommendation: sameVehicle, strategy: .sameVehicle)
+        return ranked.first(where: signature.exactMatch).map {
+            MonitoredRecommendationSelection(recommendation: $0, strategy: .exactSignature)
         }
     }
-
-    let normalizedQuery = normalizeMonitorToken(targetVehicleQuery)
+    guard !normalizeMonitorToken(targetVehicleQuery).isEmpty else { return nil }
     let platformFiltered = targetPlatform.map { platform in
         ranked.filter { $0.listing.platform == platform }
     } ?? ranked
-    if let queryMatch = platformFiltered.first(where: {
-        let vehicleName = normalizeMonitorToken($0.listing.vehicleName)
-        return vehicleName.contains(normalizedQuery) || normalizedQuery.contains(vehicleName)
-    }) {
-        return MonitoredRecommendationSelection(recommendation: queryMatch, strategy: .targetPlatformQuery)
-    }
-    return platformFiltered.first.map {
-        MonitoredRecommendationSelection(recommendation: $0, strategy: .fallbackRanked)
-    }
+    return platformFiltered.first(where: {
+        let match = matchVehicle(query: targetVehicleQuery, vehicleName: $0.listing.vehicleName, vehicleClass: $0.listing.vehicleClass)
+        return match.kind == .exact || match.kind == .similarClass
+    }).map { MonitoredRecommendationSelection(recommendation: $0, strategy: .targetPlatformQuery) }
 }
 
 public func normalizeMonitorToken(_ value: String) -> String {

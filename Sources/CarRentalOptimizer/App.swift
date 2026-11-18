@@ -4,6 +4,20 @@ import SwiftUI
 final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     static weak var monitorViewModel: MonitorCenterViewModel?
 
+    private var terminationPending = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if AppInfo.isUIValidation { return .terminateNow }
+        guard !terminationPending else { return .terminateLater }
+        terminationPending = true
+        Self.monitorViewModel?.stopSchedulerLoopForExplicitQuit()
+        Task { @MainActor in
+            _ = await PlatformSessionPersistence.shared.flush()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         Self.monitorViewModel?.stopSchedulerLoopForExplicitQuit()
     }

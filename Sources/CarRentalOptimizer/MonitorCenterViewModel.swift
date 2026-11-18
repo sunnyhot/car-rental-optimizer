@@ -39,7 +39,7 @@ final class MonitorCenterViewModel: ObservableObject {
     }
 
     var selectedTrend: PriceTrendSummary {
-        PriceTrendSummary(snapshots: selectedSnapshots)
+        PriceTrendSummary(snapshots: comparableMonitorSnapshots(selectedSnapshots))
     }
 
     var displayedMonitors: [PriceMonitor] {
@@ -106,6 +106,7 @@ final class MonitorCenterViewModel: ObservableObject {
         systemNotificationsEnabled: Bool
     ) async throws {
         let currentTime = now()
+        try validateMonitorInput(request, vehicleQuery: recommendation.listing.vehicleName, now: currentTime)
         let monitorID = idGenerator.nextID(prefix: "monitor")
         let pickupAt = AppDateRules.parseRequestDate(request.pickupAt)
         let monitor = PriceMonitor(
@@ -136,7 +137,10 @@ final class MonitorCenterViewModel: ObservableObject {
             dataCompleteness: recommendation.listing.dataCompleteness,
             warnings: recommendation.warnings,
             sourceURL: recommendation.listing.sourceUrl,
-            message: "创建监控时记录的历史快照。"
+            listingSignature: ListingSignature(recommendation: recommendation),
+            priceIsComplete: recommendation.listing.hasCompleteRentalPrice,
+            confirmedQuote: recommendation.listing.confirmedQuote,
+            message: "创建监控时记录的历史快照；只有同门店同车型且费用完整的后续报价才比较降价。"
         )
         try await store.saveMonitor(monitor)
         try await store.appendSnapshot(snapshot)
@@ -153,6 +157,7 @@ final class MonitorCenterViewModel: ObservableObject {
         systemNotificationsEnabled: Bool
     ) async throws {
         let currentTime = now()
+        try validateMonitorInput(request, vehicleQuery: targetVehicleQuery, now: currentTime)
         let monitor = PriceMonitor(
             id: idGenerator.nextID(prefix: "monitor"),
             name: name,
@@ -208,9 +213,9 @@ final class MonitorCenterViewModel: ObservableObject {
 
     func runDueChecks() async {
         do {
-            try await scheduler?.runDueChecks()
+            let count = try await scheduler?.runDueChecks() ?? 0
             try await reload()
-            operationFeedbackMessage = "已完成到期监控巡查。"
+            operationFeedbackMessage = "已处理 \(count) 个到期监控。"
         } catch {
             storageErrorMessage = error.localizedDescription
         }
@@ -223,9 +228,10 @@ final class MonitorCenterViewModel: ObservableObject {
             return
         }
         do {
-            try await scheduler?.runDueChecks(limit: max(2, visibleCount))
+            let ids = Set(displayedMonitors.map(\.id))
+            let count = try await scheduler?.runDueChecks(limit: visibleCount, monitorIDs: ids) ?? 0
             try await reload()
-            operationFeedbackMessage = "已完成当前筛选的 \(visibleCount) 个监控巡查。"
+            operationFeedbackMessage = "当前筛选已处理 \(count) 个到期监控；未到期、暂停或运行中的监控已跳过。"
         } catch {
             storageErrorMessage = error.localizedDescription
         }

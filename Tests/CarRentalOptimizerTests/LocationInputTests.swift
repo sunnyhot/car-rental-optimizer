@@ -41,7 +41,7 @@ struct LocationInputTests {
 
         await viewModel.refreshCurrentLocation()
 
-        #expect(viewModel.originStatus == "暂时没有获取到当前位置，可重试定位或手动输入地址。")
+        #expect(viewModel.originStatus == "暂时没有获取到当前位置，请点击重新定位。")
         #expect(!viewModel.originStatus.contains("kCLErrorDomain"))
         #expect(!viewModel.isLocatingOrigin)
     }

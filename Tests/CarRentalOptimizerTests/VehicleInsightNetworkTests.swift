@@ -95,6 +95,88 @@ struct VehicleInsightNetworkTests {
         #expect(configFacts["无钥匙进入"]?.value == "车型库参考")
     }
 
+    @Test("BJ40 lookup falls back to model name and skips an unrelated first result")
+    func bj40NameFallbackFindsDimensions() async {
+        let listing = makeNetworkListing(vehicleName: "北京BJ40", vehicleClass: "SUV 5座")
+        let client = StubVehicleInsightHTTPClient(responses: [
+            sohuAssociateURL("北京BJ40"): "[]",
+            sohuAssociateURL("BJ40"): #"[{"id":7553,"content":"北京越野BJ40 新能源","type":2},{"id":2875,"content":"北京越野北京BJ40","type":2}]"#,
+            "https://db.auto.sohu.com/model_2875": sohuModelHTML(modelName: "北京BJ40", length: 4790, width: 1940, height: 1949, wheelbase: 2760, fuelConsumption: "以年款为准", featureItems: [])
+        ])
+        let result = await VehicleInsightNetworkProvider(httpClient: client).networkInsight(for: listing)
+        #expect(result?.specSheet.lengthMm?.value == 4790)
+        #expect(result?.specSheet.wheelbaseMm?.value == 2760)
+        #expect(result?.sourceURL == "https://db.auto.sohu.com/model_2875")
+    }
+
+    @Test @MainActor func textOnlyCacheDoesNotBlockFetchingDimensions() async {
+        let listing = makeNetworkListing(vehicleName: "大众朗逸", vehicleClass: "三厢 5座")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        let store = VehicleInsightStore(fileURL: url)
+        var empty = VehicleInsightLocalInferencer.localInsight(for: listing)
+        empty.origin = .network
+        store.save(empty, forKey: "大众朗逸")
+        let client = StubVehicleInsightHTTPClient(responses: [
+            sohuAssociateURL("大众朗逸"): #"[{"id":2251,"content":"上汽大众朗逸","type":2}]"#,
+            "https://db.auto.sohu.com/model_2251": sohuModelHTML(modelName: "大众朗逸", length: 4678, width: 1806, height: 1474, wheelbase: 2688, fuelConsumption: "5.54L/100km", featureItems: [])
+        ])
+        let service = VehicleInsightService(store: store, networkProvider: VehicleInsightNetworkProvider(httpClient: client))
+        #expect(await service.insight(for: listing).specSheet.lengthMm?.value == 4678)
+        let offline = VehicleInsightService(store: VehicleInsightStore(fileURL: url), networkProvider: VehicleInsightNetworkProvider(httpClient: StubVehicleInsightHTTPClient(responses: [:])))
+        #expect(offline.localInsight(for: listing).specSheet.wheelbaseMm?.value == 2688)
+    }
+
+    @Test @MainActor func concurrentRequestsShareReferenceButKeepOwnSeatCounts() async {
+        let first = makeNetworkListing(vehicleName: "大众朗逸", vehicleClass: "三厢 5座")
+        let second = makeNetworkListing(vehicleName: "大众 朗逸", vehicleClass: "三厢 7座")
+        let client = CountingSpecClient(responses: [
+            sohuAssociateURL("大众朗逸"): #"[{"id":2251,"content":"上汽大众朗逸","type":2}]"#,
+            "https://db.auto.sohu.com/model_2251": sohuModelHTML(modelName: "大众朗逸", length: 4678, width: 1806, height: 1474, wheelbase: 2688, fuelConsumption: "5.54L/100km", featureItems: [])
+        ])
+        let store = VehicleInsightStore(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json"))
+        let service = VehicleInsightService(store: store, networkProvider: VehicleInsightNetworkProvider(httpClient: client))
+        async let a = service.insight(for: first)
+        async let b = service.insight(for: second)
+        let (left, right) = await (a, b)
+        #expect(left.specSheet.lengthMm?.value == 4678)
+        #expect(right.specSheet.lengthMm?.value == 4678)
+        #expect(left.specSheet.seats?.value == 5)
+        #expect(right.specSheet.seats?.value == 7)
+        #expect(await client.count == 2)
+    }
+
+    @Test func namesDoNotMergeDifferentModelVariants() {
+        #expect(VehicleInsightStore.normalizedCacheKey("奥迪A6L") == "奥迪a6l")
+        #expect(VehicleInsightStore.normalizedCacheKey("腾势N8L") == "腾势n8l")
+        #expect(VehicleModelIdentity.matches("一汽-大众探影", query: "大众探影"))
+        #expect(VehicleModelIdentity.matches("华晨宝马宝马3系", query: "宝马3系"))
+        let provider = VehicleInsightNetworkProvider(httpClient: StubVehicleInsightHTTPClient(responses: [:]))
+        #expect(!provider.acceptsNetworkTitle("北京越野BJ40 新能源", for: "北京BJ40"))
+        #expect(!provider.acceptsNetworkTitle("大众朗逸新锐", for: "大众朗逸"))
+        #expect(!provider.acceptsNetworkTitle("大众途观L", for: "大众途观"))
+        #expect(VehicleInsightStore.normalizedCacheKey("2022雪佛兰科鲁泽") == VehicleInsightStore.normalizedCacheKey("雪佛兰科鲁泽"))
+        #expect(VehicleInsightStore.normalizedCacheKey("北京BJ40新能源") != VehicleInsightStore.normalizedCacheKey("北京BJ40"))
+    }
+
+    @Test func unspecifiedEnergyUsesOnlyDimensionsSharedByAllVariants() async {
+        let responses: [String: String] = [
+            sohuAssociateURL("零跑C16"): #"[{"id":7379,"content":"零跑汽车零跑C16 增程版","type":2},{"id":7380,"content":"零跑汽车零跑C16 纯电","type":2}]"#,
+            "https://db.auto.sohu.com/model_7379": sohuModelHTML(modelName: "零跑C16 增程版", length: 4915, width: 1905, height: 1770, wheelbase: 2825, fuelConsumption: "", featureItems: []),
+            "https://db.auto.sohu.com/model_7380": sohuModelHTML(modelName: "零跑C16 纯电", length: 4915, width: 1905, height: 1770, wheelbase: 2825, fuelConsumption: "", featureItems: [])
+        ]
+        let provider = VehicleInsightNetworkProvider(httpClient: StubVehicleInsightHTTPClient(responses: responses))
+        let value = await provider.networkInsight(for: makeNetworkListing(vehicleName: "零跑C16", vehicleClass: "SUV 6座"))
+        #expect(value?.specSheet.lengthMm?.value == 4915)
+        #expect(value?.specSheet.wheelbaseMm?.value == 2825)
+        #expect(value?.specSheet.batteryKWh == nil)
+        #expect(value?.referenceSourceURLs?.count == 2)
+        var different = responses
+        different["https://db.auto.sohu.com/model_7380"] = sohuModelHTML(modelName: "零跑C16 纯电", length: 4930, width: 1905, height: 1770, wheelbase: 2825, fuelConsumption: "", featureItems: [])
+        let mismatched = await VehicleInsightNetworkProvider(httpClient: StubVehicleInsightHTTPClient(responses: different)).networkInsight(for: makeNetworkListing(vehicleName: "零跑C16", vehicleClass: "SUV 6座"))
+        #expect(mismatched?.specSheet.lengthMm == nil)
+        #expect(mismatched?.specSheet.wheelbaseMm?.value == 2825)
+    }
+
     @Test("Wikidata alias search enriches when Wikipedia summary is unavailable")
     func wikidataAliasSearchEnrichesWhenWikipediaSummaryIsUnavailable() async {
         let listing = makeNetworkListing(vehicleName: "日产劲客", vehicleClass: "SUV 5座")
@@ -131,6 +213,26 @@ struct VehicleInsightNetworkTests {
         #expect(insight?.longSummary.contains("车系介绍：日产劲客") == true)
     }
 
+    @Test func wikidataDimensionUnitsAreConvertedBeforeCaching() async throws {
+        let name = "大众朗逸"
+        func claim(_ amount: String, _ unit: String) -> [String: Any] {
+            ["mainsnak": ["datavalue": ["value": ["amount": amount, "unit": "http://www.wikidata.org/entity/" + unit]]]]
+        }
+        let entity: [String: Any] = ["entities": ["Qunits": [
+            "labels": ["zh": ["value": name]], "descriptions": ["zh": ["value": "车型"]],
+            "claims": ["P2043": [claim("+4.67", "Q11573")], "P2049": [claim("+180.6", "Q174728")], "P2048": [claim("+1474", "Q174789")], "P3039": [claim("+2.688", "Q11573")]]
+        ]]]
+        let body = String(data: try JSONSerialization.data(withJSONObject: entity), encoding: .utf8)!
+        let client = StubVehicleInsightHTTPClient(responses: [
+            wikidataSearchURL(name): wikidataSearchJSON(id: "Qunits", label: name, description: "车型", aliases: [], matchText: name),
+            wikidataEntityURL("Qunits"): body
+        ])
+        let result = await VehicleInsightNetworkProvider(httpClient: client).networkInsight(for: makeNetworkListing(vehicleName: name, vehicleClass: "三厢5座"))
+        #expect(result?.specSheet.lengthMm?.value == 4670)
+        #expect(result?.specSheet.widthMm?.value == 1806)
+        #expect(result?.specSheet.wheelbaseMm?.value == 2688)
+    }
+
     @Test("Irrelevant Wikipedia title is rejected")
     func irrelevantWikipediaTitleIsRejected() async {
         let listing = makeNetworkListing(vehicleName: "小鹏 MONA", vehicleClass: "纯电 51kWh | 三厢 5座")
@@ -146,6 +248,18 @@ struct VehicleInsightNetworkTests {
         let insight = await provider.networkInsight(for: listing, now: networkDate("2026-07-02 17:14"))
 
         #expect(insight == nil)
+    }
+}
+
+private actor CountingSpecClient: VehicleInsightHTTPClient {
+    let responses: [String: String]
+    private(set) var count = 0
+    init(responses: [String: String]) { self.responses = responses }
+    func data(from url: URL) async throws -> (Data, URLResponse) {
+        count += 1
+        try await Task.sleep(nanoseconds: 10_000_000)
+        guard let body = responses[url.absoluteString] else { throw URLError(.resourceUnavailable) }
+        return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
 }
 

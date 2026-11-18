@@ -69,17 +69,17 @@ struct SearchViewModelTests {
         #expect(viewModel.platformStatuses.contains { $0.platform == .carInc && $0.kind == .unavailable })
     }
 
-    @Test("Date application stores day-only future dates")
-    func applyDatesStoresDayOnlyFutureDates() {
+    @Test("Date application preserves explicit minutes without silently correcting past input")
+    func applyDatesPreservesExplicitMinutes() {
         let viewModel = SearchViewModel()
-        let calendar = Calendar(identifier: .gregorian)
-        let pickup = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1))!
-        let returnDate = calendar.date(from: DateComponents(year: 2026, month: 10, day: 11))!
+        let calendar = AppDateRules.calendar
+        let pickup = calendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 18, minute: 30))!
+        let returnDate = calendar.date(from: DateComponents(year: 2026, month: 10, day: 11, hour: 9, minute: 15))!
 
         viewModel.applyDates(pickup: pickup, returnDate: returnDate)
 
-        #expect(viewModel.request.pickupAt == "2026-09-01")
-        #expect(viewModel.request.returnAt == "2026-10-11")
+        #expect(viewModel.request.pickupAt == "2026-09-01 18:30")
+        #expect(viewModel.request.returnAt == "2026-10-11 09:15")
     }
 
     @Test("Search progress completes when listings are ranked")
@@ -100,6 +100,23 @@ struct SearchViewModelTests {
 
         #expect(viewModel.searchProgressPhase == .completed)
         #expect(viewModel.results.count == 1)
+    }
+
+    @Test("Some confirmed CAR Inc quotes must not mark the whole platform logged out")
+    func partiallyConfirmedQuotesKeepPlatformReady() async {
+        let confirmed = ConfirmedRentalQuote(payableTotal: 7523, items: [], checkedAt: Date(), sourceURL: "https://www.zuche.com/", scope: "default")
+        let message = "已读取 2 个候选，1 个已取得确认页应付总额；其余报价仍待核实。"
+        let provider = StubRentalSearchProvider(results: [PlatformEvidenceResult(
+            platform: .carInc,
+            status: PlatformEvidenceStatus(platform: .carInc, kind: .ready, message: message, sourceUrl: "https://www.zuche.com/"),
+            listings: [makeTestListing(id: "confirmed", platform: .carInc, warnings: [], confirmedQuote: confirmed), makeTestListing(id: "pending", platform: .carInc, warnings: [.partialPrice, .loginRequired])]
+        )])
+        let model = SearchViewModel(searchProvider: provider, geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin), mapService: EstimatedMapService())
+        model.request.vehicleQuery = ""
+        await model.runSearch()
+        #expect(model.platformStatus(for: .carInc).kind == .ready)
+        #expect(model.platformStatus(for: .carInc).message == message)
+        #expect(model.results.contains { $0.listing.confirmedQuote != nil })
     }
 
     @Test("CAR Inc partial confirmation fees request login prompt even when listings are available")
@@ -167,10 +184,10 @@ struct SearchViewModelTests {
         ]
 
         viewModel.recommendationSortMode = .bestTotal
-        #expect(viewModel.displayedResults.map(\.id) == ["lowest-total", "most-complete", "lowest-rental", "nearest"])
+        #expect(viewModel.displayedResults.map(\.id) == ["most-complete", "lowest-total", "lowest-rental", "nearest"])
 
         viewModel.recommendationSortMode = .rentalSubtotal
-        #expect(viewModel.displayedResults.map(\.id) == ["lowest-rental", "lowest-total", "most-complete", "nearest"])
+        #expect(viewModel.displayedResults.map(\.id) == ["most-complete", "lowest-rental", "lowest-total", "nearest"])
 
         viewModel.recommendationSortMode = .distance
         #expect(viewModel.displayedResults.map(\.id) == ["nearest", "most-complete", "lowest-rental", "lowest-total"])
@@ -198,7 +215,7 @@ struct SearchViewModelTests {
         viewModel.selectResult("nearest")
 
         viewModel.recommendationSortMode = .bestTotal
-        #expect(viewModel.selected?.id == "lowest-total")
+        #expect(viewModel.selected?.id == "most-complete")
 
         viewModel.recommendationSortMode = .distance
         #expect(viewModel.selected?.id == "nearest")
@@ -324,7 +341,7 @@ struct SearchViewModelTests {
         #expect(viewModel.displayedResults.map(\.id) == ["cruze", "generic-sedan", "lavida"])
 
         viewModel.recommendationFilter.vehicleClass = .all
-        #expect(viewModel.displayedResults.map(\.id) == ["unknown", "cruze", "generic-sedan", "lavida"])
+        #expect(viewModel.displayedResults.map(\.id) == ["cruze", "generic-sedan", "lavida", "unknown"])
 
         viewModel.recommendationFilter.vehicleClass = .unspecified
         #expect(viewModel.displayedResults.map(\.id) == ["unknown"])
@@ -369,7 +386,7 @@ struct SearchViewModelTests {
 
         #expect(viewModel.hasExpandableVehicleMatches)
         #expect(viewModel.displayedResults.map(\.id) == ["mona-cheap"])
-        #expect(viewModel.vehicleMatchDisplaySummary == "1/2 个匹配，显示最低价")
+        #expect(viewModel.vehicleMatchDisplaySummary == "1/2 个匹配，优先显示费用完整方案")
 
         viewModel.showsAllVehicleMatches = true
 
@@ -419,6 +436,19 @@ struct SearchViewModelTests {
         #expect(viewModel.searchProgressPhase == .failed)
         #expect(viewModel.preflightIssues.contains { $0.id == "platforms-empty" && $0.severity == .blocking })
         #expect(viewModel.status.contains("请选择平台"))
+    }
+
+    @Test("Monitor conditions remain bound to the displayed quote after input edits")
+    func quotedConditionsSurviveInputEdits() async {
+        let provider = StubRentalSearchProvider(results: [PlatformEvidenceResult(platform: .ehi, status: PlatformEvidenceStatus(platform: .ehi, kind: .ready, message: "ready", sourceUrl: "https://example.com"), listings: [makeTestListing()])])
+        let model = SearchViewModel(searchProvider: provider, geocoder: CurrentRequestGeocoder(point: AppDefaults.searchRequest.origin), mapService: EstimatedMapService())
+        await model.runSearch()
+        #expect(!model.results.isEmpty)
+        let quoted = model.resultsRequest
+        model.request.pickupAt = "2099-01-01 10:00"
+        model.request.returnAt = "2099-01-02 10:00"
+        #expect(model.resultsRequest == quoted)
+        #expect(model.resultsRequest != model.request)
     }
 
     @Test("Failed identical search keeps last successful recommendations as stale results")
@@ -648,13 +678,14 @@ struct SearchViewModelTests {
         viewModel.request.vehicleQuery = ""
 
         await viewModel.runSearch()
+        await viewModel.vehicleReferences.waitUntilFinished()
+        #expect(viewModel.vehicleReferences.totalCount == 2)
+        #expect(viewModel.vehicleReferences.processedCount == 2)
+        #expect(Set(vehicleInsightService.requestedVehicleNames) == ["大众 朗逸", "小鹏 MONA"])
+        let requestCount = vehicleInsightService.networkRequestCount
         _ = viewModel.displayedResults
         _ = viewModel.displayedResults
-        await waitForVehicleInsightCondition {
-            vehicleInsightService.networkRequestCount == 1
-        }
-
-        #expect(vehicleInsightService.networkRequestCount == 1)
+        #expect(vehicleInsightService.networkRequestCount == requestCount)
     }
 
     @Test("A valid search advances the search generation")
@@ -734,6 +765,7 @@ private struct StubRentalSearchProvider: RentalSearchProviding {
 
 private final class StubVehicleInsightService: VehicleInsightProviding {
     private(set) var networkRequestCount = 0
+    private(set) var requestedVehicleNames: [String] = []
     let networkDelayNanoseconds: UInt64
 
     init(networkDelayNanoseconds: UInt64) {
@@ -746,6 +778,7 @@ private final class StubVehicleInsightService: VehicleInsightProviding {
 
     func insight(for listing: RentalListing) async -> VehicleInsight {
         networkRequestCount += 1
+        requestedVehicleNames.append(listing.vehicleName)
         if networkDelayNanoseconds > 0 {
             try? await Task.sleep(nanoseconds: networkDelayNanoseconds)
         }
@@ -785,7 +818,8 @@ private func makeTestListing(
     platform: PlatformId = .ehi,
     vehicleName: String = "奇瑞 瑞虎8",
     vehicleClass: String = "中型SUV",
-    warnings: [ResultWarning] = [.partialPrice]
+    warnings: [ResultWarning] = [.partialPrice],
+    confirmedQuote: ConfirmedRentalQuote? = nil
 ) -> RentalListing {
     RentalListing(
         id: id,
@@ -808,7 +842,8 @@ private func makeTestListing(
         oneWayFee: 0,
         sourceUrl: "https://booking.1hai.cn/",
         dataCompleteness: 0.88,
-        warnings: warnings
+        warnings: warnings,
+        confirmedQuote: confirmedQuote
     )
 }
 

@@ -21,7 +21,7 @@ struct SearchPreflightResult: Equatable {
     }
 }
 
-func validateSearchPreflight(_ request: SearchRequest) -> SearchPreflightResult {
+func validateSearchPreflight(_ request: SearchRequest, now: Date = Date()) -> SearchPreflightResult {
     var issues: [SearchPreflightIssue] = []
     let origin = request.originLabel.trimmingCharacters(in: .whitespacesAndNewlines)
     let vehicleQuery = request.vehicleQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,18 +38,26 @@ func validateSearchPreflight(_ request: SearchRequest) -> SearchPreflightResult 
     if origin.isEmpty {
         issues.append(SearchPreflightIssue(
             id: "origin-empty",
-            severity: .warning,
+            severity: .blocking,
             title: "当前位置为空",
-            message: "地址为空时平台查询可能无法开始，请输入出发地或使用定位。"
+            message: "尚未取得位置，无法查询附近门店，请先完成系统定位。"
         ))
     }
 
-    if AppDateRules.parseRequestDate(request.pickupAt) == nil || AppDateRules.parseRequestDate(request.returnAt) == nil {
+    if request.returnMode != .sameStore {
+        issues.append(SearchPreflightIssue(id: "unsupported-return", severity: .blocking, title: "暂不支持异店还车", message: "当前只比较同店取还；请在官方平台查询异店方案。"))
+    }
+    if let pickup = parseRentalDate(request.pickupAt), let end = parseRentalDate(request.returnAt),
+       request.pickupAt.count == 16, request.returnAt.count == 16 {
+        if pickup <= now || end <= pickup {
+            issues.append(SearchPreflightIssue(id: "invalid-time-range", severity: .blocking, title: "请确认取还时间", message: "取车需晚于当前时间，还车需晚于取车时间（北京时间）。"))
+        }
+    } else {
         issues.append(SearchPreflightIssue(
             id: "date-format-invalid",
             severity: .blocking,
             title: "日期格式异常",
-            message: "取还车日期需要是 yyyy-MM-dd 格式。"
+            message: "请确认具体取还时间（yyyy-MM-dd HH:mm，北京时间）；旧监控需按明确时间重新创建。"
         ))
     }
 
@@ -58,7 +66,7 @@ func validateSearchPreflight(_ request: SearchRequest) -> SearchPreflightResult 
             id: "vehicle-empty",
             severity: .warning,
             title: "未指定车型",
-            message: "车型为空时会比较半径内可识别车型，不会按具体车型去重。"
+            message: "车型为空时仅查询最近有报价门店；结果不是半径内所有门店的最低价。"
         ))
     }
 
@@ -233,6 +241,10 @@ struct QuoteCredibility: Equatable {
 
     static func make(for recommendation: Recommendation) -> QuoteCredibility {
         let warnings = recommendation.warnings
+
+        if let quote = recommendation.listing.confirmedQuote, quote.isValid {
+            return QuoteCredibility(level: .complete, title: "平台确认应付", message: "登录后确认页返回的当前方案应付额，非已付款金额。\(quote.scope)", systemImage: "checkmark.seal.fill")
+        }
 
         if warnings.contains(.loginRequired) || warnings.contains(.captchaRequired) {
             return QuoteCredibility(
