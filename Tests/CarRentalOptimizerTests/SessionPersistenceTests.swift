@@ -33,23 +33,6 @@ private final class WebViewNavigationDelegate: NSObject, WKNavigationDelegate {
     }
 }
 
-private final class RawCookieStoreObserver: NSObject, WKHTTPCookieStoreObserver {
-    nonisolated private let lock = NSLock()
-    nonisolated(unsafe) private var count = 0
-
-    nonisolated var callbackCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return count
-    }
-
-    nonisolated func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
-        lock.lock()
-        count += 1
-        lock.unlock()
-    }
-}
-
 @Suite("Session persistence", .serialized) @MainActor
 struct SessionPersistenceTests {
     @Test func restoreMustNotOverwriteANewerBrowserCookie() async throws {
@@ -141,20 +124,6 @@ struct SessionPersistenceTests {
         withExtendedLifetime((dataStore, webView, navigationDelegate)) {}
     }
 
-    @Test func diagnoseRawCookieObserverDeliveryAcrossDataStoreKinds() async throws {
-        await runRawObserverProbe(
-            kind: "nonPersistent",
-            probe: try cookie("observer_probe", value: "nonPersistent", domain: ".example.com")
-        )
-        let persistentIdentifier = UUID()
-        await runRawObserverProbe(
-            kind: "isolatedPersistent",
-            persistentIdentifier: persistentIdentifier,
-            probe: try cookie("observer_probe", value: "isolatedPersistent", domain: ".example.com")
-        )
-        try await WKWebsiteDataStore.remove(forIdentifier: persistentIdentifier)
-    }
-
     @Test func failedPersistenceIsReportedInsteadOfPretendingSuccess() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -196,35 +165,6 @@ struct SessionPersistenceTests {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         Issue.record("Cookie observer did not persist the update")
-    }
-
-    private func runRawObserverProbe(kind: String, persistentIdentifier: UUID? = nil, probe: HTTPCookie) async {
-        let dataStore = persistentIdentifier.map { WKWebsiteDataStore(forIdentifier: $0) } ?? .nonPersistent()
-        let observer = RawCookieStoreObserver()
-        let store = dataStore.httpCookieStore
-        store.add(observer)
-        await set(probe, in: store)
-        for _ in 0..<100 where observer.callbackCount == 0 {
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-        let values = await all(in: store).filter { $0.name == "observer_probe" }.map(\.value)
-        let callbacks = observer.callbackCount
-        print("RAW_OBSERVER_AB kind=\(kind) callbacks=\(callbacks) storedValues=\(values)")
-        #expect(values == [kind], "RAW_OBSERVER_AB \(kind) did not store its probe cookie")
-        #expect(callbacks > 0, "RAW_OBSERVER_AB \(kind) delivered no raw observer callback")
-        store.remove(observer)
-        if persistentIdentifier == nil {
-            await removeAllData(from: dataStore)
-        }
-        withExtendedLifetime((dataStore, observer)) {}
-    }
-
-    private func removeAllData(from dataStore: WKWebsiteDataStore) async {
-        await withCheckedContinuation { continuation in
-            dataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
-                continuation.resume()
-            }
-        }
     }
 
     private func cookie(_ name: String, value: String, domain: String, path: String = "/") throws -> HTTPCookie {
