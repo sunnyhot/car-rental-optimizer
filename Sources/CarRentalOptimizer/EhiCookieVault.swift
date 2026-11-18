@@ -99,7 +99,11 @@ enum EhiCookieVault {
     @MainActor @discardableResult
     static func save(from store: WKHTTPCookieStore, fileURL: URL = defaultCookieFileURL, allowEmpty: Bool = false) async -> Bool {
         let cookies = await store.allCookiesAsync()
-        let persisted = persistableCookies(from: cookies)
+        return save(persistableCookies(from: cookies), fileURL: fileURL, allowEmpty: allowEmpty)
+    }
+
+    @MainActor @discardableResult
+    static func save(_ persisted: [PersistedEhiCookie], fileURL: URL = defaultCookieFileURL, allowEmpty: Bool = false) -> Bool {
         if persisted.isEmpty && !allowEmpty { return true }
 
         do {
